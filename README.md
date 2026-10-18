@@ -1,6 +1,6 @@
 # 聚鲸 Bot 团队（DSH 版）· 可迁移结构包
 
-> 状态：v0.7.0，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.2–v0.6 见下；v0.7：真实数据入口/真实报告门/评分卡与降级计算/签字持久化）。
+> 状态：v0.8.0，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.2–v0.6 见下；v0.7：真实数据入口/真实报告门/评分卡/签字；v0.8：四段闭环 bundle 自动写入）。
 > 用途：把「制造业经营归因四角色团队」做成**结构可跑、可测、可迁移**的包；明天带到工作电脑继续推进。
 
 ## 它是什么
@@ -30,11 +30,13 @@ python tools/check_data_contract.py --t runs/task-B/material_refill_T.json --t30
 # 3. 六维评分（数值 0-5，--strict 拒绝叙述）
 python tools/score_scorecard.py --scores "{\"data_completeness\":4,\"timeliness\":3,\"significance\":5,\"exclusivity\":3,\"history\":4,\"human_ai_consistency\":0}" --strict
 # 4. 收口为真实报告（禁 demo 占位）
-python orchestration/assemble_report.py workflow-result.json runs/task-B/report.json --real --task-id T-20261019-B --context "B线补料率7日 5.1%→7.2%" --data-refs "runs/task-B/material_refill_T.json,runs/task-B/material_refill_T30.json" --expected "T+7 补料率 ≤5.40%"
+python orchestration/assemble_report.py workflow-result.json runs/task-B/report.json --real --task-id T-20261019-B --context "B线补料率7日 5.1%→7.2%" --data-refs "runs/task-B/material_refill_T.json,runs/task-B/material_refill_T30.json" --expected "T+7 补料率 ≤5.40%" --records-dir runs/task-B/loop --analysis-json team/loop/example-analysis.json --goal-json team/goals/example-goal.json --cost-json team/cost/example-cost.json
 # 5. 真实报告门 + 签字
 python tests/validate_report.py runs/task-B/report.json --require-real
 python tools/sign_delivery.py runs/task-B/report.json --signer "业务负责人"
-# 6. 无真实数据也能回归（合成 11 列 CSV，跑通全链）
+# 6. 四段闭环 bundle 校验（核心三件+可选分析/目标/成本）
+python tools/validate_loop.py --task-dir runs/task-B/loop --require-complete
+# 7. 无真实数据也能回归（合成 11 列 CSV，跑通全链）
 python tests/real_mode_smoke.py
 ```
 
