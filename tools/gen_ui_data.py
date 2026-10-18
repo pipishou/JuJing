@@ -63,6 +63,19 @@ def main():
 
     data = {"generated_at": "2026-10-18", "source": "team/employees.yaml+crews.yaml+shelf.yaml",
             "employees": out, "crews": crews}
+
+    # UI 绑定用示例上下文（Goal/Memory/Cost）；真实任务由任务目录数据替代
+    try:
+        goal = json.loads((ROOT / "team/goals/example-goal.json").read_text(encoding="utf-8"))
+        mem = json.loads((ROOT / "team/memory/example-memory.json").read_text(encoding="utf-8"))
+        cost = json.loads((ROOT / "team/cost/example-cost.json").read_text(encoding="utf-8"))
+        memories = {}
+        for m in mem:
+            memories.setdefault(m.get("employee_id", "host"), []).append(m.get("text", ""))
+        data["context"] = {"goal": goal, "memories": memories, "cost": cost, "source": "examples"}
+    except Exception as exc:  # noqa: BLE001
+        print("context skipped:", exc)
+
     js = "window.TEAM_DATA = " + json.dumps(data, ensure_ascii=False, indent=2) + ";\n"
     (UI / "team-data.js").write_text(js, encoding="utf-8")
     print(f"wrote {UI / 'team-data.js'} employees={len(out)} crews={len(crews)}")

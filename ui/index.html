@@ -385,7 +385,7 @@
             <div class="meta"><span>报告编号 DL-20261018-001</span><span>数据：demo T / T-30</span><span>置信：中</span></div>
             <div class="finding-row"><span class="nm">模具状态</span><span class="bar"><i style="width:63%;background:linear-gradient(90deg,#7c3aed,#a78bfa)"></i></span><span class="pct">0.63</span></div>
             <div class="finding-row"><span class="nm">保养记录</span><span class="bar"><i style="width:47%;background:linear-gradient(90deg,#d97706,#fbbf24)"></i></span><span class="pct">0.47</span></div>
-            <div class="meta-row"><span class="chip">不确定性 12 条</span><span class="chip">M-03 超期</span><span class="chip">信息员换人</span><span class="chip">AI 成本 ¥0.02</span><span class="chip">人工节省 2.5h</span></div>
+            <div class="meta-row"><span class="chip">不确定性 12 条</span><span class="chip">M-03 超期</span><span class="chip">信息员换人</span><span class="chip" id="chipAiCost">AI 成本 ¥0.02</span><span class="chip" id="chipHumanSaved">人工节省 2.5h</span></div>
             <div class="roi"><b>¥1,500</b><span>净省：保养 ¥500 &lt; 换模 ¥800 + 停机 ¥1200×1</span></div>
             <div class="next">下一步：10-25 复查 7 日均值 ≤5.40%；未达标则库存备模更换 M-03。</div>
           </div>
@@ -496,6 +496,9 @@
     qa: ['共享合规底稿：夸大词/假紧迫/价钱口径'],
     data: ['只读取数；缺失写 missing，不补数']
   };
+  if (window.TEAM_DATA && window.TEAM_DATA.context && window.TEAM_DATA.context.memories) {
+    Object.entries(window.TEAM_DATA.context.memories).forEach(([id, list]) => { MEMORY[id] = list; });
+  }
   const AVATARS = {
     host:'<svg viewBox="0 0 100 124"><rect x="34" y="70" width="32" height="40" rx="10" fill="#1d4ed8"/><circle cx="50" cy="46" r="24" fill="#f7c9a3"/><path d="M26 44c0-14 11-22 24-22s24 8 24 22c-4-7-12-10-24-10S30 37 26 44z" fill="#26324e"/><circle cx="41" cy="48" r="2.4" fill="#1f2937"/><circle cx="59" cy="48" r="2.4" fill="#1f2937"/><path d="M44 57c4 3 8 3 12 0" stroke="#b45309" stroke-width="2" fill="none" stroke-linecap="round"/><rect x="24" y="40" width="6" height="12" rx="3" fill="#22d3ee"/><rect x="70" y="40" width="6" height="12" rx="3" fill="#22d3ee"/></svg>',
     analyst:'<svg viewBox="0 0 100 124"><rect x="34" y="70" width="32" height="40" rx="10" fill="#0f766e"/><circle cx="50" cy="46" r="24" fill="#f2bd92"/><path d="M26 46c0-15 10-24 24-24 10 0 17 4 21 11-6-4-13-5-21-5-9 0-16 3-20 9z" fill="#3a2b1f"/><circle cx="41" cy="48" r="2.4" fill="#1f2937"/><circle cx="59" cy="48" r="2.4" fill="#1f2937"/><path d="M44 58c4 2 8 2 12 0" stroke="#9a3412" stroke-width="2" fill="none" stroke-linecap="round"/><rect x="68" y="60" width="14" height="20" rx="3" fill="#fef3c7" stroke="#d6b06a"/></svg>',
@@ -575,8 +578,32 @@
     document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
     t.classList.add('on'); cat = t.dataset.cat; renderShelf();
   });
+  function applyContext(){
+    const ctx = window.TEAM_DATA && window.TEAM_DATA.context;
+    if (!ctx) return;
+    const g = ctx.goal || {};
+    if (g.metric) {
+      const last = (g.progress || []).slice(-1)[0] || {};
+      const cur = Number(last.value != null ? last.value : g.baseline);
+      const total = Math.abs(Number(g.baseline) - Number(g.target)) || 1;
+      const pct = Math.max(0, Math.min(100, Math.round((Number(g.baseline) - cur) / total * 100)));
+      const goalEl = document.querySelector('.goal');
+      if (goalEl) goalEl.innerHTML = '目标：' + (g.deadline || '') + ' 前 ' + g.metric + ' 回到 ≤' + g.target + '（当前 ' + cur + '）<br/>接单 → 快照 → 排除法六步 → ROI 算账 → 交付卡；交付后 7 天自动回看。';
+      const bar = document.querySelector('.goalbar i');
+      if (bar) bar.style.width = pct + '%';
+      const sub = document.querySelector('.goalsub');
+      if (sub) sub.textContent = '目标进度 ' + pct + '% · 下次复查 ' + (g.review_due || '-') + ' · 负责人：' + (g.owner || '-');
+    }
+    if (ctx.cost) {
+      const ai = document.getElementById('chipAiCost');
+      if (ai) ai.textContent = 'AI 成本 ¥' + (ctx.cost.ai_cost_cny != null ? ctx.cost.ai_cost_cny : '-');
+      const hs = document.getElementById('chipHumanSaved');
+      if (hs) hs.textContent = '人工节省 ' + (ctx.cost.human_hours_saved != null ? ctx.cost.human_hours_saved : '-') + 'h';
+    }
+  }
   refreshKpis();
   renderShelf();
+  applyContext();
 
   /* stage */
   const DEMO_TITLE = 'B 产线补料率 7 日爬升（5.1% → 7.2%）';
