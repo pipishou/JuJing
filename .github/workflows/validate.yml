@@ -24,3 +24,5 @@ jobs:
         run: python bot-team/tests/negative_gates.py
       - name: Ops smoke (review/cost/wecom dry-run)
         run: python bot-team/tests/ops_smoke.py
+      - name: WeCom transport smoke (local server)
+        run: python bot-team/tests/wecom_transport_smoke.py

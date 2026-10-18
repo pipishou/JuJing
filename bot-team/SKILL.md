@@ -89,5 +89,6 @@ python tests/validate_report.py runs/demo-report.json   # 报告 schema＋断言
 - v0.8：四段闭环 bundle 自动写入（`assemble_report --records-dir` → `tools/write_loop_bundle.py` 写 evidence/decision/closure，analysis/goal/cost 由入参拷贝）+ `tools/validate_loop.py --require-complete` 门。
 - v0.8.1：`tools/cost_record.py`（成本记录/汇总）、`tools/memory_retrieve.py`（员工记忆检索，隐私/过期过滤）、`tests/negative_gates.py`（demo/叙述/缺数据必须被拒）。
 - v0.9：UI 数据绑定（goals/memory/cost 生成数据）、`tools/review_due.py`（T+7 回看→GitHub issue）、`tools/cost_monthly.py`（成本月报）、`wecom_notify.py --report`（交付卡自动填充）；`.github/workflows/review-due.yml`。
+- v0.9.2：`tests/wecom_transport_smoke.py` 用本地 HTTP server 验证企微 POST payload/成功/失败路径（不连真实企微、不需要 webhook）。
 
 

@@ -1,6 +1,6 @@
 # 聚鲸 Bot 团队（DSH 版）· 可迁移结构包
 
-> 状态：v0.9.1，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.7：真实数据入口/真实报告门/评分卡/签字；v0.8：四段闭环 bundle；v0.8.1：成本记录/记忆检索/负向门；v0.9：UI 数据绑定 + 回看/月报）。
+> 状态：v0.9.2，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.7：真实数据入口/真实报告门/评分卡/签字；v0.8：四段闭环 bundle；v0.9：UI 数据绑定 + 回看/月报；v0.9.2：企微传输层冒烟）。
 > 用途：把「制造业经营归因四角色团队」做成**结构可跑、可测、可迁移**的包；明天带到工作电脑继续推进。
 
 ## 它是什么
@@ -52,6 +52,8 @@ python tools/wecom_notify.py --kind delivery --report runs/task-B/report.json --
 python tests/negative_gates.py
 # 13. 无真实数据也能回归（合成 11 列 CSV，跑通全链）
 python tests/real_mode_smoke.py
+# 14. 企微传输层（本地 HTTP server，成功/失败路径；不连真实企微）
+python tests/wecom_transport_smoke.py
 ```
 
 ## 快速开始（本机）
