@@ -61,9 +61,9 @@
 3. 可签字交付卡（老板视角的成果形态）。
 其余全部用现成组件。
 
-## 4. GitHub 存放（公开仓库）
+## 4. GitHub 存放（公开仓库，已入库）
 
-已确认 `pipishou/JuJing` 公开。建议：
+已确认 `pipishou/JuJing` 公开并已入库（commit `ef609e8`）。当前结构：
 
 ```text
 JuJing/
@@ -85,7 +85,7 @@ JuJing/
 2. **四卡字段对齐**：evidence/analysis/decision/closure 加方法论字段（✅ 已完成）。
 3. **班组装载契约**：c-refill 启动时读 decision_contract（P1 代码）。
 4. **明天真实任务**：按 `REAL_TASK_PLAYBOOK` 跑；决策日志字段按方法论填；报告附六维评分卡。
-5. **公开仓库**：把 `bot-team/` 公开安全子集放进 JuJing（需用户确认后执行 git；本轮只准备结构）。
+5. **公开仓库**：`bot-team/` 公开安全子集已进 JuJing（commit `ef609e8`）；方法论原文/真实数据/账本仍在私有侧。
 6. **校准**：前 30 条冷启动等权；≥50 条再跑有序 Logistic 回归，不提前上 ML。
 
 ## 6. 风险与边界
