@@ -20,3 +20,5 @@ jobs:
         run: python bot-team/tests/validate_report.py bot-team/runs/demo-report.json
       - name: Real-mode smoke (synthetic data)
         run: python bot-team/tests/real_mode_smoke.py
+      - name: Negative gates (must reject demo/narrative/missing data)
+        run: python bot-team/tests/negative_gates.py
