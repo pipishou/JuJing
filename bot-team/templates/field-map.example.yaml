@@ -1,0 +1,20 @@
+# 字段映射模板（真实数据入口用）
+# 用法：python tools/ingest_task_data.py ... --field-map templates/field-map.example.yaml
+# 左侧是系统内部字段（不得改），右侧填工厂实际列名（中文/英文均可）。
+version: "1.0"
+source_columns:
+  date: 日期
+  production_line: 产线
+  refill_rate: 补料率
+  output_volume: 产量
+  mold_status: 模具状态
+  maintenance_records: 保养记录
+  shift_team: 班组
+  material_batch: 原料批次
+  ambient_env: 环境温湿度
+  mold_change_records: 换模记录
+  downtime_records: 停机记录
+  reporter: 信息员
+notes: >-
+  11 因素一个都不要少；没有的列可以留空/填 null，但不要删键——数据合同检查器会按 missing/partial 降级。
+  复杂字段（模具状态/保养记录/温湿度）建议在 CSV 里放 JSON 字符串，或在上游导出时拆列。

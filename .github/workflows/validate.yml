@@ -13,8 +13,10 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install deps
-        run: python -m pip install --upgrade pip pyyaml
+        run: python -m pip install --upgrade pip pyyaml pandas
       - name: Validate bot-team structure
         run: python bot-team/tests/validate_structure.py
       - name: Validate demo report
         run: python bot-team/tests/validate_report.py bot-team/runs/demo-report.json
+      - name: Real-mode smoke (synthetic data)
+        run: python bot-team/tests/real_mode_smoke.py

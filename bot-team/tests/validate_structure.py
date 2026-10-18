@@ -45,6 +45,7 @@ def main():
         "team/cost/README.md", "team/cost/cost-record.schema.yaml", "team/cost/example-cost.json",
         "team/integrations/wecom.yaml", "tools/wecom_notify.py",
         "tools/ingest_task_data.py", "tools/check_data_contract.py", "tools/score_scorecard.py", "tools/sign_delivery.py",
+        "tests/real_mode_smoke.py", "templates/field-map.example.yaml",
         "team/roles/host.md",
         "team/roles/consulting-analyst.md",
         "team/roles/ai-attribution-expert.md",
