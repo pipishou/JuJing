@@ -1,14 +1,21 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """host 收口：把 workflow 返回的 s1–s4 结果装配成报告（s5）。
 
 用法：
+  # demo（默认）
   python assemble_report.py <workflow-result.json> <out-report.json> [--date YYYY-MM-DD]
+  # 真实任务：必须给 task-id/context/data-refs/expected；禁止 demo 占位
+  python assemble_report.py <workflow-result.json> <out-report.json> --real \
+      --task-id T-20261019-B --context "B线补料率7日 5.1%→7.2%" \
+      --data-refs "runs/task-B/material_refill_T.json,runs/task-B/material_refill_T30.json" \
+      --expected "T+7 补料率 ≤5.40%" [--goal "..."]
 
 纪律：
   - finding/cannot_attribute 原样来自归因专家，不替它补结论；
-  - 若 scorecard 缺失，用六维「等权占位」并显式标注 demo 占位（不得当真实结论）；
-  - 若任一建议 irreversible，security_gate 置「待确认」（非 confirmed），并置 is_demo=true。
+  - demo 模式缺 scorecard 时用占位并标 is_demo=true；
+  - real 模式缺 scorecard 直接失败，不补占位；
+  - 任一建议 irreversible → security_gate 待确认（不自动确认）。
 """
 import json
 import sys
@@ -17,16 +24,37 @@ from datetime import date
 SIX = ["data_completeness", "timeliness", "significance", "exclusivity", "history", "human_ai_consistency"]
 
 
-def main():
-    if len(sys.argv) < 3:
-        print("usage: assemble_report.py <workflow-result.json> <out-report.json> [--date YYYY-MM-DD]")
-        return 2
-    src = json.loads(open(sys.argv[1], encoding="utf-8").read())
-    out_path = sys.argv[2]
-    day = date.today().isoformat()
-    if "--date" in sys.argv:
-        day = sys.argv[sys.argv.index("--date") + 1]
+def get_flag(args, flag):
+    if flag in args:
+        i = args.index(flag)
+        if i + 1 < len(args):
+            return args[i + 1]
+    return ""
 
+
+def main():
+    raw = sys.argv[1:]
+    real = "--real" in raw
+    args = [a for a in raw if a != "--real"]
+    if len(args) < 2:
+        print("usage: assemble_report.py <workflow-result.json> <out-report.json> [--real --task-id ... --context ... --data-refs ... --expected ...]")
+        return 2
+    src_path, out_path = args[0], args[1]
+    task_id = get_flag(args, "--task-id")
+    context = get_flag(args, "--context")
+    data_refs = get_flag(args, "--data-refs")
+    expected = get_flag(args, "--expected")
+    goal = get_flag(args, "--goal")
+    day = get_flag(args, "--date") or date.today().isoformat()
+
+    if real:
+        missing = [k for k, v in (("--task-id", task_id), ("--context", context),
+                                  ("--data-refs", data_refs), ("--expected", expected)) if not v]
+        if missing:
+            print(f"[ERROR] real 模式缺少参数: {missing}")
+            return 2
+
+    src = json.loads(open(src_path, encoding="utf-8-sig").read())
     attribution = src.get("attribution") or {}
     advice = src.get("advice") or {}
     finding = attribution.get("finding") or []
@@ -34,22 +62,30 @@ def main():
     rec = advice.get("recommendation") or []
 
     scorecard = attribution.get("scorecard") or {}
-    for k in SIX:
-        if k not in scorecard:
-            scorecard[k] = {"score": 3, "evidence": "demo 占位：归因专家未提供该维（不得当真实结论）"}
+    if real:
+        lacking = [k for k in SIX if k not in scorecard]
+        if lacking:
+            print(f"[ERROR] real 模式 scorecard 缺维度: {lacking}；请先用 tools/score_scorecard.py 计算")
+            return 2
+    else:
+        for k in SIX:
+            if k not in scorecard:
+                scorecard[k] = {"score": 3, "evidence": "demo 占位：归因专家未提供该维（不得当真实结论）"}
 
     irreversible = any(x.get("irreversibility") == "irreversible" for x in rec)
     gate = None
     if irreversible or advice.get("security_gate_requested"):
         gate = {"requested_at": day, "confirmed_by": None, "status": "pending_user_confirmation"}
 
+    refs = [x.strip() for x in data_refs.split(",") if x.strip()] if data_refs else ["demo/material_refill_T.json", "demo/material_refill_T30.json"]
     logs = {
         "id": f"DL-{day.replace('-', '')}-001",
         "actor": "manufacturing-ops-team-dsh",
-        "context": "B产线补料率7日爬升(5.1%→7.2%) 归因（demo 数据）",
-        "data_refs": ["demo/material_refill_T.json", "demo/material_refill_T30.json"],
+        "task_id": task_id or None,
+        "context": context or "B产线补料率7日爬升(5.1%→7.2%) 归因（demo 数据）",
+        "data_refs": refs,
         "advice": (rec[0]["action"] if rec else ""),
-        "expected_result": "T+7 补料率回落至 ≤5.5%（demo 占位预期，真实试点须按数据合同重设）",
+        "expected_result": expected or "T+7 补料率回落至 ≤5.5%（demo 占位预期，真实试点须按数据合同重设）",
         "irreversibility": "irreversible" if irreversible else "reversible",
         "security_gate": gate,
         "verification_plan": "T+7 复查并回填实际值；决策日志与运行回执对账",
@@ -61,8 +97,9 @@ def main():
     report = {
         "schema": "manufacturing-ops-report/0.1",
         "generated_at": day,
-        "is_demo": True,
-        "goal": (src.get("goal") or "B产线补料率7日爬升(5.1%→7.2%)的根因归因与行动建议"),
+        "is_demo": not real,
+        "task_id": task_id or None,
+        "goal": goal or (src.get("goal") or ("真实任务：" + context if real else "B产线补料率7日爬升(5.1%→7.2%)的根因归因与行动建议")),
         "finding": finding,
         "cannot_attribute": ca,
         "scorecard": scorecard,
@@ -78,9 +115,10 @@ def main():
     }
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
-    print(f"assembled: {out_path} (demo={report['is_demo']}, finding={len(finding)}, cannot_attribute={len(ca)}, rec={len(rec)})")
+    print(f"assembled: {out_path} (real={real}, is_demo={report['is_demo']}, finding={len(finding)}, cannot_attribute={len(ca)}, rec={len(rec)})")
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
+

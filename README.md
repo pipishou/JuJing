@@ -1,6 +1,6 @@
 # 聚鲸 Bot 团队（DSH 版）· 可迁移结构包
 
-> 状态：v0.6.0，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.2：6 员工/4 班组/货架 6 态/可签字交付卡/UI；v0.2.1：原创像素角色＋YAML→UI 数据＋DSH 会话 tape 适配器；v0.3：角色 8 帧动画＋真实会话 tape 回放；v0.3.1：接单向导/真实任务手册/竞品基准；v0.4：四段闭环卡；v0.5：与方法论 v1.3 对齐；v0.6：关系/记忆、Goals、成本透明、企微接入）。
+> 状态：v0.7.0，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.2–v0.6 见下；v0.7：真实数据入口/真实报告门/评分卡与降级计算/签字持久化）。
 > 用途：把「制造业经营归因四角色团队」做成**结构可跑、可测、可迁移**的包；明天带到工作电脑继续推进。
 
 ## 它是什么
@@ -16,8 +16,25 @@
 - **v0.3.1 增量**：UI「新建任务」接单向导（生成 task JSON）＋`templates/task-intake.example.json`＋`docs/REAL_TASK_PLAYBOOK_2026-10-19_zh.md`＋`docs/PRODUCT_BENCHMARK_2026-10-18_zh.md`；交付卡加成本行（AI 成本/人工节省）；工作流支持 `args.data_dir`；
 - **v0.4 增量**：`team/loop/` 四段闭环卡（证据/分析/决策/闭环 schema + 状态机 + 示例）；`docs/FOUR_LOOP_UPGRADE_2026-10-18_zh.md`；GitHub 仓库方案 `docs/GITHUB_REPO_PLAN_2026-10-18_zh.md`；
 - **v0.5 增量**：与方法论 v1.3 对齐——`assets/scorecard_six_dim.yaml` 升 100 分制/硬护栏/阈值/CSOLR；新增 `assets/perception_rules.yaml`（L0 检测+三级降级+失败回滚）、`assets/decision_contract_refill.yaml`（决策契约）；四卡补齐决策日志字段；`docs/METHODOLOGY_INTEGRATION_2026-10-18_zh.md`；
-- **v0.6 增量**：关系层 `team/memory/`（员工记忆 schema+检索规则+脱敏样例）、目标层 `team/goals/`（目标卡+进度）、成本层 `team/cost/`（AI 成本/人工节省/净收益/ROI）、接入层 `team/integrations/wecom.yaml`＋`tools/wecom_notify.py`（企微群机器人出站，20 条/分钟，dry-run 已验证）；UI 加目标进度、员工记忆、企微推送按钮。
+- **v0.6 增量**：关系层 `team/memory/`（员工记忆 schema+检索规则+脱敏样例）、目标层 `team/goals/`（目标卡+进度）、成本层 `team/cost/`（AI 成本/人工节省/净收益/ROI）、接入层 `team/integrations/wecom.yaml`＋`tools/wecom_notify.py`（企微群机器人出站，20 条/分钟，dry-run 已验证）；UI 加目标进度、员工记忆、企微推送按钮；
+- **v0.7 增量**：真实数据入口 `tools/ingest_task_data.py`（CSV/Excel→T/T30）、`tools/check_data_contract.py`（11 因素/10%/30% 降级）；真实报告门 `assemble_report.py --real`＋`validate_report.py --require-real`；评分卡计算 `tools/score_scorecard.py`；签字持久化 `tools/sign_delivery.py`（拒绝 demo 签字）。
 - **迁移件**：`MIGRATION.md`＋`package.ps1`（zip＋manifest）。
+
+## 真实数据流程（v0.7）
+
+```powershell
+# 1. CSV/Excel → T/T30 JSON（不补数）
+python tools/ingest_task_data.py --input task.csv --line B --t-start 2026-10-05 --t-end 2026-10-11 --base-start 2026-09-05 --base-end 2026-10-04 --outdir runs/task-B
+# 2. 数据合同（--strict 时 manual 退出非零）
+python tools/check_data_contract.py --t runs/task-B/material_refill_T.json --t30 runs/task-B/material_refill_T30.json --strict
+# 3. 六维评分（数值 0-5，--strict 拒绝叙述）
+python tools/score_scorecard.py --scores "{\"data_completeness\":4,\"timeliness\":3,\"significance\":5,\"exclusivity\":3,\"history\":4,\"human_ai_consistency\":0}" --strict
+# 4. 收口为真实报告（禁 demo 占位）
+python orchestration/assemble_report.py workflow-result.json runs/task-B/report.json --real --task-id T-20261019-B --context "B线补料率7日 5.1%→7.2%" --data-refs "runs/task-B/material_refill_T.json,runs/task-B/material_refill_T30.json" --expected "T+7 补料率 ≤5.40%"
+# 5. 真实报告门 + 签字
+python tests/validate_report.py runs/task-B/report.json --require-real
+python tools/sign_delivery.py runs/task-B/report.json --signer "业务负责人"
+```
 
 ## 快速开始（本机）
 

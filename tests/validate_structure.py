@@ -44,6 +44,7 @@ def main():
         "team/goals/README.md", "team/goals/goal.schema.yaml", "team/goals/example-goal.json",
         "team/cost/README.md", "team/cost/cost-record.schema.yaml", "team/cost/example-cost.json",
         "team/integrations/wecom.yaml", "tools/wecom_notify.py",
+        "tools/ingest_task_data.py", "tools/check_data_contract.py", "tools/score_scorecard.py", "tools/sign_delivery.py",
         "team/roles/host.md",
         "team/roles/consulting-analyst.md",
         "team/roles/ai-attribution-expert.md",
@@ -195,6 +196,13 @@ def main():
     wecom = load_yaml("team/integrations/wecom.yaml") or {}
     check("wecom rate limit", wecom.get("rate_limit_per_min") == 20)
     check("wecom inbound deferred", (wecom.get("inbound") or {}).get("status") == "deferred")
+
+    # 3.10 v0.7: 单源一致 + 真实数据门
+    roster_ids = [host.get("id")] + [m.get("id") for m in members]
+    check("roster ids subset employees", all(i in emp_ids for i in roster_ids), str(roster_ids))
+    check("real report mode", "--real" in (ROOT / "orchestration/assemble_report.py").read_text(encoding="utf-8"))
+    check("real report gate", "--require-real" in (ROOT / "tests/validate_report.py").read_text(encoding="utf-8"))
+    check("sign delivery tool", (ROOT / "tools/sign_delivery.py").is_file())
     tape = json.loads((ROOT / "runs/dsh-tape-sample.json").read_text(encoding="utf-8"))
     check("tape sample beats>0", isinstance(tape.get("beats"), list) and len(tape["beats"]) > 0)
 

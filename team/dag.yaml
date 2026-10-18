@@ -9,7 +9,7 @@ steps:
   - id: s1_data_snapshot
     role: consulting-analyst
     layer: L0
-    task: "读取 demo/material_refill_T.json 与 demo/material_refill_T30.json，对 11 类因素做 T vs T-30 快照对比；标注每因素可得性(available/partial/missing)与空值率；输出 {{snapshot}}"
+    task: "读取 {{data_dir}}/material_refill_T.json 与 {{data_dir}}/material_refill_T30.json（默认 data_dir=demo；真实任务由 args.data_dir 传入），对 11 类因素做 T vs T-30 快照对比；标注每因素可得性(available/partial/missing)与空值率；输出 {{snapshot}}"
     depends_on: []
     output: snapshot
   - id: s2_factor_table
