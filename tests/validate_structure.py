@@ -40,6 +40,10 @@ def main():
         "team/roster.yaml", "team/dag.yaml", "team/gates.md",
         "team/employees.yaml", "team/crews.yaml", "team/shelf.yaml",
         "team/delivery-card.schema.yaml",
+        "team/memory/README.md", "team/memory/employee-memory.schema.yaml", "team/memory/example-memory.json",
+        "team/goals/README.md", "team/goals/goal.schema.yaml", "team/goals/example-goal.json",
+        "team/cost/README.md", "team/cost/cost-record.schema.yaml", "team/cost/example-cost.json",
+        "team/integrations/wecom.yaml", "tools/wecom_notify.py",
         "team/roles/host.md",
         "team/roles/consulting-analyst.md",
         "team/roles/ai-attribution-expert.md",
@@ -64,6 +68,7 @@ def main():
         "docs/PRODUCT_BENCHMARK_2026-10-18_zh.md",
         "docs/FOUR_LOOP_UPGRADE_2026-10-18_zh.md",
         "docs/METHODOLOGY_INTEGRATION_2026-10-18_zh.md",
+        "docs/WECOM_INTEGRATION_2026-10-18_zh.md",
         "docs/GITHUB_REPO_PLAN_2026-10-18_zh.md",
         "runs/dsh-tape-sample.json",
         "tests/validate_structure.py", "tests/validate_report.py",
@@ -178,6 +183,18 @@ def main():
     check("decision contract guardrails", len(dc.get("guardrails") or []) >= 2)
     check("example decision entity_id", bool(dec.get("entity_id")))
     check("example decision attribution_method", dec.get("attribution_method") in ("exclusion", "counterfactual", "rule_based"))
+
+    # 3.9 v0.6: 关系/记忆、目标、成本、企微
+    mem = json.loads((ROOT / "team/memory/example-memory.json").read_text(encoding="utf-8"))
+    check("memory >=3 entries", len(mem) >= 3)
+    check("memory privacy enum", all(m.get("privacy") in ("public", "internal", "customer_sensitive") for m in mem))
+    goal = json.loads((ROOT / "team/goals/example-goal.json").read_text(encoding="utf-8"))
+    check("goal target/deadline", "target" in goal and "deadline" in goal)
+    cost = json.loads((ROOT / "team/cost/example-cost.json").read_text(encoding="utf-8"))
+    check("cost net/roi", "net_benefit_cny" in cost and "roi" in cost)
+    wecom = load_yaml("team/integrations/wecom.yaml") or {}
+    check("wecom rate limit", wecom.get("rate_limit_per_min") == 20)
+    check("wecom inbound deferred", (wecom.get("inbound") or {}).get("status") == "deferred")
     tape = json.loads((ROOT / "runs/dsh-tape-sample.json").read_text(encoding="utf-8"))
     check("tape sample beats>0", isinstance(tape.get("beats"), list) and len(tape["beats"]) > 0)
 

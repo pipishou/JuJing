@@ -1,6 +1,6 @@
 # 聚鲸 Bot 团队（DSH 版）· 可迁移结构包
 
-> 状态：v0.5.0，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.2：6 员工/4 班组/货架 6 态/可签字交付卡/UI；v0.2.1：原创像素角色＋YAML→UI 数据＋DSH 会话 tape 适配器；v0.3：角色 8 帧动画＋真实会话 tape 回放；v0.3.1：接单向导/真实任务手册/竞品基准；v0.4：四段闭环卡；v0.5：与方法论 v1.3 对齐）。
+> 状态：v0.6.0，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.2：6 员工/4 班组/货架 6 态/可签字交付卡/UI；v0.2.1：原创像素角色＋YAML→UI 数据＋DSH 会话 tape 适配器；v0.3：角色 8 帧动画＋真实会话 tape 回放；v0.3.1：接单向导/真实任务手册/竞品基准；v0.4：四段闭环卡；v0.5：与方法论 v1.3 对齐；v0.6：关系/记忆、Goals、成本透明、企微接入）。
 > 用途：把「制造业经营归因四角色团队」做成**结构可跑、可测、可迁移**的包；明天带到工作电脑继续推进。
 
 ## 它是什么
@@ -15,7 +15,8 @@
 - **v0.3 增量**：角色 8 帧动画（idle/walk0/walk1/blink/talk/happy/think/surprised；说话口型、换拍行走、随机眨眼、按幕表情）＋真实 DSH 会话 tape 回放（`ui/tape-data.js`，`?mode=tape&t=N`；样例 120 beats）；
 - **v0.3.1 增量**：UI「新建任务」接单向导（生成 task JSON）＋`templates/task-intake.example.json`＋`docs/REAL_TASK_PLAYBOOK_2026-10-19_zh.md`＋`docs/PRODUCT_BENCHMARK_2026-10-18_zh.md`；交付卡加成本行（AI 成本/人工节省）；工作流支持 `args.data_dir`；
 - **v0.4 增量**：`team/loop/` 四段闭环卡（证据/分析/决策/闭环 schema + 状态机 + 示例）；`docs/FOUR_LOOP_UPGRADE_2026-10-18_zh.md`；GitHub 仓库方案 `docs/GITHUB_REPO_PLAN_2026-10-18_zh.md`；
-- **v0.5 增量**：与方法论 v1.3 对齐——`assets/scorecard_six_dim.yaml` 升 100 分制/硬护栏/阈值/CSOLR；新增 `assets/perception_rules.yaml`（L0 检测+三级降级+失败回滚）、`assets/decision_contract_refill.yaml`（决策契约）；四卡补齐决策日志字段；`docs/METHODOLOGY_INTEGRATION_2026-10-18_zh.md`。
+- **v0.5 增量**：与方法论 v1.3 对齐——`assets/scorecard_six_dim.yaml` 升 100 分制/硬护栏/阈值/CSOLR；新增 `assets/perception_rules.yaml`（L0 检测+三级降级+失败回滚）、`assets/decision_contract_refill.yaml`（决策契约）；四卡补齐决策日志字段；`docs/METHODOLOGY_INTEGRATION_2026-10-18_zh.md`；
+- **v0.6 增量**：关系层 `team/memory/`（员工记忆 schema+检索规则+脱敏样例）、目标层 `team/goals/`（目标卡+进度）、成本层 `team/cost/`（AI 成本/人工节省/净收益/ROI）、接入层 `team/integrations/wecom.yaml`＋`tools/wecom_notify.py`（企微群机器人出站，20 条/分钟，dry-run 已验证）；UI 加目标进度、员工记忆、企微推送按钮。
 - **迁移件**：`MIGRATION.md`＋`package.ps1`（zip＋manifest）。
 
 ## 快速开始（本机）

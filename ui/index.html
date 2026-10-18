@@ -110,7 +110,10 @@
 
   /* crew */
   .crew{padding:12px 14px}
-  .crew .goal{font-size:12px;color:#4b5563;line-height:1.6;margin-bottom:10px}
+  .crew .goal{font-size:12px;color:#4b5563;line-height:1.6;margin-bottom:8px}
+  .goalbar{height:8px;border-radius:99px;background:#f1e9db;overflow:hidden;margin:2px 0 5px}
+  .goalbar i{display:block;height:100%;width:25%;border-radius:99px;background:linear-gradient(90deg,#0f766e,#5eead4)}
+  .goalsub{font-size:10px;color:#9ca3af;margin-bottom:8px}
   .step{display:flex;gap:10px;align-items:flex-start;padding:7px 8px;border-radius:10px;transition:.2s}
   .step+.step{margin-top:2px}
   .step .idx{width:20px;height:20px;border-radius:50%;background:#f1e9db;color:#7c5a2e;font-size:10.5px;display:grid;place-items:center;flex:0 0 auto;font-weight:700}
@@ -239,7 +242,7 @@
       <div class="row"><span><span class="dot"></span>班组运行中</span><span id="kpiSide">4 人</span></div>
       <div class="row" style="opacity:.75"><span>累计交付</span><span>12 份</span></div>
     </div>
-    <div class="foot">UI 概念原型 v0.3.1 · 假数据<br/>引擎：DeepSeek Harness（不改）<br/>员工：声明式四件套 / 货架 6 态</div>
+    <div class="foot">UI 概念原型 v0.6.0 · 假数据<br/>引擎：DeepSeek Harness（不改）<br/>员工：声明式四件套 / 货架 6 态</div>
   </aside>
 
   <main class="main">
@@ -363,6 +366,8 @@
           <div class="card-h"><div><h3>本场班组 · 补料率归因</h3><div class="sub">5 步 · 4 角色 · 预派发已确认</div></div><span class="pill">班组</span></div>
           <div class="crew">
             <div class="goal">目标：7 日内补料率回到 ≤5.40%（当前 7.2%）<br/>接单 → 快照 → 排除法六步 → ROI 算账 → 交付卡；交付后 7 天自动回看。</div>
+            <div class="goalbar"><i></i></div>
+            <div class="goalsub">目标进度 25% · T+7 复查 10-25 · 负责人：产线负责人</div>
             <div class="step" data-i="0"><span class="idx">1</span><div><div class="txt">读取 T / T-30，11 因素快照与空值率</div><div class="who">咨询分析师 · L0</div></div></div>
             <div class="step" data-i="1"><span class="idx">2</span><div><div class="txt">因素表可得性与先验权重</div><div class="who">业务专家 · L2 准备</div></div></div>
             <div class="step" data-i="2"><span class="idx">3</span><div><div class="txt">排除法六步，finding≤2，残差强制非空</div><div class="who">AI 归因专家 · L1</div></div></div>
@@ -392,6 +397,7 @@
           <div class="sign-btns">
             <button class="primary" id="signBtn" onclick="signPaper()">签字确认</button>
             <button onclick="rejectPaper()">打回修改</button>
+            <button onclick="pushWecom()">企微推送</button>
             <button onclick="toast('已导出 PDF（原型）')">导出</button>
           </div>
         </section>
@@ -442,7 +448,7 @@
 </div></div>
 
 <div class="modal" id="empModal"><div class="box">
-  <div class="emp-detail"><div class="bigav" id="mAv"></div><div style="flex:1"><h4 id="mName"></h4><div class="m" id="mRole"></div><div class="m" id="mSum" style="margin-top:6px"></div><div class="meta-row" id="mTags" style="margin-top:8px"></div><div class="m" id="mSample" style="margin-top:6px"></div></div></div>
+  <div class="emp-detail"><div class="bigav" id="mAv"></div><div style="flex:1"><h4 id="mName"></h4><div class="m" id="mRole"></div><div class="m" id="mSum" style="margin-top:6px"></div><div class="meta-row" id="mTags" style="margin-top:8px"></div><div class="m" id="mSample" style="margin-top:6px"></div><div class="meta-row" id="mMemory" style="margin-top:6px"></div></div></div>
   <div class="foot" style="margin-top:14px"><button class="btn" onclick="closeEmp()">关闭</button><button class="btn primary" id="mHire" onclick="hireFromModal()">雇佣</button></div>
 </div></div>
 
@@ -481,6 +487,14 @@
     {id:'cost', name:'成本管家', role:'coming · 待上架', layer:'-', cat:'coming', state:'coming', stateText:'待上架', init:'cost', tags:['依赖未接'], sample:'依赖 usage 数据源', summary:'包写完了但外部服务未就绪，不上架——死按钮比没按钮伤害大。', hireable:false}
   ];
   if (window.TEAM_DATA && Array.isArray(window.TEAM_DATA.employees)) { EMPLOYEES.length = 0; EMPLOYEES.push(...window.TEAM_DATA.employees); }
+  const MEMORY = {
+    host: ['交付偏好：一页纸/先结论后证据', '必须写 ROI 与下一步'],
+    analyst: ['补料率口径=补料次数/总次数', 'B 级数据偏差<10%', '信息员换人期偏差 5%~10%'],
+    attr: ['上次主因：模具磨损 M-03（0.63）', '信息员换人进 cannot_attribute'],
+    biz: ['优先保养 ¥500，后换模 ¥800', '换模属不可逆，需 securityGate'],
+    qa: ['共享合规底稿：夸大词/假紧迫/价钱口径'],
+    data: ['只读取数；缺失写 missing，不补数']
+  };
   const AVATARS = {
     host:'<svg viewBox="0 0 100 124"><rect x="34" y="70" width="32" height="40" rx="10" fill="#1d4ed8"/><circle cx="50" cy="46" r="24" fill="#f7c9a3"/><path d="M26 44c0-14 11-22 24-22s24 8 24 22c-4-7-12-10-24-10S30 37 26 44z" fill="#26324e"/><circle cx="41" cy="48" r="2.4" fill="#1f2937"/><circle cx="59" cy="48" r="2.4" fill="#1f2937"/><path d="M44 57c4 3 8 3 12 0" stroke="#b45309" stroke-width="2" fill="none" stroke-linecap="round"/><rect x="24" y="40" width="6" height="12" rx="3" fill="#22d3ee"/><rect x="70" y="40" width="6" height="12" rx="3" fill="#22d3ee"/></svg>',
     analyst:'<svg viewBox="0 0 100 124"><rect x="34" y="70" width="32" height="40" rx="10" fill="#0f766e"/><circle cx="50" cy="46" r="24" fill="#f2bd92"/><path d="M26 46c0-15 10-24 24-24 10 0 17 4 21 11-6-4-13-5-21-5-9 0-16 3-20 9z" fill="#3a2b1f"/><circle cx="41" cy="48" r="2.4" fill="#1f2937"/><circle cx="59" cy="48" r="2.4" fill="#1f2937"/><path d="M44 58c4 2 8 2 12 0" stroke="#9a3412" stroke-width="2" fill="none" stroke-linecap="round"/><rect x="68" y="60" width="14" height="20" rx="3" fill="#fef3c7" stroke="#d6b06a"/></svg>',
@@ -538,6 +552,7 @@
     document.getElementById('mSum').textContent = e.summary;
     document.getElementById('mTags').innerHTML = e.tags.map(t=>`<span class="chip">${t}</span>`).join('');
     document.getElementById('mSample').textContent = '成果样例：' + e.sample;
+    document.getElementById('mMemory').innerHTML = (MEMORY[e.id] || ['暂无跨任务记忆']).map(x=>'<span class="chip">记忆 · '+x+'</span>').join('');
     const btn = document.getElementById('mHire');
     btn.disabled = !e.hireable || hired.has(e.id);
     btn.textContent = !e.hireable ? '不可雇佣' : (hired.has(e.id) ? '已签约' : '雇佣');
@@ -792,6 +807,7 @@
     setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
     toast('任务 JSON 已生成：' + task.task_id);
   }
+  function pushWecom(){ toast('企微推送（原型）：交付卡 Markdown 已生成，工具见 tools/wecom_notify.py'); }
   function toast(msg){
     const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
     clearTimeout(t._t); t._t = setTimeout(()=>t.classList.remove('show'), 1800);
