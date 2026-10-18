@@ -601,9 +601,24 @@
       if (hs) hs.textContent = '人工节省 ' + (ctx.cost.human_hours_saved != null ? ctx.cost.human_hours_saved : '-') + 'h';
     }
   }
+  function applyNoFinding(){
+    if (new URLSearchParams(location.search).get('nofind') !== '1') return;
+    const rt = document.querySelector('.rt');
+    if (rt) rt.textContent = '补料率 7 日异常 · 不可归因（证据不足）';
+    document.querySelectorAll('.finding-row').forEach(el => { el.style.display = 'none'; });
+    const meta = document.querySelector('.meta-row');
+    if (meta) meta.innerHTML = '<span class="chip">finding=0</span><span class="chip">cannot_attribute=2</span><span class="chip">建议：先补数据</span>';
+    const roi = document.querySelector('.roi');
+    if (roi) roi.innerHTML = '<b>¥0</b><span>先补数据，不行动；补齐后重跑</span>';
+    const next = document.querySelector('.next');
+    if (next) next.textContent = '下一步：补齐保养记录/信息员口径后重跑；T+7 前不执行动作。';
+    const stamp = document.getElementById('stamp');
+    if (stamp) { stamp.textContent = '待 补 数 据'; stamp.style.borderColor = '#b45309'; stamp.style.color = '#b45309'; }
+  }
   refreshKpis();
   renderShelf();
   applyContext();
+  applyNoFinding();
 
   /* stage */
   const DEMO_TITLE = 'B 产线补料率 7 日爬升（5.1% → 7.2%）';
