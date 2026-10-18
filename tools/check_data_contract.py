@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """数据合同检查器（方法论 v1.3 §3 的规则化）。
 
@@ -12,6 +12,7 @@
 import argparse
 import json
 import sys
+from datetime import date, datetime
 from pathlib import Path
 
 import yaml
@@ -30,8 +31,8 @@ def present(rec, key):
 
 def main():
     try:
-        sys.stdout.reconfigure(encoding="utf-8-sig")
-        sys.stderr.reconfigure(encoding="utf-8-sig")
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
         pass
     ap = argparse.ArgumentParser()
@@ -64,13 +65,42 @@ def main():
     null_rate = round(len(missing_factors) / len(ids), 4) if ids else 0.0
     cell_rate = round(cell_missing / (len(ids) * len(recs)), 4) if ids and recs else 0.0
 
+    # ---- 值级检查（键存在 ≠ 值可用）----
+    value_errors = []
+    dates = []
+    for i, r in enumerate(recs):
+        raw = r.get("date")
+        try:
+            dates.append(datetime.strptime(str(raw), "%Y-%m-%d").date())
+        except Exception:
+            value_errors.append(f"record[{i}] date 非法: {raw}")
+        if not str(r.get("production_line", "")).strip():
+            value_errors.append(f"record[{i}] production_line 为空")
+        for key, lo, hi in (("refill_rate", 0.0, 100.0), ("output_volume", 0.0, None)):
+            if r.get(key) is None:
+                continue
+            try:
+                v = float(r[key])
+            except Exception:
+                value_errors.append(f"record[{i}] {key} 非数值: {r[key]}")
+                continue
+            if v < lo or (hi is not None and v > hi):
+                value_errors.append(f"record[{i}] {key} 越界: {v}")
+    duplicate_dates = len(dates) - len(set(dates)) if dates else 0
+    date_gaps = 0
+    if dates:
+        uniq = sorted(set(dates))
+        date_gaps = max(0, (uniq[-1] - uniq[0]).days + 1 - len(uniq))
+    if duplicate_dates:
+        value_errors.append(f"重复日期 {duplicate_dates} 条")
+
     if null_rate <= 0.10:
         level, method = "normal", "exclusion_six_steps"
     elif null_rate <= 0.30:
         level, method = "counterfactual", "counterfactual"
     else:
         level, method = "manual", "manual_review"
-    if core_missing:
+    if core_missing or value_errors or duplicate_dates:
         level, method = "manual", "manual_review"
 
     out = {
@@ -82,6 +112,9 @@ def main():
         "core_missing": core_missing,
         "null_rate_factor": null_rate,
         "null_rate_cell": cell_rate,
+        "value_errors": value_errors,
+        "duplicate_dates": duplicate_dates,
+        "date_gaps": date_gaps,
         "degradation_level": level,
         "method": method,
         "availability": availability,

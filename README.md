@@ -1,6 +1,6 @@
 # 聚鲸 Bot 团队（DSH 版）· 可迁移结构包
 
-> 状态：v0.9.2，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.7：真实数据入口/真实报告门/评分卡/签字；v0.8：四段闭环 bundle；v0.9：UI 数据绑定 + 回看/月报；v0.9.2：企微传输层冒烟）。
+> 状态：v0.10.0，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.7：真实数据入口/真实报告门/评分卡/签字；v0.8：四段闭环 bundle；v0.9：UI 数据绑定 + 回看/月报；v0.10：无归因路径/值级合同/本机回看/签字收口）。
 > 用途：把「制造业经营归因四角色团队」做成**结构可跑、可测、可迁移**的包；明天带到工作电脑继续推进。
 
 ## 它是什么
@@ -41,9 +41,9 @@ python tools/cost_record.py record --task T-20261019-B --ai-cost 0.02 --tokens 7
 python tools/cost_record.py summary --file runs/task-B/cost.jsonl
 # 8. 记忆检索（按员工+实体，最多 5 条）
 python tools/memory_retrieve.py --file team/memory/example-memory.json --employee analyst --entity "塑胶厂-B线" --limit 5
-# 9. 回看扫描（到期未回填写成 GitHub issue；默认 dry-run）
-python tools/review_due.py --root runs
-python tools/review_due.py --root runs --create-issue
+# 9. 回看扫描（本机清单；GitHub issue 需 gh）
+python tools/review_due.py --root runs --out runs/review-due.md
+python tools/review_due.py --root runs --create-issue   # 仅 CI/装了 gh 的机器
 # 10. 成本月报
 python tools/cost_monthly.py --file runs/task-B/cost.jsonl --month 2026-10 --outdir runs
 # 11. 企微交付卡（从 report.json 自动填充；默认 dry-run）
@@ -54,6 +54,10 @@ python tests/negative_gates.py
 python tests/real_mode_smoke.py
 # 14. 企微传输层（本地 HTTP server，成功/失败路径；不连真实企微）
 python tests/wecom_transport_smoke.py
+# 15. 无归因路径 + 值级合同 + 签字收口
+python tests/no_finding_smoke.py
+python tests/contract_values_smoke.py
+python tools/finalize_delivery.py --report runs/task-B/report.json --loop-dir runs/task-B/loop --signature runs/task-B/report.signature.json
 ```
 
 ## 快速开始（本机）

@@ -35,14 +35,15 @@ def main():
     args = ap.parse_args()
     d = Path(args.task_dir)
     errors, warnings = [], []
+    dec = readj(d / "decision.json") if (d / "decision.json").is_file() else None
 
     ev = d / "evidence.jsonl"
     if not ev.is_file():
         errors.append("missing evidence.jsonl")
     else:
         lines = [json.loads(x) for x in ev.read_text(encoding="utf-8-sig").splitlines() if x.strip()]
-        if not lines:
-            errors.append("evidence.jsonl empty")
+        if not lines and not (dec and dec.get("no_finding")):
+            errors.append("evidence.jsonl empty（非 no_finding 时必须非空）")
         for i, e in enumerate(lines):
             for k in ("id", "source", "quote", "score", "grade"):
                 if k not in e:
@@ -54,8 +55,7 @@ def main():
         if not (d / name).is_file():
             errors.append(f"missing {name}")
 
-    if (d / "decision.json").is_file():
-        dec = readj(d / "decision.json")
+    if dec is not None:
         for k in DECISION_REQ:
             if k not in dec:
                 errors.append(f"decision missing {k}")
@@ -64,6 +64,8 @@ def main():
             errors.append("decision approval 缺 by/at/mode")
         if not dec.get("reversal_conditions"):
             errors.append("decision reversal_conditions 为空")
+        if dec.get("no_finding") and dec.get("chosen") != "不做":
+            errors.append("no_finding 决策的 chosen 必须是「不做」")
 
     if (d / "closure.json").is_file():
         clo = readj(d / "closure.json")

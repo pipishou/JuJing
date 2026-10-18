@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """报告校验：demo 报告 or 真实报告是否满足产出契约。
 
@@ -39,7 +39,9 @@ def main():
     r = json.loads(p.read_text(encoding="utf-8-sig"))
 
     finding = r.get("finding") or []
-    check("finding 1-2 条", 1 <= len(finding) <= 2, str(len(finding)))
+    check("finding 0-2 条", 0 <= len(finding) <= 2, str(len(finding)))
+    if len(finding) == 0:
+        check("no_finding 需 cannot_attribute 非空", isinstance(r.get("cannot_attribute"), list) and len(r["cannot_attribute"]) > 0)
     for i, f in enumerate(finding):
         check(f"finding[{i}] factor", bool(f.get("factor")))
         check(f"finding[{i}] confidence", f.get("confidence") not in (None, ""))

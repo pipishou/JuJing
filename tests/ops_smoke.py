@@ -34,8 +34,10 @@ def main():
     (loop / "closure.json").write_text(json.dumps({
         "id": "C-20261001-001", "decision_id": "D-20261001-001", "due": "2026-10-08",
         "verdict": "unverified"}, ensure_ascii=False), encoding="utf-8")
-    out = run([PY, "tools/review_due.py", "--root", str(TMP), "--today", "2026-10-18"])
+    out = run([PY, "tools/review_due.py", "--root", str(TMP), "--today", "2026-10-18",
+               "--out", str(TMP / "review-due.md")])
     assert "D-20261001-001" in out, "review_due did not list due decision"
+    assert (TMP / "review-due.md").is_file(), "local review list missing"
 
     costdir = TMP / "cost"
     run([PY, "tools/cost_record.py", "record", "--task", "T-A", "--ai-cost", "0.02",
@@ -58,6 +60,14 @@ def main():
     out = run([PY, "tools/wecom_notify.py", "--kind", "delivery", "--report", str(report),
                "--cost", "AI ¥0.02 / 人工节省 2.5h", "--dry-run"])
     assert "主因" in out and "模具状态" in out, "wecom report mode failed"
+
+    loop = TMP / "loop"
+    run([PY, "tools/write_loop_bundle.py", "--report", str(report), "--outdir", str(loop)])
+    sig = TMP / "signature.json"
+    run([PY, "tools/sign_delivery.py", str(report), "--signer", "smoke", "--out", str(sig)])
+    run([PY, "tools/finalize_delivery.py", "--report", str(report), "--loop-dir", str(loop), "--signature", str(sig)])
+    dec = json.loads((loop / "decision.json").read_text(encoding="utf-8-sig"))
+    assert dec.get("status") == "approved", "finalize did not approve decision"
 
     print(json.dumps({"ok": True, "tmp": str(TMP)}, ensure_ascii=False))
     return 0
