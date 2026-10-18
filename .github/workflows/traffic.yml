@@ -15,12 +15,17 @@ jobs:
 
       - name: Scrape traffic API into metrics/wal.jsonl
         env:
-          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN || github.token }}
         run: |
           mkdir -p metrics
           API="https://api.github.com/repos/${{ github.repository }}"
           TS=$(date -u +%F)
-          curl -sf -H "Authorization: Bearer $TRAFFIC_TOKEN" "$API/traffic/views"  > /tmp/views.json
+          CODE=$(curl -s -o /tmp/views.json -w '%{http_code}' -H "Authorization: Bearer $TRAFFIC_TOKEN" "$API/traffic/views")
+          echo "traffic/views HTTP $CODE"
+          if [ "$CODE" != "200" ]; then
+            echo "::error::traffic API returned HTTP $CODE. If 403/404: set repo secret TRAFFIC_TOKEN (PAT with access to this repo), or accept that GITHUB_TOKEN cannot read traffic API."
+            exit 1
+          fi
           curl -sf -H "Authorization: Bearer $TRAFFIC_TOKEN" "$API/traffic/clones" > /tmp/clones.json
           jq -c --arg ts "$TS" '{ts:$ts,type:"views", count:.count,uniques:.uniques}' /tmp/views.json  >> metrics/wal.jsonl
           jq -c --arg ts "$TS" '{ts:$ts,type:"clones",count:.count,uniques:.uniques}' /tmp/clones.json >> metrics/wal.jsonl
