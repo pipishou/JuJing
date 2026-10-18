@@ -63,13 +63,13 @@ def build(kind: str, args) -> str:
     return f"## 成本与价值 · {args.title}\n> {args.content or '待填'}\n- 日期：{date.today().isoformat()}"
 
 
-def send(webhook: str, content: str, dry_run: bool) -> int:
+def send(webhook: str, content: str, dry_run: bool, endpoint: str = ENDPOINT) -> int:
     payload = {"msgtype": "markdown", "markdown": {"content": content[:4000]}}
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     if dry_run:
         print("[dry-run]", json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
-    req = urllib.request.Request(ENDPOINT + "?key=" + webhook, data=body,
+    req = urllib.request.Request(endpoint + "?key=" + webhook, data=body,
                                  headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -101,6 +101,7 @@ def main() -> int:
     p.add_argument("--report", default="", help="从 report.json 自动填充交付卡字段")
     p.add_argument("--next", default="")
     p.add_argument("--webhook", default="")
+    p.add_argument("--endpoint", default=ENDPOINT, help="测试用；默认官方 endpoint")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
 
@@ -109,7 +110,7 @@ def main() -> int:
     if not webhook:
         print("[INFO] 未配置 WECOM_WEBHOOK，自动 dry-run", file=sys.stderr)
         return send("", content, True)
-    return send(webhook, content, args.dry_run)
+    return send(webhook, content, args.dry_run, args.endpoint)
 
 
 if __name__ == "__main__":

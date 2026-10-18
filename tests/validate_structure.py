@@ -48,7 +48,7 @@ def main():
         "tools/write_loop_bundle.py", "tools/validate_loop.py",
         "tools/cost_record.py", "tools/memory_retrieve.py",
         "tools/review_due.py", "tools/cost_monthly.py",
-        "tests/real_mode_smoke.py", "tests/negative_gates.py", "tests/ops_smoke.py", "templates/field-map.example.yaml",
+        "tests/real_mode_smoke.py", "tests/negative_gates.py", "tests/ops_smoke.py", "tests/wecom_transport_smoke.py", "templates/field-map.example.yaml",
         "team/loop/example-analysis.json",
         "team/roles/host.md",
         "team/roles/consulting-analyst.md",
