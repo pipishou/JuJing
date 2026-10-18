@@ -33,6 +33,7 @@ def main():
     ap.add_argument("--root", default="runs")
     ap.add_argument("--today", default=date.today().isoformat())
     ap.add_argument("--create-issue", action="store_true")
+    ap.add_argument("--out", default="", help="写本地回看清单 Markdown（本机计划任务用）")
     ap.add_argument("--repo", default="")
     args = ap.parse_args()
     today = date.fromisoformat(args.today)
@@ -70,11 +71,20 @@ def main():
     lines += ["", "回填：`closure.json` 的 actual_outcome/metric_result/verdict/lessons/action；verdict∈hit/miss/partial。"]
     body = "\n".join(lines)
     print(body)
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(body + "\n", encoding="utf-8")
+        print(f"[OK] local review list: {out}")
     if args.create_issue:
         cmd = ["gh", "issue", "create", "--title", f"T+7 回看到期（{len(due)} 条）", "--body", body]
         if args.repo:
             cmd += ["--repo", args.repo]
-        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            print("[ERROR] 本机未安装 gh；请用 --out 生成本地回看清单，或安装 gh", file=sys.stderr)
+            return 2
         print(p.stdout.strip())
         if p.returncode != 0:
             print(p.stderr, file=sys.stderr)

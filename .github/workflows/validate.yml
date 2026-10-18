@@ -26,3 +26,7 @@ jobs:
         run: python bot-team/tests/ops_smoke.py
       - name: WeCom transport smoke (local server)
         run: python bot-team/tests/wecom_transport_smoke.py
+      - name: No-finding path smoke
+        run: python bot-team/tests/no_finding_smoke.py
+      - name: Value-level data contract smoke
+        run: python bot-team/tests/contract_values_smoke.py

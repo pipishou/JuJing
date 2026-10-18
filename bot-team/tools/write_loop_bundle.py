@@ -67,8 +67,11 @@ def main():
             fh.write(json.dumps(e, ensure_ascii=False) + "\n")
 
     rec = (report.get("recommendation") or [{}])[0]
+    no_finding = len(findings) == 0
     options = [f.get("factor") for f in findings if f.get("factor")] + ["不做"]
-    chosen = options[0] if options else "待定"
+    chosen = options[0] if options else "不做"
+    if no_finding:
+        chosen = "不做"
     status = "approved" if args.approver else "proposed"
     decision = {
         "id": did,
@@ -78,13 +81,14 @@ def main():
         "options": options,
         "chosen": chosen,
         "rejected": [{"option": o, "reason": "证据/收益排序落后"} for o in options[1:]],
-        "confidence": "MED",
+        "confidence": "LOW" if no_finding else "MED",
         "reversibility": rec.get("irreversibility", "reversible"),
         "approval": {"by": args.approver or "pending", "at": day, "mode": "explicit" if args.approver else "default"},
         "reversal_conditions": [report.get("decision_log_entry", {}).get("expected_result") or "T+7 未达预期"],
         "expected_outcome": report.get("decision_log_entry", {}).get("expected_result") or "待填",
         "review_due": (date.fromisoformat(day) + timedelta(days=args.review_days)).isoformat(),
         "status": status,
+        "no_finding": no_finding,
         "entity_id": (report.get("task_id") or "task"),
         "metric": report.get("goal") or "",
         "context": report.get("decision_log_entry", {}).get("context") or "",
