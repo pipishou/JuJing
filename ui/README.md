@@ -10,6 +10,10 @@ start D:\项目\bot\bot-team-dsh\ui\index.html
 start "D:\项目\bot\bot-team-dsh\ui\index.html?beat=3"
 ```
 
+## v0.7.1 签字内容哈希（2026-10-18）
+
+- 「签字确认」不再只是改 DOM：浏览器用 `crypto.subtle` 对交付卡内容做 SHA-256，显示前 16 位；与 `tools/sign_delivery.py` 的报告 SHA256 对齐（UI 是示例内容哈希，正式签字以工具输出 signature.json 为准）。
+
 ## v0.6 关系/目标/成本/企微（2026-10-18）
 
 - 班组卡加**目标进度条**（7.2%→5.4%，T+7 复查）；员工详情加**跨任务记忆** chips；交付卡加「企微推送」按钮（原型，实际工具 `tools/wecom_notify.py`）。
