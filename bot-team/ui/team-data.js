@@ -241,5 +241,60 @@ window.TEAM_DATA = {
       ],
       "followup_days": 7
     }
-  ]
+  ],
+  "context": {
+    "goal": {
+      "goal_id": "G-20261018-01",
+      "entity": "塑胶厂-B线",
+      "metric": "补料率",
+      "baseline": 7.2,
+      "target": 5.4,
+      "deadline": "2026-11-17",
+      "cadence": "weekly",
+      "owner": "产线负责人",
+      "status": "active",
+      "linked_decisions": [
+        "D-20261018-01"
+      ],
+      "progress": [
+        {
+          "date": "2026-10-18",
+          "value": 7.2,
+          "source": "T 窗口 7 日均值",
+          "note": "起点"
+        }
+      ],
+      "created_at": "2026-10-18",
+      "review_due": "2026-10-25"
+    },
+    "memories": {
+      "analyst": [
+        "补料率口径=补料次数/总次数；B 级数据偏差<10%；信息员换人期间上报偏差可能 5%~10%"
+      ],
+      "biz": [
+        "该厂优先动作顺序：先保养（¥500）后换模（¥800）；换模属不可逆动作，只呈请 securityGate"
+      ],
+      "host": [
+        "交付偏好：一页纸、先结论后证据、必须写 ROI 与下一步；不接受模型术语"
+      ]
+    },
+    "cost": {
+      "cost_id": "C-20261018-01",
+      "task_id": "T-20261019-B-refill-01",
+      "date": "2026-10-18",
+      "ai_cost_cny": 0.02,
+      "ai_tokens": 79000,
+      "human_hours_saved": 2.5,
+      "human_hourly_cny": 50,
+      "human_cost_saved_cny": 125,
+      "action_cost_cny": 500,
+      "avoided_loss_cny": 2000,
+      "net_benefit_cny": 1500,
+      "roi": 3.0,
+      "source": "estimate",
+      "verified": false,
+      "notes": "示例值；真实任务请用 billing/实际工时替换，verified 由记录员确认"
+    },
+    "source": "examples"
+  }
 };
