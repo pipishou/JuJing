@@ -30,3 +30,5 @@ jobs:
         run: python bot-team/tests/no_finding_smoke.py
       - name: Value-level data contract smoke
         run: python bot-team/tests/contract_values_smoke.py
+      - name: One-command run_task smoke
+        run: python bot-team/tests/run_task_smoke.py
