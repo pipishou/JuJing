@@ -1,0 +1,87 @@
+# 员工名册（v0.2）：声明式四件套的注册层。
+# 纪律：注册与内容分离——本文件只写"谁在册"；人格在 roles/*.md，技能在 skills/，样例在 sample/。
+# 状态语义见 shelf.yaml。
+
+version: "0.2.0"
+team_id: manufacturing-ops-team-dsh
+
+categories:
+  - key: deliver
+    name: 交付岗
+  - key: quality
+    name: 质量岗
+  - key: resident
+    name: 常驻职能
+
+employees:
+  - id: host
+    name: 工作助理
+    layer: L3
+    category: resident
+    state: resident
+    summary: 接单、出 DAG、预派发确认、收敛报告、写决策日志与交付卡
+    role_file: team/roles/host.md
+    skills: [team-orchestration, delivery-card]
+    sample: 交付卡 DL-20261018-001
+  - id: consulting-analyst
+    name: 咨询分析师
+    layer: L0
+    category: deliver
+    state: active
+    summary: 取数对账、T vs T-30 快照、11 因素扫描与空值率标注；只陈述事实
+    role_file: team/roles/consulting-analyst.md
+    skills: [data-snapshot, field-contract-audit]
+    sample: 11 因素 × (T, T-30, Δ, 可得性) 对比表
+  - id: ai-attribution-expert
+    name: AI 归因专家
+    layer: L1
+    category: deliver
+    state: active
+    summary: 封闭世界内排除法六步；finding≤2，cannot_attribute 强制非空
+    role_file: team/roles/ai-attribution-expert.md
+    skills: [exclusion-six-steps, crp-guard]
+    sample: 主因 M-03（0.63）＋残差 12 条
+  - id: manufacturing-ops-expert
+    name: 制造业业务专家
+    layer: L2
+    category: deliver
+    state: active
+    summary: 方向一致性校验、ROI 三锚点算账、不可逆动作标记
+    role_file: team/roles/manufacturing-ops-expert.md
+    skills: [direction-check, roi-anchors]
+    sample: 保养 ¥500 < 换模 ¥800 + 停机 ¥1200
+  - id: compliance-reviewer
+    name: 合规质检
+    layer: cross
+    category: quality
+    state: resident
+    summary: 共享合规底稿（夸大词表/假紧迫/价钱口径/功效边界），班组交付前复核
+    role_file: team/roles/compliance-reviewer.md
+    skills: [compliance-check]
+    sample: 6+ 员工复用的合规底稿
+  - id: data-fetcher
+    name: 取数员
+    layer: craft
+    category: deliver
+    state: craft
+    summary: 只读拿真数据（不互动、不点赞、不评论），班组第一道工序
+    role_file: team/roles/data-fetcher.md
+    skills: [read-only-fetch]
+    sample: 数据合同审计：字段覆盖率与缺失项
+  - id: report-recorder
+    name: 记录员
+    layer: support
+    category: quality
+    state: resident
+    summary: 决策日志、交付卡归档、T+7 回看催办
+    role_file: team/roles/report-recorder.md
+    skills: [decision-log, followup]
+    sample: DL 条目与回看清单
+
+coming:
+  - id: content-operator
+    name: 内容运营
+    reason: 能力包（SKILL.md）尚未写，不上架（空壳员工=欺诈）
+  - id: cost-steward
+    name: 成本管家
+    reason: 依赖 usage 数据源未接，不上架（死按钮比没按钮伤害大）

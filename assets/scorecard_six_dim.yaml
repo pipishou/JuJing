@@ -1,0 +1,83 @@
+# 置信度六维评分表（等权冷启动）
+# 来源：模型 v1.3 §4 · PRD §4.5
+# 用途：AI 归因专家 finding.confidence 计算 + host 报告 scorecard 呈现
+
+version: "1.3"
+weighting: equal_cold_start
+weight_each: 16.67          # 六维等权，冷启动默认；决策日志≥50 条后触发数据驱动校准（P3 CSOLR）
+scale: 5                    # 每维 0-5 分
+dimensions:
+  - id: data_completeness
+    name: 数据完整性
+    question: 11 类因素里有几个 available？
+    example_evidence: "11因素中9个available"
+  - id: timeliness
+    name: 数据时效性
+    question: 数据延迟多久？T-1 以内满分，T-7 起显著扣分
+    example_evidence: "数据延迟 T-1"
+  - id: significance
+    name: 异常显著性
+    question: 异常幅度是否超基线 2σ？
+    example_evidence: "Δ+2.1pp 超 2σ"
+  - id: exclusivity
+    name: 因素互斥性
+    question: 候选因素之间是否完全互斥（不共因）？
+    example_evidence: "2候选因素未完全互斥"
+  - id: history
+    name: 历史一致性
+    question: 同因素历史上是否多次伴随同类异常？
+    example_evidence: "同模具历史3次超期均伴随补料率上行"
+  - id: human_ai_consistency
+    name: 人机一致性
+    question: 结论与现场人员直觉是否一致？不一致必须写明分歧点
+    example_evidence: "与车间主任直觉一致"
+confidence_formula: >-
+  confidence = Σ(每维得分/5 × 16.67%)，保留两位小数；
+  任一维 missing 时该维计 0 分并在 evidence 中声明
+
+# ---- v1.4：与《AI智能经营模型 v1.3》§4 评分卡对齐（2026-10-18）----
+total_score: 100
+score_per_dimension_max: 16.67
+scoring_note: >-
+  LLM 输出 0-5 分/维，换算 16.67×得分/5；系统建议输出前必须换算成 100 分制并检查硬护栏。
+guardrails:
+  - id: human_ai_conflict
+    condition: human_ai_consistency == 0
+    action: force_manual_review
+    note: 信息员反馈与 AI 归因矛盾
+  - id: too_many_hypotheses
+    condition: exclusivity <= 10
+    action: force_manual_review
+    note: ≥3 个竞争假设
+  - id: data_gap
+    condition: data_completeness <= 15
+    action: force_manual_review
+    note: ≥3 个关键字段缺失
+thresholds:
+  - min_score: 80
+    label: 系统建议
+    action: output
+  - min_score: 60
+    max_score: 79
+    label: 建议人工复核
+    action: output_with_flag
+  - min_score: 40
+    max_score: 59
+    label: 需人工判断
+    action: reference_only
+  - max_score: 39
+    label: 待人工排查
+    action: no_output
+calibration:
+  cold_start:
+    rule: 六维等权 16.67 分，所有输出标注"冷启动模式"
+    target_records: 30
+  phase1:
+    trigger_records: 50
+    method: ordinal_logistic_regression
+    note: 因变量=人工标注归因正确性(0/1/2)；校准权重须评审会签字
+  phase2:
+    every_records: 30
+    stable_when_weight_change_lt: 0.05
+    final_frequency: quarterly
+

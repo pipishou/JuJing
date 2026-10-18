@@ -1,0 +1,28 @@
+# 决策日志 schema（四分类 + 聚鲸 WAL 行锚点）
+# 来源：模型 v1.3 §4 + 聚鲸 WAL · PRD §7（R3 修订：P1 校验器复用同一 schema，日志不做两套格式）
+# 写入方：host（s5 收敛时追加一条到 decision_log/）
+# P0：prompt 纪律 + 人工抽查；P1：机检校验器按本 schema 解析报警
+
+version: "1.3"
+entry_fields:
+  # —— 决策身份 ——
+  id: {type: string, format: "DL-YYYYMMDD-序号", example: DL-20261011-001}
+  actor: {type: string, example: manufacturing-ops-team, note: 决策主体（团队/角色）}
+  # —— 当时上下文 ——
+  context: {type: string, example: "B产线补料率 7日 5.1%→7.2%"}
+  data_refs: {type: list, example: ["demo/material_refill_T.json", "demo/material_refill_T30.json"]}
+  # —— 建议与行动 ——
+  advice: {type: string, example: "3号模具保养超期，建议周末保养"}
+  expected_result: {type: string, example: "T+7 补料率回落至 ≤5.5%"}
+  irreversibility: {type: enum, values: [reversible, irreversible], note: irreversible 条目必须含 securityGate 确认记录}
+  security_gate: {type: object, nullable: true, fields: {requested_at: string, confirmed_by: string}, note: 仅 irreversible 条目非空}
+  # —— 评估信息 ——
+  verification_plan: {type: string, example: "T+7 复查并回填实际值"}
+  actual_result: {type: string, nullable: true, note: 回填前为空}
+  # —— 聚鲸 WAL 行锚点（R3 修订新增，P1 校验器与经验库对账用）——
+  clause: {type: string, note: 对应聚鲸 params.json#clauses 已注册条款锚点（如「配置三问」），无则留空串}
+  trace: {type: string, note: 证据链引用（数据文件/上游 output id），逗号分隔}
+write_discipline:
+  - 每次归因（含降级）完成必写一条，追加不覆写
+  - expected_result 必须可验证（有数值、有时限），写不了可验证预期的建议不发
+  - P0 人工抽查：每次演示后核对 decision_log/ 条数与运行次数一致（G0-6）

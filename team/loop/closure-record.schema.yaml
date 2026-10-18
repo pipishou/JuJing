@@ -1,0 +1,28 @@
+# 闭环记录 schema（v1.0）
+version: "1.0"
+required: [id, decision_id, due, actual_outcome, verdict, lessons, action]
+fields:
+  id: {type: string, format: "C-YYYYMMDD-序号"}
+  decision_id: {type: string, format: "D-YYYYMMDD-序号"}
+  due: {type: string, format: date}
+  closed_at: {type: string, format: date}
+  actual_outcome: {type: string, note: 实际结果，不是预期}
+  metric_result:
+    type: object
+    fields:
+      metric: {type: string}
+      expected: {type: string}
+      actual: {type: string}
+      delta: {type: string}
+  evidence_ids: {type: array, items: {type: string}}
+  verdict: {type: string, enum: [hit, miss, partial, unverified]}
+  lessons: {type: array, items: {type: string}, min_items: 1}
+  action: {type: string, enum: [keep, adjust, retire], note: 棘轮动作}
+  # ---- 与《AI智能经营模型 v1.3》§4 评估信息对齐 ----
+  increment_value: {type: string, note: 增量价值（扣除行动与系统成本）}
+  attribution_method: {type: string, enum: [exclusion, counterfactual, rule_based]}
+  scorecard_snapshot: {type: object, note: 六维分数与总分快照}
+  failure_mode: {type: string, enum: [none, direction_wrong, system_failure, data_break, overfit]}
+  calibration_version: {type: string, note: 本次归因使用的评分卡版本}
+  wal_ref: {type: string, note: 对应 WAL 行/条目}
+  next_review: {type: string, format: date, note: adjust 时必填}

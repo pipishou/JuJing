@@ -1,0 +1,1239 @@
+{
+  "file": "<sanitized-session>",
+  "meta": {
+    "id": "<session>",
+    "cwd": "<workspace>",
+    "agentPreset": "standard",
+    "createdAt": 1792316609798
+  },
+  "counts": {
+    "session": 1,
+    "permission/preset": 3,
+    "sandbox/mode": 2,
+    "approval/policy": 2,
+    "agent/inbox/spliced": 31,
+    "turn/start": 10,
+    "step/start": 248,
+    "system/message": 1,
+    "user/message": 44,
+    "request/header": 3,
+    "request/context": 1,
+    "session/title": 2,
+    "session/title-llm-request": 1,
+    "session-log-deepseek/delivery-accepted": 249,
+    "assistant/message": 248,
+    "tool/call": 361,
+    "job/registered": 150,
+    "job/settled": 149,
+    "tool/result": 373,
+    "step/end": 247,
+    "approval/asked": 5,
+    "approval/decided": 5,
+    "command/run": 1,
+    "command/done": 1,
+    "subagent/catalog": 7,
+    "deliverables/presented": 4,
+    "workspace/changes": 9,
+    "turn/end": 9,
+    "session/end-seed": 1,
+    "todo/write": 4,
+    "tool-workflow/run-start": 1,
+    "tool-workflow/agent-start": 4,
+    "tool-workflow/agent-end": 4,
+    "tool-workflow/run-end": 1,
+    "compaction/prune": 13
+  },
+  "reasoningTurns": 209,
+  "beats": [
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "working_directory",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "skill",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "glob",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "glob",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "glob",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "glob",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "glob",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "glob",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "web_search",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "web_fetch",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "web_fetch",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "subagent",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "list_agents",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "present",
+      "args": ""
+    },
+    {
+      "kind": "speak",
+      "text": "（公开样例：内容已脱敏）"
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "web_search",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "web_fetch",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "job_output",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "job_kill",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "speak",
+      "text": "（公开样例：内容已脱敏）"
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "speak",
+      "text": "（公开样例：内容已脱敏）"
+    },
+    {
+      "kind": "speak",
+      "text": "（公开样例：内容已脱敏）"
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "web_search",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "todo_write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "subagent",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "subagent",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "grep",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "send_message",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read_image",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "todo_write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "speak",
+      "text": "（公开样例：内容已脱敏）"
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "speak",
+      "text": "（公开样例：内容已脱敏）"
+    },
+    {
+      "kind": "speak",
+      "text": "（公开样例：内容已脱敏）"
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "speak",
+      "text": "（公开样例：内容已脱敏）"
+    },
+    {
+      "kind": "speak",
+      "text": "（公开样例：内容已脱敏）"
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "speak",
+      "text": "（公开样例：内容已脱敏）"
+    },
+    {
+      "kind": "tool",
+      "tool": "workflow",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "job_output",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "edit",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "job_output",
+      "args": ""
+    },
+    {
+      "kind": "speak",
+      "text": "（公开样例：内容已脱敏）"
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "read",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "write",
+      "args": ""
+    },
+    {
+      "kind": "tool",
+      "tool": "pwsh",
+      "args": ""
+    }
+  ],
+  "beatsTotal": 379
+}

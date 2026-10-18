@@ -1,0 +1,30 @@
+# ROI 三锚点（行动建议算账基准）
+# 来源：模型 v1.3 §3 · PRD §4.2 s4 / §4.5
+# 执行者：业务专家（manufacturing-ops/manufacturing-ops-expert）
+
+version: "1.3"
+currency: CNY
+anchors:
+  - id: mold_replacement
+    name: 模具更换
+    unit_cost: 800          # ¥/次
+    applies_to: 模具寿命到头或不可修复损伤
+  - id: maintenance
+    name: 模具保养
+    unit_cost: 500          # ¥/次
+    applies_to: 常规保养（含超期补保养）
+  - id: downtime
+    name: 停机损失
+    unit_cost: 1200         # ¥/次
+    applies_to: 非计划停机，按次估损失
+decision_rule: >-
+  每条建议算三笔账：cost（锚点价）× 次数、avoided（避免的损失，锚点价 × 预估次数）、
+  anchor（一句话结论，如「保养 ¥500 < 停机 ¥1200/次 × 预估 2 次 = ¥2400，先做」）。
+  廉价动作优先：能保养解决的不换模，能换模解决的不停线。
+example:
+  action: 本周末安排 B 产线 3 号模具保养
+  roi:
+    cost: 保养 ¥500/次
+    avoided: 停机损失 ¥1200/次 × 预估 2 次
+    anchor: 保养 < 停机，先做
+  irreversibility: reversible

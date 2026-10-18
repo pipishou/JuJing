@@ -1,0 +1,160 @@
+{
+  "meta": {
+    "dataset": "material_refill_T_variantC_missing",
+    "purpose": "变体 C：关键字段（refill_rate/mold_status）整体缺失，触发降级规则 level=3（暂停并说明）",
+    "production_line": "B",
+    "schema_version": "1.3",
+    "null_rate_declared": 0.0,
+    "planted_signal": {
+      "root_cause": "3号模具(M-03)保养超期：上次保养2026-09-10，保养周期30天，T窗口内距上次保养25~31天（按30天周期实际超期0~1天）且无补保养，模具磨损推高单次补料失败率",
+      "confounder": "信息员2026-09-27(T-15)由王芳换为李强，上报偏差5%~10%（B级数据），无法用数据排除漏报→应进cannot_attribute"
+    },
+    "field_contract": [
+      "date",
+      "production_line",
+      "refill_rate",
+      "output_volume",
+      "mold_status",
+      "maintenance_records",
+      "shift_team",
+      "material_batch",
+      "ambient_env",
+      "mold_change_records",
+      "downtime_records",
+      "reporter"
+    ],
+    "demo_intent": "G0-4 三级降级探针",
+    "missing_fields": [
+      "refill_rate",
+      "mold_status"
+    ]
+  },
+  "records": [
+    {
+      "date": "2026-10-05",
+      "production_line": "B",
+      "refill_rate": null,
+      "output_volume": 1110,
+      "mold_status": null,
+      "maintenance_records": [],
+      "shift_team": "甲班",
+      "material_batch": "RM-2026043",
+      "ambient_env": {
+        "temp_c": 24.4,
+        "humidity_pct": 55.5
+      },
+      "mold_change_records": [],
+      "downtime_records": [],
+      "reporter": "李强"
+    },
+    {
+      "date": "2026-10-06",
+      "production_line": "B",
+      "refill_rate": null,
+      "output_volume": 987,
+      "mold_status": null,
+      "maintenance_records": [],
+      "shift_team": "乙班",
+      "material_batch": "RM-2026043",
+      "ambient_env": {
+        "temp_c": 24.5,
+        "humidity_pct": 65.2
+      },
+      "mold_change_records": [],
+      "downtime_records": [],
+      "reporter": "李强"
+    },
+    {
+      "date": "2026-10-07",
+      "production_line": "B",
+      "refill_rate": null,
+      "output_volume": 1104,
+      "mold_status": null,
+      "maintenance_records": [
+        {
+          "mold": "M-01",
+          "type": "例行保养",
+          "duration_h": 2.0,
+          "by": "设备科·李娜"
+        }
+      ],
+      "shift_team": "丙班",
+      "material_batch": "RM-2026043",
+      "ambient_env": {
+        "temp_c": 22.1,
+        "humidity_pct": 69.1
+      },
+      "mold_change_records": [],
+      "downtime_records": [],
+      "reporter": "李强"
+    },
+    {
+      "date": "2026-10-08",
+      "production_line": "B",
+      "refill_rate": null,
+      "output_volume": 1069,
+      "mold_status": null,
+      "maintenance_records": [],
+      "shift_team": "甲班",
+      "material_batch": "RM-2026043",
+      "ambient_env": {
+        "temp_c": 22.3,
+        "humidity_pct": 65.8
+      },
+      "mold_change_records": [],
+      "downtime_records": [],
+      "reporter": "李强"
+    },
+    {
+      "date": "2026-10-09",
+      "production_line": "B",
+      "refill_rate": null,
+      "output_volume": 1037,
+      "mold_status": null,
+      "maintenance_records": [],
+      "shift_team": "乙班",
+      "material_batch": "RM-2026043",
+      "ambient_env": {
+        "temp_c": 25.0,
+        "humidity_pct": 58.8
+      },
+      "mold_change_records": [],
+      "downtime_records": [],
+      "reporter": "李强"
+    },
+    {
+      "date": "2026-10-10",
+      "production_line": "B",
+      "refill_rate": null,
+      "output_volume": 1027,
+      "mold_status": null,
+      "maintenance_records": [],
+      "shift_team": "丙班",
+      "material_batch": "RM-2026043",
+      "ambient_env": {
+        "temp_c": 23.4,
+        "humidity_pct": 55.5
+      },
+      "mold_change_records": [],
+      "downtime_records": [],
+      "reporter": "李强"
+    },
+    {
+      "date": "2026-10-11",
+      "production_line": "B",
+      "refill_rate": null,
+      "output_volume": 1015,
+      "mold_status": null,
+      "maintenance_records": [],
+      "shift_team": "甲班",
+      "material_batch": "RM-2026043",
+      "ambient_env": {
+        "temp_c": 23.5,
+        "humidity_pct": 63.4
+      },
+      "mold_change_records": [],
+      "downtime_records": [],
+      "reporter": "李强"
+    }
+  ]
+}
