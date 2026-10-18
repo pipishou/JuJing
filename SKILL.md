@@ -91,5 +91,6 @@ python tests/validate_report.py runs/demo-report.json   # 报告 schema＋断言
 - v0.9：UI 数据绑定（goals/memory/cost 生成数据）、`tools/review_due.py`（T+7 回看→GitHub issue）、`tools/cost_monthly.py`（成本月报）、`wecom_notify.py --report`（交付卡自动填充）；`.github/workflows/review-due.yml`。
 - v0.9.2：`tests/wecom_transport_smoke.py` 用本地 HTTP server 验证企微 POST payload/成功/失败路径（不连真实企微、不需要 webhook）。
 - v0.10：无归因路径（finding=0 → decision.no_finding/chosen=不做，报告门+loop 门允许）；值级合同（日期重复/连续、数值范围）；`review_due --out` 本机清单；`finalize_delivery.py` 签字后 decision=approved（校验 hash）。
+- v0.11：`run_task.py` 一键收口（ingest→合同→real 报告→四卡→签字→approved）；`install_review_task.ps1` 注册本机每周回看任务。
 
 

@@ -1,6 +1,6 @@
 # 聚鲸 Bot 团队（DSH 版）· 可迁移结构包
 
-> 状态：v0.10.0，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.7：真实数据入口/真实报告门/评分卡/签字；v0.8：四段闭环 bundle；v0.9：UI 数据绑定 + 回看/月报；v0.10：无归因路径/值级合同/本机回看/签字收口）。
+> 状态：v0.11.0，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.7：真实数据入口/真实报告门/评分卡/签字；v0.8：四段闭环 bundle；v0.9：UI 数据绑定 + 回看/月报；v0.10：无归因/值级合同/本机回看/签字收口；v0.11：一键收口）。
 > 用途：把「制造业经营归因四角色团队」做成**结构可跑、可测、可迁移**的包；明天带到工作电脑继续推进。
 
 ## 它是什么
@@ -58,6 +58,10 @@ python tests/wecom_transport_smoke.py
 python tests/no_finding_smoke.py
 python tests/contract_values_smoke.py
 python tools/finalize_delivery.py --report runs/task-B/report.json --loop-dir runs/task-B/loop --signature runs/task-B/report.signature.json
+# 16. 一键收口（ingest→合同→real 报告→四卡→签字→approved）
+python tools/run_task.py --csv task.csv --line B --t-start 2026-10-05 --t-end 2026-10-11 --base-start 2026-09-05 --base-end 2026-10-04 --field-map templates/field-map.example.yaml --outdir runs/task-B --workflow-result runs/task-B/workflow-result.json --analysis-json team/loop/example-analysis.json --goal-json team/goals/example-goal.json --cost-json team/cost/example-cost.json --expected "T+7 补料率 ≤5.40%" --signer "业务负责人"
+# 17. 本机 T+7 回看计划任务（每周一 09:00）
+powershell -ExecutionPolicy Bypass -File tools/install_review_task.ps1
 ```
 
 ## 快速开始（本机）
