@@ -1,0 +1,17 @@
+{
+  "goal_id": "G-20261018-01",
+  "entity": "塑胶厂-B线",
+  "metric": "补料率",
+  "baseline": 7.2,
+  "target": 5.4,
+  "deadline": "2026-11-17",
+  "cadence": "weekly",
+  "owner": "产线负责人",
+  "status": "active",
+  "linked_decisions": ["D-20261018-01"],
+  "progress": [
+    { "date": "2026-10-18", "value": 7.2, "source": "T 窗口 7 日均值", "note": "起点" }
+  ],
+  "created_at": "2026-10-18",
+  "review_due": "2026-10-25"
+}

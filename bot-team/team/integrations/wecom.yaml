@@ -1,0 +1,42 @@
+# 企微接入配置（v1.0）
+# 首选：企业内部群机器人 webhook（无回调、无公网服务器，5 分钟可通）
+version: "1.0"
+channel: wecom_group_robot
+status: p1_outbound_only
+endpoint: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send"
+webhook_env: WECOM_WEBHOOK
+rate_limit_per_min: 20
+msg_type: markdown
+events:
+  delivery_card:
+    trigger: 交付卡签字后
+    template: |
+      ## 交付卡 · {title}
+      > {finding}
+      - 不确定性：{cannot_attribute}
+      - ROI：{roi}
+      - 成本：AI ¥{ai_cost} · 人工节省 {human_hours}h
+      - 下一步：{next_step}
+      [查看交付卡]({link})
+  review_due:
+    trigger: T+7 回看到期（GitHub Actions / 本机计划任务）
+    template: |
+      ## 回看提醒 · {goal_or_task}
+      目标：{target}
+      实际：{actual}
+      请回填 verdict（hit/miss/partial）与教训。
+  cost_report:
+    trigger: 月度/周度
+    template: |
+      ## 成本与价值月报
+      AI 成本：¥{ai_cost}
+      人工节省：{human_hours}h
+      净收益：¥{net_benefit}
+security:
+  - webhook 只放环境变量/本机配置，不入仓库
+  - 日志只显示 key 后 4 位
+  - 客户敏感数据不发公开群；只发内部群
+  - 消息最小化：一条一个结论，不附原始数据
+inbound:
+  status: deferred
+  reason: 接收消息/任务需要企微自建应用回调 + 公网服务 + 加解密，P2 再做

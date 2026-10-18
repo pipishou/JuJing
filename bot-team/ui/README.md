@@ -10,6 +10,11 @@ start D:\项目\bot\bot-team-dsh\ui\index.html
 start "D:\项目\bot\bot-team-dsh\ui\index.html?beat=3"
 ```
 
+## v0.6 关系/目标/成本/企微（2026-10-18）
+
+- 班组卡加**目标进度条**（7.2%→5.4%，T+7 复查）；员工详情加**跨任务记忆** chips；交付卡加「企微推送」按钮（原型，实际工具 `tools/wecom_notify.py`）。
+- 记忆/目标/成本/企微的 schema 与规则见 `team/memory`、`team/goals`、`team/cost`、`team/integrations`。
+
 ## v0.3.1 接单向导 + 成本行（2026-10-18）
 
 - 顶栏「新建任务」：工厂/产线/指标/目标/T 窗口/基线/数据目录/负责人 → 生成 `task-*.json`（真实任务入口）。
