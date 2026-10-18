@@ -9,6 +9,19 @@ Two Agent-Skills-compatible skills: a self-evolving multi-role agent development
 | [jujing-agent-workflow](jujing-agent-workflow/) | v2.3.3 | 多角色 agent 开发工作流：立项→需求→开发→测试→部署→版本→排障→反馈运营，内核为 AI＋数据飞轮自优化（WAL／棘轮／探针） | 聚鲸、工作流、立项、质量门、三绿、G2.5、飞轮、经验库 |
 | [jujing-junshi](jujing-junshi/) | v0.3 | 念头到产品的思维决策层：取证检索→选项地图→权衡推荐→人拍板→决策落账 | 军师、帮我想想、选型、要不要做、方案对比、复盘 |
 
+## 产品：bot-team（制造业 AI 经营班组）
+
+`bot-team/` 是「AI 员工事务所」产品包：4+ 员工、4 套班组、可签字交付卡、像素舞台、DSH 会话 tape 回放，以及检索→分析→决策→闭环四段卡。
+
+- 快速看：[bot-team/README.md](bot-team/README.md) ｜ UI 原型：[bot-team/ui/index.html](bot-team/ui/index.html)
+- 方法论对齐：[docs/METHODOLOGY_INTEGRATION_2026-10-18_zh.md](docs/METHODOLOGY_INTEGRATION_2026-10-18_zh.md)
+- 四段闭环：[docs/FOUR_LOOP_UPGRADE_2026-10-18_zh.md](docs/FOUR_LOOP_UPGRADE_2026-10-18_zh.md)
+- 真实任务手册：[docs/REAL_TASK_PLAYBOOK_2026-10-19_zh.md](docs/REAL_TASK_PLAYBOOK_2026-10-19_zh.md)
+- 验收：`python bot-team/tests/validate_structure.py`（CI 每次 push 自动跑）
+
+> 公开仓库只放代码/模板/脱敏 demo；真实工厂数据、个人账本、方法论原文不入库。
+
+
 ## 安装 / Install
 
 兼容所有支持 Agent Skills 协议的 runtime（Claude Code、Trae、WorkBuddy/CodeBuddy、Codex、Cursor 等）。

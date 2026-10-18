@@ -1,0 +1,23 @@
+# secrets
+.env
+.env.*
+.credentials*
+*.key
+*.pem
+# personal / project memory
+.junshi/
+skills/*/data/
+bot-team/.junshi/
+# real data / runtime
+runs/task-*/
+*.zst
+*.jsonl.zstd
+dist/
+# caches
+__pycache__/
+*.pyc
+node_modules/
+.venv/
+# OS
+Thumbs.db
+.DS_Store

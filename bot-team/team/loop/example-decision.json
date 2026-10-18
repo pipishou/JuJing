@@ -1,0 +1,149 @@
+{
+  "evidence": [
+    {
+      "id": "E-20261018-01",
+      "query": "Muse agent interaction design goals activity approval artifacts",
+      "source": {
+        "url": "https://www.uisdc.com/muse-ai-hype",
+        "title": "上线两周登顶榜首！拆解 Meta Muse 的 Agent 交互设计",
+        "publisher": "优设",
+        "published_at": "2026-09-30"
+      },
+      "quote": "Goals：可追踪的长期目标……Activity：让后台执行变得可见……Approval：对不可逆操作使用确定性界面……Artifacts：让结果摆脱长长的聊天文本",
+      "score": 2.03,
+      "grade": "B",
+      "freshness_days": 30,
+      "retrieved_at": "2026-10-18",
+      "stance": "supports",
+      "used_for": ["A-20261018-01", "D-20261018-01"]
+    },
+    {
+      "id": "E-20261018-02",
+      "query": "GrokBot seat price deployment cost",
+      "source": {
+        "url": "https://forkast.news/grokbots-price-tag-is-public-the-deployment-bill-behind-it-is-not/",
+        "title": "GrokBot's Price Tag Is Public. The Deployment Bill Behind It Is Not.",
+        "publisher": "Forkast",
+        "published_at": "2026-10-14"
+      },
+      "quote": "A seat license is one line. Implementation, licensing at scale, operations overhead, and the long-term lifecycle of the system are the rest, and vendors almost never publish them.",
+      "score": 2.02,
+      "grade": "B",
+      "freshness_days": 30,
+      "retrieved_at": "2026-10-18",
+      "stance": "context",
+      "used_for": ["A-20261018-01", "D-20261018-01"]
+    }
+  ],
+  "analysis": {
+    "id": "A-20261018-01",
+    "question": "bot-team 下一步优先补'目标/回看'还是'更多员工与班组'？",
+    "options": [
+      {
+        "id": "O1",
+        "one_liner": "补 Goals + T+7 回看闭环",
+        "cost": "低（1–2 天）",
+        "risk": "短期演示变化小",
+        "reversibility": "reversible",
+        "evidence_ids": ["E-20261018-01", "E-20261018-02"]
+      },
+      {
+        "id": "O2",
+        "one_liner": "继续加员工/班组（32 员工路线）",
+        "cost": "高（数周）",
+        "risk": "货架变长但留存不变；同质化",
+        "reversibility": "partially",
+        "evidence_ids": ["E-20261018-01"]
+      },
+      {
+        "id": "O3",
+        "one_liner": "不做，维持现状",
+        "cost": "零",
+        "risk": "真实任务后无回访，客户一次性",
+        "reversibility": "reversible",
+        "evidence_ids": []
+      }
+    ],
+    "criteria": [
+      { "name": "留存/复购", "weight": 0.4, "score": 5, "evidence_ids": ["E-20261018-01"] },
+      { "name": "信任/成本透明", "weight": 0.3, "score": 4, "evidence_ids": ["E-20261018-02"] },
+      { "name": "实现成本", "weight": 0.2, "score": 4, "evidence_ids": [] },
+      { "name": "视觉差异化", "weight": 0.1, "score": 1, "evidence_ids": [] }
+    ],
+    "weighted_scores": { "O1": 4.5, "O2": 2.8, "O3": 1.6 },
+    "sensitivity": "把'视觉差异化'权重提到 0.3，O1 仍领先；把'实现成本'权重提到 0.5，O1 与 O2 接近，但 O1 仍优。",
+    "judgement": { "kind": "blank", "confidence": "MED" },
+    "assumptions": [
+      "明天真实任务能跑通，客户愿意看第二次",
+      "T+7 回看不需要外部定时服务（本机清单即可）"
+    ],
+    "disconfirming": [
+      "如果客户明确说'只要一次报告'，Goals/回看优先级下降",
+      "如果明天数据合同不过，先修数据而不是加功能"
+    ],
+    "premortem": [
+      "回看提醒没人维护，变成死按钮",
+      "Goals 定义太抽象，客户不认",
+      "员工记忆写入隐私数据，引发合规问题"
+    ],
+    "recommendation": "选 O1：先补 Goals + T+7 回看（低成本、直接补'回来的理由'），O2 推迟到有 3 个真实客户后。",
+    "decision_id": "D-20261018-01"
+  },
+  "decision": {
+    "id": "D-20261018-01",
+    "question": "bot-team 下一步优先补'目标/回看'还是'更多员工与班组'？",
+    "analysis_id": "A-20261018-01",
+    "evidence_ids": ["E-20261018-01", "E-20261018-02"],
+    "options": ["O1", "O2", "O3"],
+    "chosen": "O1",
+    "rejected": [
+      { "option": "O2", "reason": "成本高、与留存无直接因果；先验证客户是否回来" },
+      { "option": "O3", "reason": "真实任务后无回访，等于一次性交付" }
+    ],
+    "confidence": "MED",
+    "reversibility": "reversible",
+    "approval": { "by": "用户", "at": "2026-10-18T21:00:00+08:00", "mode": "explicit" },
+    "reversal_conditions": [
+      "明天真实任务未能签字 → 先修数据/交付，Goals 延后",
+      "客户明确表示只要一次性报告 → 回看改为可选"
+    ],
+    "expected_outcome": "真实任务交付后 7 天内有 1 次自动回看，且客户愿意看回看结论",
+    "review_due": "2026-10-25",
+    "status": "approved",
+    "entity_id": "bot-team/产品路线",
+    "metric": "T+7 回看完成率",
+    "context": {
+      "current_value": "0 次回看",
+      "trend": "尚未开始",
+      "note": "示例：真实任务时填产线/模具/指标"
+    },
+    "recommendation": "补 Goals + T+7 回看；先不加员工/班组",
+    "actual_action": "已排入 W1 任务（示例）",
+    "override_reason": "",
+    "attribution_method": "exclusion",
+    "outcome_window": "7d",
+    "action_cost": { "cny": 0, "items": ["内部工时"] },
+    "increment_value": "待回填",
+    "calibration_version": "冷启动-等权16.67",
+    "cost_cny": 0.01,
+    "notes": "本示例用于展示四段卡；实际决策以项目 ledger 为准。"
+  },
+  "closure": {
+    "id": "C-20261025-01",
+    "decision_id": "D-20261018-01",
+    "due": "2026-10-25",
+    "closed_at": "2026-10-25",
+    "actual_outcome": "待真实任务后回填",
+    "metric_result": { "metric": "T+7 回看完成率", "expected": "1 次", "actual": "待填", "delta": "待填" },
+    "evidence_ids": [],
+    "verdict": "unverified",
+    "lessons": ["待回填"],
+    "action": "keep",
+    "increment_value": "待回填",
+    "attribution_method": "exclusion",
+    "scorecard_snapshot": { "total": null, "dimensions": {} },
+    "failure_mode": "none",
+    "calibration_version": "冷启动-等权16.67",
+    "wal_ref": "WAL#pending"
+  }
+}
