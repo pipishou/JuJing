@@ -1,0 +1,34 @@
+name: traffic-wal
+on:
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scrape traffic API into metrics/wal.jsonl
+        env:
+          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+        run: |
+          mkdir -p metrics
+          API="https://api.github.com/repos/${{ github.repository }}"
+          TS=$(date -u +%F)
+          curl -sf -H "Authorization: Bearer $TRAFFIC_TOKEN" "$API/traffic/views"  > /tmp/views.json
+          curl -sf -H "Authorization: Bearer $TRAFFIC_TOKEN" "$API/traffic/clones" > /tmp/clones.json
+          jq -c --arg ts "$TS" '{ts:$ts,type:"views", count:.count,uniques:.uniques}' /tmp/views.json  >> metrics/wal.jsonl
+          jq -c --arg ts "$TS" '{ts:$ts,type:"clones",count:.count,uniques:.uniques}' /tmp/clones.json >> metrics/wal.jsonl
+
+      - name: Commit metrics
+        run: |
+          git config user.name "traffic-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add metrics/wal.jsonl
+          git diff --cached --quiet || git commit -m "metrics: traffic $(date -u +%F)"
+          git push
