@@ -22,6 +22,7 @@ import os
 import sys
 import urllib.request
 from datetime import date
+from pathlib import Path
 
 ENDPOINT = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send"
 
@@ -34,13 +35,27 @@ def mask(webhook: str) -> str:
 
 def build(kind: str, args) -> str:
     if kind == "delivery":
+        title = args.title or "经营归因"
+        finding = args.finding
+        cannot = args.cannot
+        roi = args.roi
+        nxt = args.next
+        if getattr(args, "report", ""):
+            r = json.loads(Path(args.report).read_text(encoding="utf-8-sig"))
+            f0 = (r.get("finding") or [{}])[0]
+            rec = (r.get("recommendation") or [{}])[0]
+            title = args.title or r.get("goal") or "经营归因"
+            finding = finding or f"{f0.get('factor', '待填')}（置信 {f0.get('confidence', '-')}）"
+            cannot = cannot or f"{len(r.get('cannot_attribute') or [])} 条"
+            roi = roi or ((rec.get("roi") or {}).get("avoided") or "待填")
+            nxt = nxt or (r.get("decision_log_entry") or {}).get("expected_result") or "待填"
         return (
-            f"## 交付卡 · {args.title}\n"
-            f"> 主因：{args.finding or '待填'}\n"
-            f"- 不确定性：{args.cannot or '待填'}\n"
-            f"- ROI：{args.roi or '待填'}\n"
+            f"## 交付卡 · {title}\n"
+            f"> 主因：{finding or '待填'}\n"
+            f"- 不确定性：{cannot or '待填'}\n"
+            f"- ROI：{roi or '待填'}\n"
             f"- 成本：{args.cost or '待填'}\n"
-            f"- 下一步：{args.next or '待填'}\n"
+            f"- 下一步：{nxt or '待填'}\n"
             f"- 日期：{date.today().isoformat()}"
         )
     if kind == "review":
@@ -77,12 +92,13 @@ def main() -> int:
         pass
     p = argparse.ArgumentParser(description="企业微信群机器人推送（出站）")
     p.add_argument("--kind", choices=["delivery", "review", "cost"], default="delivery")
-    p.add_argument("--title", default="经营归因")
+    p.add_argument("--title", default="")
     p.add_argument("--content", default="")
     p.add_argument("--finding", default="")
     p.add_argument("--cannot", default="")
     p.add_argument("--roi", default="")
     p.add_argument("--cost", default="")
+    p.add_argument("--report", default="", help="从 report.json 自动填充交付卡字段")
     p.add_argument("--next", default="")
     p.add_argument("--webhook", default="")
     p.add_argument("--dry-run", action="store_true")

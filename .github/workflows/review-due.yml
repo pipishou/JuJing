@@ -1,0 +1,21 @@
+name: review-due
+
+on:
+  schedule:
+    - cron: '0 1 * * 1'   # 每周一 09:00 CST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Open review issue if due
+        run: python bot-team/tools/review_due.py --root bot-team/runs --create-issue --repo "${{ github.repository }}"

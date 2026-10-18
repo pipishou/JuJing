@@ -22,3 +22,5 @@ jobs:
         run: python bot-team/tests/real_mode_smoke.py
       - name: Negative gates (must reject demo/narrative/missing data)
         run: python bot-team/tests/negative_gates.py
+      - name: Ops smoke (review/cost/wecom dry-run)
+        run: python bot-team/tests/ops_smoke.py
