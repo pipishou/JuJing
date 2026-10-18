@@ -86,5 +86,6 @@ python tests/validate_report.py runs/demo-report.json   # 报告 schema＋断言
 - v0.5：与方法论《AI智能经营模型 v1.3》对齐——`assets/scorecard_six_dim.yaml` 100 分制/硬护栏/阈值/CSOLR；新增 `assets/perception_rules.yaml`（L0 检测+三级降级+失败回滚）、`assets/decision_contract_refill.yaml`；四卡补齐决策日志字段。
 - v0.6：关系/记忆（`team/memory/`）、Goals（`team/goals/`）、成本透明（`team/cost/`）、企微出站（`team/integrations/wecom.yaml`＋`tools/wecom_notify.py`）；UI 加目标进度/记忆/企微推送。
 - v0.7：真实数据入口（`tools/ingest_task_data.py`/`check_data_contract.py`）、真实报告门（`assemble_report --real`/`validate_report --require-real`）、评分卡计算（`score_scorecard.py`）、签字持久化（`sign_delivery.py`，拒绝 demo 签字）；`templates/field-map.example.yaml` + `tests/real_mode_smoke.py` 用合成 11 列数据跑通全链。
+- v0.8：四段闭环 bundle 自动写入（`assemble_report --records-dir` → `tools/write_loop_bundle.py` 写 evidence/decision/closure，analysis/goal/cost 由入参拷贝）+ `tools/validate_loop.py --require-complete` 门。
 
 

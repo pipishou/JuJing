@@ -83,8 +83,13 @@ def main():
     run("assemble-real", [PY, "orchestration/assemble_report.py", str(result_path), str(report),
                           "--real", "--task-id", "T-SMOKE-B", "--context", "B线补料率合成数据",
                           "--data-refs", f"{outdir}/material_refill_T.json,{outdir}/material_refill_T30.json",
-                          "--expected", "T+7 ≤5.40%"])
+                          "--expected", "T+7 ≤5.40%",
+                          "--records-dir", str(TMP / "loop"),
+                          "--analysis-json", "team/loop/example-analysis.json",
+                          "--goal-json", "team/goals/example-goal.json",
+                          "--cost-json", "team/cost/example-cost.json"])
     run("validate-real", [PY, "tests/validate_report.py", str(report), "--require-real"])
+    run("validate-loop", [PY, "tools/validate_loop.py", "--task-dir", str(TMP / "loop"), "--require-complete"])
     sig = TMP / "signature.json"
     run("sign", [PY, "tools/sign_delivery.py", str(report), "--signer", "smoke-test", "--out", str(sig)])
     run("verify", [PY, "tools/sign_delivery.py", "--verify", str(sig), "--report", str(report)])

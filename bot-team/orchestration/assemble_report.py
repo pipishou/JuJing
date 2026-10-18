@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """host 收口：把 workflow 返回的 s1–s4 结果装配成报告（s5）。
 
@@ -18,9 +18,12 @@
   - 任一建议 irreversible → security_gate 待确认（不自动确认）。
 """
 import json
+import subprocess
 import sys
 from datetime import date
+from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
 SIX = ["data_completeness", "timeliness", "significance", "exclusivity", "history", "human_ai_consistency"]
 
 
@@ -45,6 +48,11 @@ def main():
     data_refs = get_flag(args, "--data-refs")
     expected = get_flag(args, "--expected")
     goal = get_flag(args, "--goal")
+    records_dir = get_flag(args, "--records-dir")
+    analysis_json = get_flag(args, "--analysis-json")
+    goal_json = get_flag(args, "--goal-json")
+    cost_json = get_flag(args, "--cost-json")
+    approver = get_flag(args, "--approver")
     day = get_flag(args, "--date") or date.today().isoformat()
 
     if real:
@@ -116,6 +124,17 @@ def main():
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
     print(f"assembled: {out_path} (real={real}, is_demo={report['is_demo']}, finding={len(finding)}, cannot_attribute={len(ca)}, rec={len(rec)})")
+
+    if records_dir:
+        cmd = [sys.executable, str(ROOT / "tools/write_loop_bundle.py"), "--report", out_path, "--outdir", records_dir]
+        for flag, val in (("--analysis", analysis_json), ("--goal", goal_json), ("--cost", cost_json), ("--approver", approver)):
+            if val:
+                cmd += [flag, val]
+        p = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace")
+        print(p.stdout.strip())
+        if p.returncode != 0:
+            print(p.stderr, file=sys.stderr)
+            return 1
     return 0
 
 

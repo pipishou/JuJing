@@ -1,0 +1,48 @@
+{
+  "id": "A-20261018-01",
+  "question": "补料率异常的主因与行动优先级",
+  "options": [
+    {
+      "id": "O1",
+      "one_liner": "补保养 M-03 + 复测 7 日",
+      "cost": "¥500",
+      "risk": "若磨损已到寿命末段，保养无效需换模",
+      "reversibility": "reversible",
+      "evidence_ids": ["E-20261018-01"]
+    },
+    {
+      "id": "O2",
+      "one_liner": "直接更换 M-03",
+      "cost": "¥800 + 停机 ¥1200",
+      "risk": "过早换模，浪费模具寿命",
+      "reversibility": "irreversible",
+      "evidence_ids": ["E-20261018-01"]
+    },
+    {
+      "id": "O3",
+      "one_liner": "不行动，继续观察",
+      "cost": "0",
+      "risk": "补料率可能继续上升",
+      "reversibility": "reversible",
+      "evidence_ids": []
+    }
+  ],
+  "criteria": [
+    { "name": "净收益", "weight": 0.4, "score": 5, "evidence_ids": ["E-20261018-01"] },
+    { "name": "可逆性", "weight": 0.3, "score": 4, "evidence_ids": [] },
+    { "name": "实施成本", "weight": 0.2, "score": 4, "evidence_ids": [] },
+    { "name": "证据充分度", "weight": 0.1, "score": 3, "evidence_ids": ["E-20261018-01"] }
+  ],
+  "weighted_scores": { "O1": 4.5, "O2": 3.1, "O3": 1.8 },
+  "sensitivity": "把'证据充分度'权重提到 0.3，O1 仍领先；把'实施成本'提到 0.4，O1 与 O2 接近，O1 仍优。",
+  "judgement": { "kind": "unknown", "confidence": "MED" },
+  "assumptions": ["T+7 内补料率可观测", "保养后需 1~2 天恢复"],
+  "disconfirming": ["若 M-03 已到寿命末段，保养可能无效"],
+  "premortem": ["保养后未复测，结论不可验", "信息员换人导致上报偏差被误判", "换模审批链过长错过窗口"],
+  "recommendation": "先补保养（可逆、¥500），T+7 复测；未回落再评估换模。",
+  "decision_id": "D-20261018-001",
+  "attribution_method": "exclusion",
+  "degradation_level": "normal",
+  "decision_contract": "assets/decision_contract_refill.yaml",
+  "scorecard": { "total": null, "note": "由 tools/score_scorecard.py 计算后回填" }
+}
