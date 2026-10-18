@@ -1,0 +1,235 @@
+{
+  "_说明": "聚鲸工作流参数唯一事实源（合并原 budget/probe-config/wal-config 三件）。改参数＝改本文件；代码不内置任何数值与清单，文档只引用键名不复制数值。缺任一必填键即报错——不设兜底默认值（兜底＝隐藏的硬编码，且会把「缺配置」静默降级成假绿）。",
+  "budget": {
+    "_说明": "加载预算（2026-09-27 铁律修订：不设硬上限·零硬编码）。本节全部数值＝**软目标观测线**：target_kb＝参考目标、limit_kb＝观测警戒线、session.limit_kb＝会话观测线——超线由 size 只提示不阻塞，禁止作为机检退出码、验收否决项或跨轮追压字数的债（缘起＝P1 两轮验收陷入压文件死循环，见 evolution.md#18）。成本意识靠路由按需加载＋减法纪律，不靠字数门。size 机检读本节；缺键即报。",
+    "unit": "KB",
+    "scan_roots": ["references", "forms", "assets", "knowledge", "mechanisms", "preferences"],
+    "scan_files": ["SKILL.md"],
+    "default": { "limit_kb": 9, "target_kb": 6, "layer": "L2" },
+    "by_glob": {
+      "SKILL.md": { "limit_kb": 9, "target_kb": 6, "layer": "L0" },
+      "forms/*.md": { "limit_kb": 4, "target_kb": null, "layer": "L2.5" },
+      "assets/*.md": { "limit_kb": 9, "target_kb": null, "layer": "素材" },
+      "mechanisms/*.md": { "limit_kb": 5, "target_kb": null, "layer": "L2" },
+      "references/*.md": { "limit_kb": 9, "target_kb": 6, "layer": "L2" },
+      "references/knowledge-base.md": { "limit_kb": 8, "target_kb": null, "layer": "L3" },
+      "references/stages/*.md": { "limit_kb": 3, "target_kb": null, "layer": "L1" },
+      "knowledge/INDEX.md": { "limit_kb": 8, "target_kb": null, "layer": "L3" },
+      "knowledge/entries/*.md": { "limit_kb": 2, "target_kb": null, "layer": "L3" },
+      "preferences/*.md": { "limit_kb": 2, "target_kb": null, "layer": "L3" }
+    },
+    "session": {
+      "limit_kb": 30,
+      "_口径": "python scripts/probe_usage.py size --session <相对路径,逗号分隔> 计算本次会话加载量"
+    },
+    "_匹配规则": "按本文件书写顺序匹配，后写者覆盖先写者（故精确键须写在对应通配之后）；未写的字段继承 default，要关掉目标判定须显式写 null。路径匹配用 fnmatch（`*` 跨 `/`），故 `references/*.md` 亦覆盖 `references/` 的子目录，新增子目录无需改 scan_roots。"
+  },
+  "probe": {
+    "_说明": "消费探针参数。样本条数、退役窗口、自检告警窗口、证据来源枚举都不内置。",
+    "sample_n": 3,
+    "retire_window": 3,
+    "self_stall_warn": 3,
+    "effect_sample_max": 3,
+    "evidence_sources": ["self", "witness", "machine"],
+    "independent_sources": ["witness", "machine"],
+    "cutoff_min_reason_len": 20
+  },
+  "debug": {
+    "_说明": "排障阶段判据（P2 外置，零硬编码示范）：诊断六步中「假设先行」的可证伪假设条数下限；上限按问题复杂度伸缩（实操口径溯源见生产Debug工作流 v1.0 §四）。",
+    "assumption_min": 3
+  },
+  "cost": {
+    "_说明": "成本观测线判据（v2.3 新增，pitfalls#10#20 复发修复）。软观测线（聚鲸铁律·不设硬上限）：超线只 warning 不拦截。trigger_freq_min_interval_sec＝agent 上线前 trigger 频率校验阈值（interval < 60s 拒绝启动）。具体网关侧实现归项目代码（gateway.py CostGuard 类），skill 只出判据。",
+    "hourly_soft_limit": 10.0,
+    "trigger_freq_min_interval_sec": 60,
+    "_pricing": "项目侧填写平台定价（¥/M input/output tokens），skill 不内置"
+  },
+  "wal": {
+    "_说明": "纠偏 WAL 参数：晋升阈值、枚举、每轮留痕下限（键名沿用旧称，语义见下——勿按字面「下限」读；锁定批·J1「敢于不沉淀」，2026-10-06 产品负责人授权）。text_soft_limit＝行文本软上限（超限不拒、打印警告并要求 --ref 外链详版——v2.2.0 D7#1：长文本让 list 不可扫读，写易读难）。per_round_min 语义：**无强制下限＝有效配置**——本轮确无可固化者即记「本轮无新增」空转证据（同样合规入档，非敷衍）；禁止为凑下限写无信息行：凑数行污染 promote_min 晋升候选与 digest 评审（密度>体量）。四情形判据（命中任一才须新增行）见 references/self-optimization.md 每轮协议第 1 步。**本键无数值语义消费**：`scripts/wal.py` 仅 `_req()` 校验键存在（删键即报错）、不读其数值（准确表述，consumers.wal 已如实标注）；判据消费者＝每轮协议第 1 步的 AI 读者与评审者（非机检）；**若把本键改为非 0，须同步改四情形判据与 self-optimization.md，否则即为虚设下限（两处同改防漂移）**。**晋升聚类键边界（2026-10-06 锁定批·甲 D-a/D-b）**：候选分组键＝(type, clause)，而 clause 是**大类锚点**——「同组」只表示共享上位公理，**不表示同类**：故 promote-check --digest 强制打印 cohesion_questions 三问、mark-promoted 强制 --cohesion <逐条回答>（长度下限＝cohesion_min_len）——判断仍留给人（公理 1），但判断须留痕可审。**修正链**用机器可读字段 chain（wal.py add --chain <父id,...>；文本内 `#N` 提及不算机检）：kb-lint ⑨ 校验悬空/倒指＝红，跨锚点链计数公示（复发换锚点时聚类键看不见，正是 D-a 事故：同根复发分属两个锚点 ⇒ 阈值永远数不到）。",
+    "promote_min": 3,
+    "cohesion_questions": [
+      "同一操作？——三条能否归约为同一个可执行动作（分组只共享上位公理 ≠ 同类）",
+      "同一判据？——改写一条判据即可覆盖三条的检查点，无需并列三条",
+      "可否合成一条动作？——不能则不许合并晋升：合并产出无单一动作＝口号（公理 1：缺机检项只记候选）"
+    ],
+    "cohesion_min_len": 20,
+    "per_round_min": 0,
+    "text_soft_limit": 500,
+    "types": ["correction", "lesson", "pattern"],
+    "sources": ["user", "ai"]
+  },
+  "release_pool": {
+    "_说明": "待发版池判据（v2.2.0·D8 三层分离：机制件在 skill 一份，实例池在产品每仓一份）。实例池＝产品仓库常驻 PENDING_RELEASES.md（模板 template 键；routing §六 第 2 步随建档初始化）；scripts/probe_usage.py pool-check --pool <路径> 机检实例池。触发三选一（采纳态≥adopt_trigger_n / blocker_definition 命中 / 距上批≥stale_days）即打包走扩展四问＋棘轮发版。statuses＝实例池状态列唯一值域；observe_window_rounds＝观察态轮窗（超窗未复发由人标 expired，脚本只提示滞留）。",
+    "template": "assets/pending-releases.template.md",
+    "instance_filename": "PENDING_RELEASES.md",
+    "statuses": ["proposed", "adopted", "observing", "rejected", "shipped", "expired"],
+    "adopt_trigger_n": 3,
+    "stale_days": 30,
+    "observe_window_rounds": 1,
+    "blocker_definition": "数据丢失/安全/机检失效——命中即不等攒批，单条立即发版"
+  },
+  "rubric": {
+    "_说明": "评分维度与量程。rubric_score 读本节；维度清单改动＝判据改动，须走棘轮。anchors＝BARS 行为锚（三档 9/7/5，裁判按锚打分收窄跨实例方差）；ratchet_floor＝棘轮绝对地板（均分低于地板无论配对差值多大不升 minor，防「双低」——裁判整体偏松时锚与当前批同涨、差值失真；地板依据：8 维制下 7 分档≈合格但有明显短板，低于 7＝未过合格线）。棘轮配对语义（优先）：独立裁判同一实例先评校准锚 data/calibration/anchor-<版本>.md 得 X、再评改动后同构样本得 Y，Y>X 且 ≥floor → ALLOWED minor，否则 LOCKED patch；无 anchor_avg 的行退回历史最高绝对分比较（旧行为，向后兼容）。锚分入档（#36）：score --anchor-s 逐维锚分（校验 dims 匹配与量程、均分由脚本复算入 anchor_dims/anchor_avg，首选）；--anchor-avg 手传均分仍兼容（单点自报，弱证据）；任一锚分必须绑定 data/calibration/<anchor_ver>.md 已冻结锚文件（存在性校验，缺失即拒绝）。",
+    "dims": ["结构完整", "边界覆盖", "指令具体性", "实证密度", "可执行性", "防自欺", "可演化性", "负边界"],
+    "score_min": 0,
+    "score_max": 10,
+    "ratchet_floor": 7.0,
+    "anchors": {
+      "结构完整": { "9": "外壳骨架全且零冗余：每节单一职责、无内容重叠", "7": "骨架全但有可合并或职责交叉的节", "5": "有缺件或节间职责重叠明显" },
+      "边界覆盖": { "9": "每个新件正边界＋负边界＋与邻件分工三条齐", "7": "有正负边界但邻件分工有含糊处", "5": "只有「做什么」，「不做什么」缺失" },
+      "指令具体性": { "9": "动作可逐步执行、几乎无自由裁量空间", "7": "有动作步骤但留关键裁量空间", "5": "原则性表述、无可执行动作" },
+      "实证密度": { "9": "每个机制有隔离负测试或机检断言覆盖", "7": "核心机制有机检，边缘机制走行为协议且诚实标注", "5": "机制全靠文档自觉、无机检面" },
+      "可执行性": { "9": "AI 冷启动按文档可复现全程", "7": "需人工补关键决策点", "5": "依赖未文档化的隐性知识" },
+      "防自欺": { "9": "无证据路径显式堵死（如「无消费证据」与有证据同权重留痕）", "7": "主路径有防自欺、旁路存在漏洞", "5": "存在可绕过留痕的路径" },
+      "可演化性": { "9": "退役条件键化＋消费者具名＋扩展四问留痕三件齐", "7": "有退役条件但未键化或消费者含糊", "5": "只进不出、无退役语义" },
+      "负边界": { "9": "明确声明「不做什么」＋「何时收手」", "7": "部分场景有负边界", "5": "无负边界声明" }
+    }
+  },
+  "team": {
+    "_说明": "编制与卡片的数量下限（下限也是判据，故外置）。编制分档同在此节：低于「全编制」的裁剪档见 scale_tiers；「全编制」的门槛见 full_scale_min_people（或出现多线并行）。档位人数与档名只在此处定义，文档只引用键名。assert_readable_seconds＝用户可见效果「一句话读得完」的可读秒数判据。",
+    "full_scale_min_people": 3,
+    "scale_tiers": [
+      { "id": "solo", "label": "最小内核档", "people": 1, "desc": "低于全编制门槛的最小可用配置：负责人独立推进＋AI 执行机" },
+      { "id": "pair", "label": "推荐起步档", "people": 2, "desc": "MVP 全程够用的推荐配置（whalemementor 实测，见 roles-and-gates.md）" }
+    ],
+    "assert_readable_seconds": 30,
+    "card_assert_min": 1,
+    "boundary_min_items": 3,
+    "wiring_min_consumers": 1
+  },
+  "governance": {
+    "_说明": "记忆/规则治理与台账参数：非对称淘汰权重、条款热度回流、停滞降级天数、决策回看天数。asym_hit_weight／asym_false_positive_weight＝条款热度加权项（正向：独立源真消费命中加分；负向：未记消费证据（consumed=false，含 --none 与其它无消费路径）＝空转扣分；**权重带符号**——空转权重取负值即扣分项，其绝对值大于命中权重＝罚重于奖，防噪音污染）；heat_top_n＝热度榜**条数上限**（按热度分降序取前 N，**含负分与零分条目**，非「只取正分」；零痕迹与扣分条款不受其截断、一律全量公示）。热度为观测口径：非门、不进任何退出码——退役仍走 probe.retire-check 五判据＋人工确认。",
+    "asym_hit_weight": 0.05,
+    "asym_false_positive_weight": -0.12,
+    "heat_top_n": 10,
+    "candidate_stale_days": 90,
+    "decision_review_days": 14
+  },
+  "followup": {
+    "_说明": "交付回看（行家来了反馈·建议一方案A；催生＝P0 批次交付后证据在盘却无定期回看触发，消费证据只能等抽样撞上）。statuses＝回执「待回看」字段状态值域（delivered 已交付→awaiting 到期待回看→reviewed 已回看并记消费证据）；default_days＝交付到回看的默认窗口天数。判据消费者＝stages/08 关键动作 7 与 self-optimization.md 每轮协议第 6 步（仅文档引用，无代码消费）。边界一：record --off-round／heat 管消费证据即时捕捉，本节只补「定期触发回看」纪律，不新增执行器。边界二：与决策台账回看日（governance.decision_review_days）分工——彼管单条决策的回看时点，本节管批次交付的消费证据回看。诚实边界：回执落盘位置随项目侧台账文档、本 skill 无统一扫描口径＝行为协议（无机检项，同 profile-template 先例 evolution#26），机检化待回执落盘标准化后按扩展四问评审。退役条件：连续 probe.retire_window 轮到期回看均零消费发现（回看动作如实留痕）→ 候选退役（走 evolution 登记表）。",
+    "default_days": 7,
+    "statuses": ["delivered", "awaiting", "reviewed"]
+  },
+  "kb": {
+    "_说明": "经验库晋升门：一条经验须被几个独立项目复现才升正文。",
+    "promote_min_projects": 2
+  },
+  "knowledge": {
+    "_说明": "经验库分层（P3，v1.4，设计定稿§六）：knowledge/INDEX.md（索引＝候选经验唯一清单）＋ knowledge/entries/（条目按需读）。本节＝kb-lint 五项机检判据；index_limit_kb＝索引软目标观测线（铁律：非门）；required_meta＝条目头部必备元数据字段（kb-lint 第③项逐字段核）。",
+    "index_dir": "knowledge",
+    "entries_dir": "knowledge/entries",
+    "index_limit_kb": 8,
+    "required_meta": ["标签", "形态", "锚点", "状态", "现落点", "溯源", "隐私"]
+  },
+  "loop": {
+    "_说明": "P4 双循环闭合判据（v2.0，设计定稿 §六·减负版：接入协议子项已由 M1 前移为 routing §七）。experience_loop＝双回流机制权威件（两环咬合协议＋④⑧出口判据挂载＋全循环复算＋姊妹 skill 边界声明）；backflow_hooks＝必须挂「双回流两件在位」出口判据的阶段分件（缺引用＝咬合断裂，kb-lint ⑨ 红）；profile_template＝新项目接入档案模板（routing §六 第 2 步落点）。内环四段留痕观测（写入→消费→评分→晋升/退役）由 kb-lint ⑨ 从 data/ 重放计数——观测非门，唯 promoted 行 ids 悬空＝红（留痕复算断裂）。零硬编码：改路径/挂载点＝改本节。",
+    "experience_loop": "mechanisms/experience-loop.md",
+    "backflow_hooks": ["references/stages/04-testing.md", "references/stages/08-operations.md"],
+    "profile_template": "assets/profile-template.md",
+    "profile_anchor_doc": "references/routing.md"
+  },
+  "memory": {
+    "_说明": "记忆系统参数（M1 轻量版，2026-09-28 拍板：不建独立 git 仓库，skill 内 json/md 即记忆区，分享 skill 文件夹＝共享记忆）。铁律重申（拍板4）：零硬编码——本节全部判据只存此处，文档只引键名；不设硬上限——记忆条数/大小一律观测非门，本节不设任何 max_* 键。weight_tiers＝L1–L5 使用方式判据与目录默认等级（分层理念源自参考文章 2026-08-27，判据文本以本键为唯一事实源）；ownership_criteria＝写入归类三条判据；endorsement＝佐证口径 v2 双轨（M1 仅立键，M2 接线 --actor）。",
+    "routing_table": "knowledge/README.md",
+    "privacy_default": "public",
+    "privacy_values": ["public", "internal"],
+    "status_values_extra": ["archived"],
+    "weight_tiers": {
+      "L1": { "label": "硬约束", "usage": "默认必须遵守；违反须向用户显式说明理由", "default_dirs": ["principles/behavioral-rules"] },
+      "L2": { "label": "判断框架", "usage": "任务相关时优先使用", "default_dirs": ["principles/decision-making", "principles/life-philosophy", "knowledge（方法可复用类条目）"] },
+      "L3": { "label": "偏好", "usage": "影响表达形式，不覆盖事实", "default_dirs": ["preferences"] },
+      "L4": { "label": "上下文", "usage": "使用前注意时效；高影响决策前向用户验证", "default_dirs": ["context"] },
+      "L5": { "label": "经验素材", "usage": "用于类比，不直接套用", "default_dirs": ["knowledge（经历复盘类条目）"] }
+    },
+    "ownership_criteria": [
+      "原则vs技能：价值判断→principles 层；操作方法→knowledge 层（skills 类）",
+      "经验vs技能：有具体日期的事件→knowledge 层（experiences 类）；可复用方法→knowledge 层（skills 类）",
+      "学习vs技能：外部输入（书/课/他人）→knowledge 层（learnings 类）；自己总结→knowledge 层（skills 类）",
+      "偏好vs原则（M3-lite）：协作/表达/沟通的形式偏好→preferences 层（L3，影响形式不覆盖事实）；价值判断与硬约束→principles 层（建层前按本判据暂存会话，不偷建 pending 层）"
+    ],
+    "personal_layers": {
+      "_说明": "M3-lite（2026-09-28，B 案：四层缩一层）个人层激活登记表＝唯一事实源。active＝已建层（目录必须在盘且每层至少一条真实条目，kb-lint ⑩ 机检）；pending＝候选未建层（目录不得偷建——「顺手就建」＝膨胀，⑩ 红；待真实痛点触发扩展四问后再移入 active）。context 层裁决口径：跨项目通用 context（工作环境/常驻工具链/协作时段）才进个人层；项目级当前状态一律留项目侧档案（profile-template 建档件），两层互不收编（防双源漂移）。条目真实性：须从真实会话提取并经产品负责人确认，AI 不代笔预填。",
+      "active": ["preferences"],
+      "pending": ["identity", "principles", "context"]
+    },
+    "actors": {
+      "_说明": "M2 多人共享 actor 准入登记表（唯一事实源）：键=actor_id、值=身份描述。留痕（record/wal add）带 --actor 时机检比对，未登记＝拒绝（防匿名留痕洗白成佐证）。登记＝合伙人接入第三步（routing.md §七）；合并带入的他方留痕若含未登记 actor，kb-lint ⑤ 报红待人工准入或删除。M1 前的历史行无 actor 字段＝按弱佐证诚实标注，不洗白不改写。",
+      "kf41": "产品负责人（skill 初始所有者）"
+    },
+    "actor_policy": {
+      "_说明": "M2 --actor 纪律判据：required=true＝所有新增留痕必须带 --actor 且已登记（缺省/未登记均拒绝，无默认人——默认人会把匿名留痕洗白成他人佐证）。",
+      "required": true
+    },
+    "endorsement": {
+      "_说明": "佐证口径 v2（拍板4：双轨过渡；M2 已接线 --actor）。mode=dual_track：独立源真消费即解锁 retire 佐证，但同人/无 actor 历史行标注「弱佐证」提示；mode=cross_actor_only：仅同一锚点的有效消费行来自≥2 个已登记 actor 才解锁。切档＝改本键值，零代码返工。",
+      "mode": "dual_track",
+      "strong": "cross_actor",
+      "weak": "same_actor"
+    }
+  },
+  "drift": {
+    "_说明": "防数值漂移机检：① forbid＝文档不得复制的**判据值**字面量；forbid_regex＝同一意图的正则兜底（字面量挡得住照抄，挡不住半角/空格改写，故判据类数值一律再配一条正则）；② dead＝已废弃的路径/标识，出现即视为死引用。size 机检逐行扫，命中即非零退出。豁免：同行写 exempt_marker:理由，理由须≥exempt_min_reason_len 字，空/过短理由＝未豁免，且每条豁免在机检里逐行打印（豁免不是黑洞）。边界：案例证据（历史批次实测的代价/覆盖率/人数）属溯源，不算判据值，出现时用 exempt_marker 标理由即通过——判据值须引用键名，证据可带批次留存。",
+    "exempt_marker": "params-exempt",
+    "exempt_min_reason_len": 4,
+    "forbid": [
+      "≥3 次", "≥3 人", "≥3 条", "≥2 项目", "≥2 个独立项目", "≥1 条", "≥1 处",
+      "连续 2 轮", "连续 3 轮", "抽 3 条", "+0.05", "-0.12", "90 天", "+14d",
+      "≤30 KB", "≤4 KB", "≤5 KB",
+      "2 人＋AI", "2 人＋1 AI", "单人＋1 AI", "过滤 95%",
+      "2人+AI", "2人＋AI", "2 人+AI", "单人+AI", "过滤95%",
+      "30 秒", "30秒", "7 天", "7天"
+    ],
+    "forbid_regex": [
+      "\\d\\s*人\\s*[+＋]\\s*\\d*\\s*AI",
+      "[一二两三四五六七八九]\\s*人\\s*[+＋]\\s*[一二两三四五六七八九\\d]*\\s*AI",
+      "过滤\\s*9\\d\\s*%"
+    ],
+    "dead": [
+      "assets/budget.json", "assets/probe-config.json", "assets/wal-config.json", "CLAUSES"
+    ]
+  },
+  "wording": {
+    "_说明": "措辞绝对化观测（2026-10-06 锁定批·甲 ②-B；**观测非门**：常态恒 0 退出、不进任何机检码，与 heat 同构）。原提案＝把「绝对化措辞未列例外」做成机检门：实测（锁定批扫描面 37 件／absolute_words 15 词）命中 95 行次、其中 77 处未带例外，主体是**合法用法**（「永远红」＝陷阱描述、「一切判据值只存 params.json」＝铁律、「恒 ImagePullBackOff」＝状态描述、「唯一入口」＝正当限定）——判定面过宽 ⇒ 永远红 ⇒ 被绕过（陷阱 #19）；且「这句措辞是否失实」属**判断**（公理 1：是事实就机检，是判断才留给人）⇒ 降级为**只报不判**的观测清单：先给清单，由人改写或补例外，不设退出码。absolute_words＝绝对化断言词（**不含纪律词**：必须/禁止/一律/不得属规则用语，收窄判定面＝第一刀）；exception_markers＝同行出现任一即视为「已列例外」（只计数，可 --show-exc 展开）；scope=changed 口径＝--since <YYYY-MM-DD> 按**文件 mtime** 圈定「本次改动件」（**文件级粒度，非行级**，勿读成行级精确）；--files 可显式指定（相对 skill 根，含扫描面外文件，供负测试）；缺省＝全树只报。跳过范围：代码块内、exempt_marker 豁免行、Markdown 台账表行（行首 |＝历史登记/评分溯源，非对外判据表述）；跳过量按因分列打印（跳过不是黑洞）。",
+    "scope": "changed",
+    "absolute_words": ["恒", "永远", "绝不", "永不", "总是", "始终", "全部", "一切", "唯一", "零例外", "任何情况下", "无条件", "一概", "毫无例外"],
+    "exception_markers": ["例外", "常态", "除", "仅当", "个例", "之一", "绝大多数", "unless", "豁免"],
+    "scan_extra": ["scripts/*.py"]
+  },
+  "consumers": {
+    "_说明": "每节必须声明「谁读它」——写在代码里的才算机检消费；只被文档引用的节必须显式标注「仅文档引用（无代码消费）」，不得据此声称已机检。size 每次运行都校验本节覆盖全部配置节（漏声明即非零退出：无消费者的配置节＝无人读的死配置）。",
+    "budget": "scripts/probe_usage.py size（逐件/会话观测线提示——大小类不进退出码；四项反查非零退出：锚点／漂移死引用／参数键／消费者可落实）",
+    "probe": "scripts/probe_usage.py sample/record/retire-check/cutoff（sample_n·retire_window·self_stall_warn·evidence_sources·independent_sources·cutoff_min_reason_len）；effect_sample_max 仅文档引用",
+    "wal": "scripts/wal.py add/promote-check/mark-promoted（types·sources·promote_min；add 校验 --chain 父 id 存在性＝机器可读修正链，promote-check --digest 读 cohesion_questions 强制打印三问，mark-promoted 读 cohesion_min_len 校验 --cohesion 回答长度下限）；per_round_min 仅文档判据（wal.py 只校验键存在、不读其数值；语义＝无强制下限，空转证据合规；四情形判据见 self-optimization.md 每轮协议第 1 步）；text_soft_limit 由 wal.py add 超限警告消费",
+    "rubric": "scripts/rubric_score.py score/ratchet（dims·score_min·score_max·ratchet_floor）；anchors 文本由独立裁判按 BARS 锚打分消费（文档引用）；#36 起锚分入档有代码消费：score --anchor-s 校验逐维锚分（dims 匹配·量程·均分脚本复算）与锚文件存在性（data/calibration/<anchor_ver>.md 缺失即拒绝）",
+    "clauses": "scripts/probe_usage.py sample/retire-check + size 的锚点校对",
+    "drift": "scripts/probe_usage.py size（forbid/forbid_regex/dead 反查 + 豁免理由长度校验）；wording 观测复用其 exempt_marker 作为跳过口径",
+    "wording": "scripts/probe_usage.py wording（措辞绝对化观测：读 absolute_words·exception_markers·scope·scan_extra——**只报不判、常态恒 0 退出、不进任何机检码**；不作判定故无判定权）",
+    "team": "仅文档引用（无代码消费）：编制下限/分档（scale_tiers）/断言下限/边界下限/接线下限由人评审把关；`size` 只校验「文档引用的键存在」，不校验档位取值是否合适",
+    "governance": "scripts/probe_usage.py heat（锁定批·D2 正向回流：读 asym_hit_weight·asym_false_positive_weight·heat_top_n → 条款热度榜，观测非门）；candidate_stale_days·decision_review_days 仅文档引用（评审者按判据执行）",
+    "kb": "仅文档引用（无代码消费）：经验晋升门由归档协议人工执行",
+    "debug": "仅文档引用（无代码消费）：假设条数下限由 stages/07-debug 分件与评审者把关（下限也是判据，故外置）",
+    "knowledge": "scripts/probe_usage.py kb-lint（M1 五项基线：索引完整/条目全注册/元数据齐/锚点在池/消费可追溯，读 index_dir·entries_dir·required_meta·index_limit_kb；M2 起扩至十项，增项挂本表 #memory·#loop 声明）",
+    "loop": "scripts/probe_usage.py kb-lint ⑨（P4 双循环咬合：experience_loop 机制件在位＋backflow_hooks ④⑧出口判据挂双回流＋profile_template 被 routing §六 引用＋内环四段留痕计数与 promoted ids 复算完整性；D-a 增：chain 修正链悬空/倒指＝红、跨锚点链计数公示）",
+    "memory": "scripts/probe_usage.py kb-lint（M1 ⑥记忆区健康读 memory.routing_table；⑦目录纪律读 knowledge.entries_dir；⑧隐私值域读 memory.privacy_values·privacy_default·status_values_extra）＋ M2：kb-lint ⑤ v2 读 memory.endorsement.mode·actors（准入比对/跨人佐证），record 与 wal.add 的 --actor 准入校验读 memory.actors·actor_policy ＋ M3-lite：kb-lint ⑩ 个人层咬合读 memory.personal_layers（active 层目录在盘/条目元数据/锚点在池/INDEX 注册；pending 层偷建目录＝红）＋ weight_tiers·ownership_criteria 仅文档引用",
+    "release_pool": "scripts/probe_usage.py pool-check（statuses 值域·adopt_trigger_n·stale_days·observe_window_rounds·instance_filename·template 在盘校验）；blocker_definition 仅文档引用（人评裁决）",
+    "cost": "仅文档引用（无代码消费）：hourly_soft_limit·trigger_freq_min_interval_sec 由项目侧网关（如 gateway.py CostGuard 类）消费；skill 侧 params.json 只出判据值、不内置代码",
+    "followup": "仅文档引用（无代码消费）：default_days·statuses 由 references/stages/08-operations.md（关键动作 7 交付回看）与 references/self-optimization.md（每轮协议第 6 步呈现待回看清单）消费，人工执行；size 只校验「文档引用的键存在」"
+  },
+  "clauses": [
+    "G0用户前置对齐", "G1三绿纪律", "G1.5前端实测", "G2事实纪律", "G2.5双视角对抗",
+    "G3二次核查", "G4留痕关单", "Maker-Checker", "用户视角断言", "状态机硬约束",
+    "handoff五要素", "授权令牌", "升级协议", "决策台账", "U清单",
+    "纠偏WAL", "消费探针", "退役判据", "三条产品铁律", "M1最小内核",
+    "机检清单", "测试复利", "接线验证", "版本指纹", "发布四判据",
+    "成本四行检查单", "北极星切换", "成本台账", "主动汇报", "诚实降级",
+    "减法纪律", "棘轮", "公理2同源自审", "公理5绿测掩盖", "不设硬上限",
+    "路由即第一动作", "加载预算判据", "形态识别", "扩展四问", "能力归属",
+    "接入协议", "反膨胀门", "内核不可变", "上游变更矩阵", "数据不跨版本",
+    "一行路由声明", "透明度守恒", "亮卡",
+    "编号以远端为准", "留项目侧", "边界漂移", "可恢复性前置",
+    "假设可证伪", "反馈回路", "能力矩阵",
+    "上线四问", "配置三问", "判定面收窄", "减法分工", "红分型",
+    "伙伴接入", "待发版池",
+    "trigger频率校验", "agent runtime清理", "编码纪律载体"
+  ]
+}
