@@ -1,6 +1,6 @@
 # 聚鲸 Bot 团队（DSH 版）· 可迁移结构包
 
-> 状态：v0.8.0，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.2–v0.6 见下；v0.7：真实数据入口/真实报告门/评分卡/签字；v0.8：四段闭环 bundle 自动写入）。
+> 状态：v0.8.1，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.7：真实数据入口/真实报告门/评分卡/签字；v0.8：四段闭环 bundle；v0.8.1：成本记录器/记忆检索/负向门）。
 > 用途：把「制造业经营归因四角色团队」做成**结构可跑、可测、可迁移**的包；明天带到工作电脑继续推进。
 
 ## 它是什么
@@ -36,7 +36,14 @@ python tests/validate_report.py runs/task-B/report.json --require-real
 python tools/sign_delivery.py runs/task-B/report.json --signer "业务负责人"
 # 6. 四段闭环 bundle 校验（核心三件+可选分析/目标/成本）
 python tools/validate_loop.py --task-dir runs/task-B/loop --require-complete
-# 7. 无真实数据也能回归（合成 11 列 CSV，跑通全链）
+# 7. 成本记录/汇总（成本透明）
+python tools/cost_record.py record --task T-20261019-B --ai-cost 0.02 --tokens 79000 --hours 2.5 --action 500 --avoided 2000 --source estimate --outdir runs/task-B
+python tools/cost_record.py summary --file runs/task-B/cost.jsonl
+# 8. 记忆检索（按员工+实体，最多 5 条）
+python tools/memory_retrieve.py --file team/memory/example-memory.json --employee analyst --entity "塑胶厂-B线" --limit 5
+# 9. 负向门（确认 demo/叙述/缺数据真的被拒）
+python tests/negative_gates.py
+# 10. 无真实数据也能回归（合成 11 列 CSV，跑通全链）
 python tests/real_mode_smoke.py
 ```
 
