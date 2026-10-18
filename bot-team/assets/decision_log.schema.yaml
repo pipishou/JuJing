@@ -4,6 +4,8 @@
 # P0：prompt 纪律 + 人工抽查；P1：机检校验器按本 schema 解析报警
 
 version: "1.3"
+canonical_full_schema: team/loop/decision-record.schema.yaml
+note: 本文件是报告内嵌的精简视图；完整决策记录以 canonical_full_schema 为准，不双写
 entry_fields:
   # —— 决策身份 ——
   id: {type: string, format: "DL-YYYYMMDD-序号", example: DL-20261011-001}

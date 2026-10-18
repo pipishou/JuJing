@@ -4,6 +4,7 @@
 
 version: "0.1.0"
 team_id: manufacturing-ops-team-dsh
+employee_source: team/employees.yaml   # 员工册唯一源；本名册只声明 DAG 用到的角色子集
 team_name:
   zh: 制造业经营助手团队（DSH 版）
   en: Manufacturing Ops Team (DSH)
