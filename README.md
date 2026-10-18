@@ -34,6 +34,8 @@ python orchestration/assemble_report.py workflow-result.json runs/task-B/report.
 # 5. 真实报告门 + 签字
 python tests/validate_report.py runs/task-B/report.json --require-real
 python tools/sign_delivery.py runs/task-B/report.json --signer "业务负责人"
+# 6. 无真实数据也能回归（合成 11 列 CSV，跑通全链）
+python tests/real_mode_smoke.py
 ```
 
 ## 快速开始（本机）

@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 REQUIRED = ["date", "production_line", "refill_rate", "output_volume"]
@@ -42,10 +43,16 @@ def main():
     ap.add_argument("--base-start", required=True)
     ap.add_argument("--base-end", required=True)
     ap.add_argument("--outdir", required=True)
+    ap.add_argument("--field-map", default="", help="YAML: canonical -> source column")
     args = ap.parse_args()
 
     df = read_table(Path(args.input))
     df.columns = [str(c).strip() for c in df.columns]
+    if args.field_map:
+        fmap = (yaml.safe_load(Path(args.field_map).read_text(encoding="utf-8")) or {}).get("source_columns") or {}
+        rename = {src: canonical for canonical, src in fmap.items() if src in df.columns}
+        df = df.rename(columns=rename)
+        print(json.dumps({"field_map_applied": rename}, ensure_ascii=False))
     missing = [c for c in REQUIRED if c not in df.columns]
     if missing:
         print(json.dumps({"ok": False, "error": f"缺少必需列: {missing}", "columns": list(df.columns)}, ensure_ascii=False, indent=2))
