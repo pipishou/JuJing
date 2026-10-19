@@ -34,15 +34,19 @@ def main():
             "scorecard": {"data_completeness": 2, "timeliness": 3, "significance": 4,
                           "exclusivity": 1, "history": 1, "human_ai_consistency": 0},
         },
-        "advice": {"recommendation": [{"action": "先补数据，不行动",
+        "advice": {"direction_check": "数据不足，暂不归因；先补保养记录与信息员交接记录，再重跑 exclusion 排除法",
+                   "recommendation": [{"action": "先补数据，不行动",
                                         "roi": {"cost": "0", "avoided": "0", "anchor": "无行动"},
                                         "irreversibility": "reversible"}]},
     }
     rp = TMP / "workflow-result.json"
     rp.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+    # M1：real 模式 data_refs 必须真实存在且记录 sha256（A2 可信门）
+    data_file = TMP / "material_refill_T.json"
+    data_file.write_text(json.dumps({"meta": {"task": "no-finding"}, "records": []}, ensure_ascii=False), encoding="utf-8")
     report = TMP / "report.json"
     run([PY, "orchestration/assemble_report.py", str(rp), str(report), "--real",
-         "--task-id", "T-NOFIND", "--context", "数据不足演练", "--data-refs", "runs/task-nofind/T.json",
+         "--task-id", "T-NOFIND", "--context", "数据不足演练", "--data-refs", str(data_file),
          "--expected", "补齐保养记录后重跑", "--records-dir", str(TMP / "loop"),
          "--analysis-json", "team/loop/example-analysis.json",
          "--goal-json", "team/goals/example-goal.json",
