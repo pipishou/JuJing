@@ -212,6 +212,11 @@ def main():
     check("real report mode", "--real" in (ROOT / "orchestration/assemble_report.py").read_text(encoding="utf-8"))
     check("real report gate", "--require-real" in (ROOT / "tests/validate_report.py").read_text(encoding="utf-8"))
     check("sign delivery tool", (ROOT / "tools/sign_delivery.py").is_file())
+    check("workbench api", (ROOT / "tools/task_server.py").is_file())
+    check("workbench ui", all((ROOT / f"ui/workbench.{ext}").is_file() for ext in ("html", "css", "js")))
+    check("workbench defer-sign", "--defer-sign" in (ROOT / "tools/run_task.py").read_text(encoding="utf-8"))
+    check("workbench web test", (ROOT / "tests/web_api_smoke.py").is_file())
+    check("workbench doc", (ROOT / "docs/WEB_WORKBENCH_2026-10-19_zh.md").is_file())
     tape = json.loads((ROOT / "runs/dsh-tape-sample.json").read_text(encoding="utf-8"))
     check("tape sample beats>0", isinstance(tape.get("beats"), list) and len(tape["beats"]) > 0)
 

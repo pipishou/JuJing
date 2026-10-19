@@ -17,6 +17,12 @@ New-Item -ItemType Directory -Force -Path $staging | Out-Null
 Get-ChildItem $root -Force | Where-Object { $_.Name -ne 'dist' } | ForEach-Object {
   Copy-Item $_.FullName -Destination $staging -Recurse -Force
 }
+# never package caches or real task data
+Get-ChildItem $staging -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+$runs = Join-Path $staging 'runs'
+if (Test-Path $runs) {
+  Get-ChildItem $runs -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+}
 
 # 2) manifest: every file + sha256, relative to package root
 $manifest = Join-Path $dist ("manifest-" + $Date + ".txt")

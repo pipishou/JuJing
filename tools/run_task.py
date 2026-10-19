@@ -57,8 +57,11 @@ def main():
     ap.add_argument("--analysis-json", default="")
     ap.add_argument("--goal-json", default="")
     ap.add_argument("--cost-json", default="")
-    ap.add_argument("--signer", required=True)
+    ap.add_argument("--signer", default="", help="签字人；--defer-sign 时可留空，等人工复核后再签")
+    ap.add_argument("--defer-sign", action="store_true", help="只跑到报告/四卡校验，签字留给人工复核（Web 工作台用）")
     args = ap.parse_args()
+    if not args.defer_sign and not args.signer:
+        ap.error("--signer 必填；若要先复核再签，加 --defer-sign")
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -96,6 +99,13 @@ def main():
     run("validate-loop", loop_cmd)
 
     sig = outdir / "report.signature.json"
+    if args.defer_sign:
+        summary = {"ok": True, "task_id": task_id, "report": str(report), "loop": str(records),
+                   "signature": None, "decision_status": "pending_signature",
+                   "is_demo": json.loads(report.read_text(encoding="utf-8-sig")).get("is_demo")}
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+
     run("sign", [PY, "tools/sign_delivery.py", str(report), "--signer", args.signer, "--out", str(sig)])
     run("finalize", [PY, "tools/finalize_delivery.py", "--report", str(report),
                     "--loop-dir", str(records), "--signature", str(sig)])

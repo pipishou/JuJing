@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>任务工作台 · Bot Team</title>
+<link rel="stylesheet" href="workbench.css" />
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="mark">B</div>
+    <div>
+      <h1>任务工作台</h1>
+      <p>真实数据入口 · 复核签字 · 交付留痕</p>
+    </div>
+  </div>
+  <nav class="nav">
+    <a href="index.html">舞台实况</a>
+    <a href="workbench.html" class="on">任务工作台</a>
+    <a href="index.html#wall">交付墙</a>
+  </nav>
+  <div class="health" id="health"><span class="dot"></span><span id="healthText">连接中</span></div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <div>
+      <div class="eyebrow">BOT TEAM · LOCAL WORKBENCH</div>
+      <h2>把真实数据跑成一张可复核的交付卡</h2>
+      <p>新建任务 → 上传 CSV/字段映射 → 跑数据合同与报告门 → 人工复核签字。归因结果（s1–s4）仍由 DSH workflow 产出，工作台只做 s5 收口。</p>
+    </div>
+    <div class="steps">
+      <div><b>01</b>建任务</div><div><b>02</b>传数据</div><div><b>03</b>跑门</div><div><b>04</b>签字</div>
+    </div>
+  </section>
+
+  <div class="layout">
+    <aside class="panel">
+      <div class="panel-head">
+        <h3>新建任务</h3>
+        <span class="hint">本地文件不上云</span>
+      </div>
+      <div class="form">
+        <label>任务 ID（可空，自动生成）<input id="fId" placeholder="T-20261020-B" /></label>
+        <div class="two">
+          <label>产线<input id="fLine" value="B" /></label>
+          <label>数据负责人<input id="fOwner" placeholder="姓名" /></label>
+        </div>
+        <div class="two">
+          <label>T 开始<input id="fTStart" type="date" value="2026-10-05" /></label>
+          <label>T 结束<input id="fTEnd" type="date" value="2026-10-11" /></label>
+        </div>
+        <div class="two">
+          <label>基线开始<input id="fBStart" type="date" value="2026-09-05" /></label>
+          <label>基线结束<input id="fBEnd" type="date" value="2026-10-04" /></label>
+        </div>
+        <label>目标 / 预期<input id="fExpected" value="T+7 补料率 ≤5.40%" /></label>
+        <label>上下文<input id="fContext" value="B线补料率7日 5.1%→7.2%" /></label>
+        <label>签字人<input id="fSigner" placeholder="业务负责人" /></label>
+        <button class="btn primary wide" id="createBtn">创建任务</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="panel-head">
+        <h3>上传文件</h3>
+        <span class="hint" id="uploadHint">先创建任务</span>
+      </div>
+      <div class="form" id="uploadForm">
+        <label class="file">CSV / Excel 数据
+          <input id="fCsv" type="file" accept=".csv,.xlsx,.xls" />
+          <span id="csvName">选择文件</span>
+        </label>
+        <label class="file">字段映射 YAML（可选）
+          <input id="fMap" type="file" accept=".yaml,.yml" />
+          <span id="mapName">选择文件</span>
+        </label>
+        <label class="file">workflow-result.json（s1–s4）
+          <input id="fWf" type="file" accept=".json" />
+          <span id="wfName">选择文件</span>
+        </label>
+        <button class="btn wide" id="uploadBtn" disabled>上传到当前任务</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="panel-head">
+        <h3>任务列表</h3>
+        <button class="mini" id="refreshBtn">刷新</button>
+      </div>
+      <div class="tasks" id="tasks"><div class="muted">还没有任务</div></div>
+    </aside>
+
+    <section class="content">
+      <div class="empty" id="empty">
+        <div class="empty-mark">▤</div>
+        <h3>选择或创建一个任务</h3>
+        <p>工作台会显示数据合同、归因结果、六维评分、决策与签字状态。没有真实数据时，可先用 <code>demo/material_refill_T.json</code> 做受控演练。</p>
+      </div>
+
+      <div id="detail" class="detail" hidden>
+        <div class="detail-head">
+          <div>
+            <div class="eyebrow" id="dTask">TASK</div>
+            <h2 id="dTitle">任务详情</h2>
+            <div class="meta" id="dMeta"></div>
+          </div>
+          <div class="actions">
+            <span class="status" id="dStatus">created</span>
+            <button class="btn primary" id="runBtn">运行收口</button>
+            <button class="btn" id="signBtn">签字确认</button>
+          </div>
+        </div>
+
+        <div class="banner" id="banner" hidden></div>
+        <div class="report" id="report"></div>
+
+        <details class="logbox">
+          <summary>运行日志 / 原始回执</summary>
+          <pre id="log">暂无日志</pre>
+        </details>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+<script src="workbench.js"></script>
+</body>
+</html>
