@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
@@ -235,6 +235,7 @@
       <a href="#crew"><span class="ico">⌘</span>班组编排<span class="badge">4</span></a>
       <a href="#paper"><span class="ico">▤</span>交付卡<span class="badge">待签</span></a>
       <a href="#wall"><span class="ico">▥</span>交付墙</a>
+      <a href="workbench.html"><span class="ico">⌁</span>任务工作台<span class="badge">真实</span></a>
     </nav>
     <div class="card">
       <b>今日运营</b>
@@ -242,14 +243,14 @@
       <div class="row"><span><span class="dot"></span>班组运行中</span><span id="kpiSide">4 人</span></div>
       <div class="row" style="opacity:.75"><span>累计交付</span><span>12 份</span></div>
     </div>
-    <div class="foot">UI 概念原型 v0.6.0 · 假数据<br/>引擎：DeepSeek Harness（不改）<br/>员工：声明式四件套 / 货架 6 态</div>
+    <div class="foot">UI v0.11.2 · 舞台为演示数据 / 工作台接真实文件<br/>引擎：DeepSeek Harness（不改）<br/>员工：声明式四件套 / 货架 6 态</div>
   </aside>
 
   <main class="main">
     <div class="topbar">
       <div class="crumb">AI 员工事务所 / <b>舞台实况</b> · 制造业经营归因班组</div>
       <div class="top-actions">
-        <button class="btn" onclick="openIntake()">新建任务</button>
+        <button class="btn" onclick="location.href='workbench.html'">新建任务</button>
         <button class="btn" onclick="toast('已复制过程链接（原型）')">复制过程链接</button>
         <button class="btn" onclick="toast('交付卡 PDF 已导出（原型）')">导出交付卡</button>
         <button class="btn primary" onclick="openG0()">预派发确认</button>
