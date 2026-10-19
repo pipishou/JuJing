@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """交付卡签字（持久化，不是 UI toast）。
 
@@ -14,6 +14,7 @@
 import argparse
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime, timezone, timedelta
 
@@ -35,7 +36,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("report", nargs="?", default="")
     ap.add_argument("--report", dest="report_opt", default="")
-    ap.add_argument("--signer", default="")
+    ap.add_argument("--signer", default=os.environ.get("BOT_SIGNER", "老板"), help="签字人（默认 老板，可用 env BOT_SIGNER 覆盖）")
     ap.add_argument("--out", default="")
     ap.add_argument("--allow-demo", action="store_true")
     ap.add_argument("--verify", default="")

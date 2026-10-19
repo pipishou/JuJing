@@ -16,14 +16,30 @@ import json
 import sys
 from pathlib import Path
 
-import pandas as pd
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 REQUIRED = ["date", "production_line", "refill_rate", "output_volume"]
 
 
-def read_table(p: Path) -> pd.DataFrame:
+def _pandas():
+    """懒导入 pandas（A4）：无 pandas 环境只走 JSON/demo 路径时不得 import 失败崩掉。"""
+    try:
+        import pandas as pd  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        msg = {
+            "ok": False,
+            "error": "缺少 pandas，无法从 CSV/Excel 取数；JSON 数据路径不需要 pandas（可改用 --task-json）",
+            "missing": "pandas",
+            "detail": str(exc),
+        }
+        print(json.dumps(msg, ensure_ascii=False, indent=2), file=sys.stderr)
+        raise SystemExit(2) from exc
+    return pd
+
+
+def read_table(p: Path):
+    pd = _pandas()
     if p.suffix.lower() in (".xlsx", ".xls"):
         return pd.read_excel(p)
     return pd.read_csv(p)
@@ -45,6 +61,7 @@ def main():
     ap.add_argument("--outdir", required=True)
     ap.add_argument("--field-map", default="", help="YAML: canonical -> source column")
     args = ap.parse_args()
+    pd = _pandas()
 
     df = read_table(Path(args.input))
     df.columns = [str(c).strip() for c in df.columns]
