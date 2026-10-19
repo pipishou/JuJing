@@ -10,7 +10,7 @@
 
 ## 1. 工作电脑环境
 
-1. Windows + Python 3.12+（需要 `pyyaml`：`python -m pip install pyyaml`）。
+1. Windows + Python 3.9+（`python -m pip install pyyaml pandas openpyxl`；工作台本身只用标准库）。
 2. DeepSeek Harness（桌面/CLI 任一）；本包已按 DSH skill 规范写 `SKILL.md`。
 3. 可选：Octop（只有要跑旧版 runtime 时才需要，本包不依赖）。
 
@@ -35,6 +35,7 @@ cd <包根>
 python tests\validate_structure.py          # 期望 exit 0
 # DSH 会话内：用 workflow 工具跑 orchestration/team-workflow.mjs（args: {"base":"<包根>"}）
 python tests\validate_report.py runs\demo-report.json   # 期望 exit 0
+python tests\web_api_smoke.py               # 期望 exit 0（HTTP 建任务→上传→运行→签字）
 ```
 
 | # | 检查 | 判据 |
@@ -43,11 +44,12 @@ python tests\validate_report.py runs\demo-report.json   # 期望 exit 0
 | 2 | demo runner 可跑 | workflow 返回 s1–s4 四段 JSON，无空段 |
 | 3 | 报告合规 | `validate_report.py` exit 0（finding/ cannot_attribute/ scorecard/ roi/ 决策日志） |
 | 4 | skill 可见 | 新会话 `/` 菜单或 `<available_skills>` 出现 `jujing-bot-team` |
-| 5 | 迁移留痕 | 新机把 `runs/` 与 `docs/ledger.md` 带上，继续追加 |
+| 5 | Web 工作台可跑 | `python tools/task_server.py --port 8765` 打开 `/workbench`；`web_api_smoke.py` exit 0 |
+| 6 | 迁移留痕 | 新机把 `runs/` 与 `docs/ledger.md` 带上，继续追加 |
 
 ## 4. 到工作电脑后的第一批动作（按顺序）
 
-1. 跑 §3 验收；
+1. 跑 §3 验收；启动工作台 `python tools\task_server.py --port 8765`，打开 `http://127.0.0.1:8765/workbench` 做一次空任务；
 2. 按 `docs/BOT_PILOT_SPEC_2026-10-18_zh.md` §2 做**数据合同审计**（真实塑胶厂 T/T-30 + 因素字段；demo 数据只用于结构验收）；
 3. 数据审计绿后，把 `demo/` 路径换成真实数据路径，按 G0 预派发确认跑一次真归因；
 4. 结果回填 `docs/ledger.md`（append-only）。

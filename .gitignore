@@ -11,6 +11,7 @@ jujing-junshi/data/
 bot-team/.junshi/
 # real data / runtime
 runs/task-*/
+**/runs/*/
 *.zst
 *.jsonl.zstd
 dist/
