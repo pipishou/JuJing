@@ -6,19 +6,35 @@
     "D:\\work\\产品类\\个人产品\\bot-2\\venv\\Scripts\\python.exe" -B server/app.py
     ... --port 8787 --root "D:\\work\\产品类\\个人产品\\bot-2\\JuJing\\bot-team"
 
-端点（spec §2.6）：
+端点（M1 spec §2.6 + M1.5 spec §2.5）：
     GET  /                                    ui/index.html
     GET  /ui/<path>                           ui/ 静态资源
-    GET  /api/health                          {ok, pack, version, ...}
+    GET  /api/health                          {ok, pack, version, owner, allow_signers, ...}
     GET  /api/packs                           已装行业包列表
+    GET  /api/team                            core.team.load_team：employees/crews/shelf/roster/pack
     GET  /api/tasks                           [{task_id,title,state,updated_at,...}]（扫描 runs/）
-    POST /api/tasks                           body=intake JSON -> 分配 task_id，写 task.json/status.json
-    GET  /api/tasks/<id>                      {task,report,status,loop,signature}
+    POST /api/tasks                           body=intake JSON，可含 data_files[{name,content[,encoding]}]
+    GET  /api/tasks/<id>                      {task,report,status,loop,signature,gate,task_id}
     GET  /api/tasks/<id>/delivery             交付卡字段投影（finding/scorecard/roi/decision_log/signature）
-    GET  /api/tasks/<id>/log?after=<n>        [{n,ts,phase,role,line}] 增量（供 UI 舞台/轮询）
-    POST /api/tasks/<id>/run                  后台线程跑 tools/run_task.py，立即 202
+    GET  /api/tasks/<id>/log?after=<n>        旧增量端点（保留兼容，读 run.log）
+    GET  /api/tasks/<id>/events?since=<n>     事件增量 [{seq,ts,phase,role,agent,kind,line}]
+    GET  /api/tasks/<id>/events?since=<n>&stream=1
+                                              SSE（id: <seq> / data: <json> / 15s ": ping"，断线续传）
+    POST /api/tasks/<id>/data                 body {files:[{name,content[,encoding]}]} 追加数据文件
+    POST /api/tasks/<id>/run                  body {runner:"fixture"|"external"|"dsh"}，立即 202
+    POST /api/tasks/<id>/gate                 body {action:"confirm"|"reject",confirmer,comment}
     POST /api/tasks/<id>/sign                 body {signer} -> tools/sign_delivery.py -> {sha256,signer}
     POST /api/tasks/<id>/finalize             tools/finalize_delivery.py，不通过 409 + 原因
+
+身份与 runner（M1.5 spec §2.5/§2.7）：
+- `--owner`（默认 "老板"）、`--allow-signers`（默认 "老板,boss"）；/sign、/gate、/finalize 的
+  signer/confirmer 必须在白名单（不读环境变量兜底），响应均带 identity。
+- runner=fixture（默认）：把 runs/demo-result-2026-10-19.json 复制成 outdir/result.json 再调
+  run_task --demo，报告必须 is_demo=true，禁止冒充真实；external：等 outdir/result.json 出现
+  （最长 600s）后跑真实链路；dsh：501（M2 实现）。
+- 数据上传（POST /api/tasks[/<id>/data]）：单文件 ≤8MB、总 ≤24MB，落 runs/<id>/data/，
+  文件名走 core.paths.safe_relative（缺失时用 server 内置同语义兜底），校验 meta.field_contract /
+  meta.schema_version / records 非空。
 
 设计约束：
 - 只绑定 127.0.0.1；--host/--port/--root 可配。
@@ -32,12 +48,16 @@
 - 任务编号：优先 core.ids.allocate（B1 落盘后自动生效），否则回退到扫描 runs/T-YYYYMMDD-* 取下一个序号。
 """
 import argparse
+import base64
+import hashlib
+import importlib
 import json
 import os
 import re
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -53,6 +73,16 @@ VENV_PY = r"D:\work\产品类\个人产品\bot-2\venv\Scripts\python.exe"
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,95}$")
 TASK_ROUTE_RE = re.compile(r"^/api/tasks/([^/]+)(?:/([a-z]+))?$")
 SIX_DIMS = ("data_completeness", "timeliness", "significance", "exclusivity", "history", "human_ai_consistency")
+DEFAULT_OWNER = "老板"
+DEFAULT_ALLOW_SIGNERS = "老板,boss"
+DEMO_RESULT = "demo-result-2026-10-19.json"
+MAX_UPLOAD_FILE = 8 * 1024 * 1024          # 单文件 8MB
+MAX_UPLOAD_TOTAL = 24 * 1024 * 1024        # 总量 24MB
+MAX_BODY_BYTES = 36 * 1024 * 1024          # 24MB 数据 base64 膨胀 4/3 + JSON 余量
+EXTERNAL_WAIT_SECONDS = 600                # runner=external 最长等待
+SSE_POLL_SECONDS = 0.5
+SSE_PING_SECONDS = 15.0
+GATE_FILE = "gate.json"
 PHASE_ALIAS = {
     "ingest": "s1", "snapshot": "s1", "contract": "s2", "factor": "s2", "factors": "s2",
     "attribution": "s3", "exclusion": "s3", "exclude": "s3", "advice": "s4", "recommend": "s4",
@@ -118,7 +148,106 @@ def write_json_atomic(path, payload):
     with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
         fh.write("\n")
+        fh.flush()
+        os.fsync(fh.fileno())
     os.replace(tmp, path)
+
+
+def write_bytes_atomic(path, data):
+    """原子写二进制（temp + fsync + os.replace），失败清理 temp。"""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + f".tmp.{os.getpid()}.{threading.get_ident()}")
+    try:
+        with open(tmp, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
+def sha256_bytes(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 256), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+# --------------------------------------------------------------------------- #
+# core/ 模块接入（B4 并行落盘：按 spec 契约调用，缺失时给明确 500）
+# --------------------------------------------------------------------------- #
+_CORE_PATH_LOCK = threading.Lock()
+
+
+def ensure_core_path(cfg):
+    root = str(cfg.root)
+    with _CORE_PATH_LOCK:
+        if root not in sys.path:
+            sys.path.insert(0, root)
+
+
+def import_core(cfg, name):
+    """导入 core.<name>；未落盘时抛 500 + 明确错误（不静默降级）。"""
+    ensure_core_path(cfg)
+    try:
+        return importlib.import_module("core." + name)
+    except Exception as exc:  # noqa: BLE001 - ImportError / 模块内错误
+        raise ApiError(500,
+                       f"core.{name} 不可用（B4 尚未落盘或导入失败）：{exc}；"
+                       f"契约见 audit/M1.5-build-spec.md §2")
+
+
+def core_paths_module(cfg):
+    """core.paths 优先；未就绪时返回 None（调用方用内置兜底，handoff 记录）。"""
+    try:
+        return import_core(cfg, "paths")
+    except ApiError:
+        return None
+
+
+def _fallback_safe_relative(name):
+    """与 core.paths.safe_relative 同语义的兜底：拒绝绝对路径/盘符/../ /控制字符，
+    仅允许 [\\w.\\-] 与最多单层子目录（保留中文等非 ASCII 文字字符）。"""
+    raw = str(name or "").replace("\\", "/").strip()
+    if not raw:
+        raise ApiError(400, "数据文件名不能为空")
+    if "\x00" in raw or any(ord(ch) < 0x20 for ch in raw):
+        raise ApiError(400, f"数据文件名含控制字符: {name!r}")
+    if raw.startswith("/") or re.match(r"^[A-Za-z]:", raw):
+        raise ApiError(400, f"数据文件名不允许绝对路径/盘符: {name!r}")
+    parts = raw.split("/")
+    if len(parts) > 2:
+        raise ApiError(400, f"数据文件名只允许单层子目录: {name!r}")
+    for part in parts:
+        if part in ("", ".", ".."):
+            raise ApiError(400, f"数据文件名非法（含空段/./..）: {name!r}")
+        if not re.match(r"^[\w.\-]+$", part, flags=re.UNICODE):
+            raise ApiError(400, f"数据文件名含非法字符: {name!r}")
+    return "/".join(parts)
+
+
+def safe_relative(cfg, name):
+    """数据文件名安全化：优先 core.paths.safe_relative（spec §2.4）。"""
+    module = core_paths_module(cfg)
+    if module is not None:
+        try:
+            return str(module.safe_relative(name))
+        except ApiError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 统一转 400
+            raise ApiError(400, f"数据文件名非法: {name!r}（{exc}）")
+    return _fallback_safe_relative(name)
 
 
 def child_env():
@@ -199,20 +328,35 @@ class ApiError(Exception):
 
 
 class Config:
-    def __init__(self, root):
+    def __init__(self, root, owner=DEFAULT_OWNER, allow_signers=DEFAULT_ALLOW_SIGNERS):
         self.root = Path(root).resolve()
         self.runs = self.root / "runs"
         self.ui = self.root / "ui"
         self.runs.mkdir(parents=True, exist_ok=True)
+        self.owner = str(owner or DEFAULT_OWNER).strip() or DEFAULT_OWNER
+        self.allow_signers = parse_signers(allow_signers or DEFAULT_ALLOW_SIGNERS)
         self.alloc_lock = threading.Lock()
         self.map_lock = threading.Lock()
         self.running_lock = threading.Lock()
         self.running = set()
         self._task_locks = {}
+        # core/ 是 B4 的产物，按 spec 契约调用；把它加进 sys.path 一次（包内相互 import 需要）
+        ensure_core_path(self)
 
     def task_lock(self, task_id):
         with self.map_lock:
             return self._task_locks.setdefault(task_id, threading.Lock())
+
+    def identity(self):
+        return {"owner": self.owner, "allow_signers": list(self.allow_signers)}
+
+
+def parse_signers(raw):
+    if isinstance(raw, (list, tuple)):
+        parts = [str(item).strip() for item in raw]
+    else:
+        parts = [item.strip() for item in re.split(r"[,，;；\s]+", str(raw or ""))]
+    return tuple(dict.fromkeys(item for item in parts if item))
 
 
 def task_title(task):
@@ -371,8 +515,12 @@ def list_tasks(cfg):
         report = read_json(child / "report.json")
         signature = signature_doc(child)
         closure = read_json(child / "loop" / "closure.json")
+        gate_doc = read_json(child / GATE_FILE)
         if not isinstance(closure, dict):
             closure = {}
+        if not isinstance(gate_doc, dict):
+            gate_doc = {}
+        status_task = status.get("task") if isinstance(status.get("task"), dict) else {}
         verdict = closure.get("verdict")
         items.append({
             "task_id": str(task.get("task_id") or child.name),
@@ -386,42 +534,212 @@ def list_tasks(cfg):
             "is_demo": report.get("is_demo") if isinstance(report, dict) else None,
             "review_due": closure.get("due") or closure.get("review_due"),
             "reviewed": verdict not in (None, "", "unverified"),
+            "data_ready": bool(status.get("data_ready") or status_task.get("data_ready")),
+            "runner": task.get("runner"),
+            "gate": gate_doc.get("status"),
         })
     items.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
     return items
 
 
+def validate_dataset(doc, name=""):
+    """T/T30 数据文件 schema 校验（M1.5 spec §2.5）。返回错误列表（空=通过）。"""
+    errors = []
+    if not isinstance(doc, dict):
+        return ["数据文件必须是 JSON 对象（meta/records）"]
+    meta = doc.get("meta")
+    records = doc.get("records")
+    if not isinstance(meta, dict):
+        errors.append("meta 缺失或不是对象")
+    else:
+        contract = meta.get("field_contract")
+        if not (isinstance(contract, list) and contract
+                and all(isinstance(item, str) and item.strip() for item in contract)):
+            errors.append("meta.field_contract 缺失或不是非空字符串数组")
+        version = meta.get("schema_version")
+        if not (isinstance(version, str) and version.strip()):
+            errors.append("meta.schema_version 缺失或为空")
+    if not (isinstance(records, list) and records):
+        errors.append("records 缺失或为空数组")
+    elif not all(isinstance(record, dict) for record in records):
+        errors.append("records 内每条记录必须是对象")
+    if name:
+        errors = [f"{name}: {item}" for item in errors]
+    return errors
+
+
+def _upload_items(cfg, body, key="data_files"):
+    """把 body 里的上传项分成 (uploads, kept_paths, manifest_entries)。
+
+    - data_files 里的字符串 = 既有数据文件路径（保留给 task.json.data_files）
+    - data_files 里的对象 = 上传（{name, content[, encoding]}）
+    """
+    raw = body.get(key)
+    uploads = []
+    kept = []
+    if raw in (None, ""):
+        return uploads, kept
+    if not isinstance(raw, list):
+        raise ApiError(400, f"{key} 必须是数组（字符串路径或 {{name,content}} 上传项）")
+    total = 0
+    for item in raw:
+        if isinstance(item, str):
+            kept.append(item)
+            continue
+        if not isinstance(item, dict):
+            raise ApiError(400, f"{key} 内元素必须是字符串或对象")
+        name = ""
+        for field in ("name", "path", "filename", "file"):
+            value = item.get(field)
+            if isinstance(value, str) and value.strip():
+                name = value.strip()
+                break
+        if not name:
+            raise ApiError(400, f"{key}[] 缺 name")
+        safe_name = safe_relative(cfg, name)
+        content = item.get("content")
+        if isinstance(content, (bytes, bytearray)):
+            data = bytes(content)
+        elif isinstance(content, str):
+            encoding = str(item.get("encoding") or ("base64" if item.get("base64") else "text")).lower()
+            if encoding in ("base64", "b64"):
+                try:
+                    data = base64.b64decode(content, validate=True)
+                except (ValueError, TypeError):
+                    raise ApiError(400, f"数据文件 base64 解码失败: {safe_name}")
+            else:
+                data = content.encode("utf-8")
+        else:
+            raise ApiError(400, f"数据文件 content 必须是字符串: {safe_name}")
+        if len(data) > MAX_UPLOAD_FILE:
+            raise ApiError(400, f"单文件超过 8MB 上限: {safe_name}（{len(data)} bytes）")
+        total += len(data)
+        if total > MAX_UPLOAD_TOTAL:
+            raise ApiError(400, f"数据文件总量超过 24MB 上限（{total} bytes）")
+        try:
+            doc = json.loads(data.decode("utf-8-sig"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ApiError(400, f"数据文件不是合法 UTF-8 JSON: {safe_name}（{exc}）")
+        errors = validate_dataset(doc, safe_name)
+        if errors:
+            raise ApiError(400, "数据文件 schema 校验失败: " + "; ".join(errors))
+        uploads.append({"name": safe_name, "data": data, "sha256": sha256_bytes(data)})
+    return uploads, kept
+
+
+def apply_uploads(cfg, tdir, task_id, uploads):
+    """落盘 runs/<id>/data/ 并更新 task.json.data_files + status.task.data_ready。"""
+    if not uploads:
+        return [], []
+    data_dir = Path(tdir) / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    data_root = data_dir.resolve()
+    files = []
+    written = []
+    for item in uploads:
+        target = (data_dir / item["name"]).resolve()
+        try:
+            target.relative_to(data_root)
+        except ValueError:
+            raise ApiError(400, f"数据文件越界: {item['name']!r}")
+        write_bytes_atomic(target, item["data"])
+        rel = target.relative_to(Path(cfg.root).resolve()).as_posix()
+        record = {"name": item["name"], "path": rel, "sha256": item["sha256"], "size": len(item["data"])}
+        files.append(record)
+        written.append(rel)
+    with cfg.task_lock(task_id):
+        task = read_json(Path(tdir) / "task.json") or {}
+        if not isinstance(task, dict):
+            task = {}
+        data_files = [str(entry) for entry in (task.get("data_files") or []) if isinstance(entry, str)]
+        for rel in written:
+            if rel not in data_files:
+                data_files.append(rel)
+        manifest = [entry for entry in (task.get("data_manifest") or []) if isinstance(entry, dict)]
+        names = {entry.get("path") for entry in manifest}
+        for record in files:
+            if record["path"] in names:
+                manifest = [entry for entry in manifest if entry.get("path") != record["path"]]
+            manifest.append(record)
+        task["data_files"] = data_files
+        task["data_manifest"] = manifest
+        task["updated_at"] = now_iso()
+        write_json_atomic(Path(tdir) / "task.json", task)
+        status = read_status(tdir)
+        status_task = status.get("task") if isinstance(status.get("task"), dict) else {}
+        status_task = dict(status_task)
+        status_task.update({"data_ready": True, "data_files": data_files, "data_manifest": manifest})
+        write_status(tdir, task=status_task, data_ready=True)
+    return files, data_files
+
+
 def create_task(cfg, body):
     if not isinstance(body, dict):
         raise ApiError(400, "body 必须是 intake JSON 对象")
+    intake = dict(body)
+    uploads, _kept = _upload_items(cfg, body, "data_files")
+    if isinstance(body.get("data_files"), list):
+        kept = [item for item in body["data_files"] if isinstance(item, str)]
+        if kept:
+            intake["data_files"] = kept
+        else:
+            intake.pop("data_files", None)
     explicit = str(body.get("task_id") or "").strip()
     task_id = allocate_task_id(cfg, explicit or None)
     tdir = cfg.runs / task_id
     if tdir.exists():
         raise ApiError(409, f"task_id 已存在: {task_id}")
     tdir.mkdir(parents=True, exist_ok=True)
-    task = dict(body)
+    task = intake
     task["task_id"] = task_id
     task.setdefault("created_at", now_iso())
+    task.setdefault("runner", str(body.get("runner") or "fixture"))
     write_json_atomic(tdir / "task.json", task)
     write_json_atomic(status_path(tdir), {
         "state": "created", "step": "intake",
         "created_at": task.get("created_at"), "updated_at": now_iso(),
     })
+    files, data_files = apply_uploads(cfg, tdir, task_id, uploads)
     response = dict(task)
     response["ok"] = True
+    response["data_files"] = data_files
+    response["files"] = files
+    response["data_ready"] = bool(files) or bool(data_files)
     return response
+
+
+def post_upload_data(cfg, task_id, body):
+    """POST /api/tasks/<id>/data：追加数据文件（与 POST /api/tasks 的 data_files 同校验）。"""
+    tdir = task_dir(cfg, task_id)
+    if not isinstance(body, dict):
+        raise ApiError(400, "body 必须是 JSON 对象")
+    raw = body.get("files")
+    if raw is None:
+        raw = body.get("data_files")
+    if not isinstance(raw, list) or not raw:
+        raise ApiError(400, "body.files 必须是非空数组（{name,content[,encoding]}）")
+    uploads, _kept = _upload_items(cfg, {"data_files": raw}, "data_files")
+    if not uploads:
+        raise ApiError(400, "body.files 内没有可落盘的上传项")
+    files, data_files = apply_uploads(cfg, tdir, task_id, uploads)
+    status = read_status(tdir)
+    return 200, {"ok": True, "task_id": task_id, "files": files,
+                 "data_files": data_files, "data_ready": True,
+                 "status": status, "identity": cfg.identity()}
 
 
 def get_task(cfg, task_id):
     tdir = task_dir(cfg, task_id)
+    gate = read_json(tdir / GATE_FILE)
     return {
         "task": read_json(tdir / "task.json"),
         "report": read_json(tdir / "report.json"),
         "status": read_status(tdir),
         "loop": read_loop(tdir),
         "signature": signature_doc(tdir),
+        "gate": gate if isinstance(gate, dict) else None,
         "task_id": task_id,
+        "identity": cfg.identity(),
     }
 
 
@@ -453,11 +771,134 @@ def delivery_view(cfg, task_id):
 
 
 def get_log(cfg, task_id, after):
-    """run.log 由 tools/run_task.py 写；这里补 1-based 序号并返回 spec 的 4 字段。"""
+    """旧端点：run.log 由 tools/run_task.py 写；这里补 1-based 序号并返回 spec 的 4 字段。"""
     tdir = task_dir(cfg, task_id)
     events = RunLog(tdir / "run.log").events(max(0, after))
     return [{"n": ev["n"], "ts": ev["ts"], "phase": ev["phase"], "line": ev["line"]}
             for ev in events]
+
+
+# --------------------------------------------------------------------------- #
+# 团队数据（GET /api/team：core.team.load_team，M1.5 spec §2.1）
+# --------------------------------------------------------------------------- #
+AGENT_BY_ROLE = {
+    "host": "工作助理",
+    "analyst": "咨询分析师",
+    "attr": "AI 归因专家",
+    "biz": "制造业业务专家",
+    "quality": "合规质检",
+    "data": "取数员",
+}
+
+
+def team_view(cfg):
+    module = import_core(cfg, "team")
+    try:
+        doc = module.load_team(str(cfg.root))
+    except ApiError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise ApiError(500, f"core.team.load_team 失败: {exc}")
+    if not isinstance(doc, dict):
+        raise ApiError(500, "core.team.load_team 返回不是对象（契约：dict）")
+    if not isinstance(doc.get("employees"), list):
+        raise ApiError(500, "core.team.load_team 返回缺 employees（契约见 M1.5 spec §2.1）")
+    out = dict(doc)
+    out["ok"] = True
+    out["team_id"] = str(out.get("team_id") or "manufacturing-refill")
+    warnings = [str(item) for item in (out.get("warnings") or [])]
+    crews = out.get("crews") if isinstance(out.get("crews"), list) else []
+    crew_ids = sorted({str(crew.get("id")) for crew in crews if isinstance(crew, dict) and crew.get("id")})
+    pack = out.get("pack") if isinstance(out.get("pack"), dict) else {}
+    crew_id = str(pack.get("crew_id") or "")
+    if crew_id and crew_id not in crew_ids:
+        raise ApiError(500, f"团队数据不一致：pack.crew_id={crew_id!r} 不在 crews {crew_ids}")
+    required = ("id", "name", "layer", "category", "state", "skills", "sample", "sprite_key")
+    for emp in out["employees"]:
+        if not isinstance(emp, dict):
+            raise ApiError(500, "core.team.load_team 的 employees 内存在非对象条目")
+        missing = [key for key in required if emp.get(key) in (None, "", [])]
+        if missing:
+            warnings.append(f"员工 {emp.get('id')} 缺字段: {missing}")
+    out["warnings"] = warnings
+    out["identity"] = cfg.identity()
+    return 200, out
+
+
+# --------------------------------------------------------------------------- #
+# 事件流（GET /api/tasks/<id>/events，M1.5 spec §2.2/§2.5）
+# --------------------------------------------------------------------------- #
+def _normalize_event(ev, fallback_seq):
+    phase = str(ev.get("phase") or "status")
+    role = str(ev.get("role") or "host")
+    try:
+        seq = int(ev.get("seq"))
+    except (TypeError, ValueError):
+        seq = int(fallback_seq)
+    record = {
+        "seq": seq,
+        "ts": str(ev.get("ts") or ""),
+        "phase": phase,
+        "role": role,
+        "agent": str(ev.get("agent") or AGENT_BY_ROLE.get(role, role)),
+        "kind": str(ev.get("kind") or "status"),
+        "line": str(ev.get("line") or ""),
+    }
+    meta = ev.get("meta")
+    if isinstance(meta, dict):
+        record["meta"] = meta
+    return record
+
+
+def read_events(cfg, run_log, since=0):
+    """事件列表：优先 core.events.iter_events（spec §2.2）；core 未就绪时回退旧 run.log 解析。"""
+    try:
+        since = max(0, int(since or 0))
+    except (TypeError, ValueError):
+        since = 0
+    try:
+        module = import_core(cfg, "events")
+        raw = module.iter_events(str(run_log), since)
+        if isinstance(raw, list):
+            out = []
+            for index, ev in enumerate(raw, start=1):
+                if isinstance(ev, dict):
+                    item = _normalize_event(ev, since + index)
+                    if item["seq"] > since:
+                        out.append(item)
+            out.sort(key=lambda item: item["seq"])
+            return out
+        log("core.events.iter_events 未返回 list，回退 run.log 解析")
+    except ApiError:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        log(f"core.events.iter_events 失败（{exc}），回退 run.log 解析")
+    out = []
+    for ev in RunLog(run_log).events(since):
+        role = str(ev.get("role") or "host")
+        out.append({
+            "seq": int(ev["n"]),
+            "ts": str(ev.get("ts") or ""),
+            "phase": str(ev.get("phase") or "status"),
+            "role": role,
+            "agent": AGENT_BY_ROLE.get(role, role),
+            "kind": "status",
+            "line": str(ev.get("line") or ""),
+        })
+    return out
+
+
+def get_events(cfg, task_id, since):
+    tdir = task_dir(cfg, task_id)
+    return read_events(cfg, tdir / "run.log", since)
+
+
+def get_events_meta(cfg, task_id, since):
+    tdir = task_dir(cfg, task_id)
+    events = read_events(cfg, tdir / "run.log", since)
+    last = events[-1]["seq"] if events else max(0, int(since or 0))
+    return {"ok": True, "task_id": task_id, "since": max(0, int(since or 0)),
+            "last_seq": last, "events": events, "identity": cfg.identity()}
 
 
 # --------------------------------------------------------------------------- #
@@ -547,7 +988,7 @@ def _workflow_result(cfg, task, tdir):
     ])
 
 
-def _append_common_run_opts(cfg, task, tdir, flags, cmd):
+def _append_common_run_opts(cfg, task, tdir, flags, cmd, include_signer=True):
     title = task_title(task)
     _add_opt(cmd, flags, "--task-id", task.get("task_id") or tdir.name)
     _add_opt(cmd, flags, "--outdir", str(tdir))
@@ -556,8 +997,9 @@ def _append_common_run_opts(cfg, task, tdir, flags, cmd):
     _add_opt(cmd, flags, "--expected", task.get("target") or task.get("expected"))
     # 只透传 intake 里显式给的签字人；缺省不在 run 阶段自动签字，
     # 让 UI 走「run → assembled/awaiting_sign → POST /sign → POST /finalize」两步流。
+    # runner=fixture 组装的是 demo 报告，签字/收口一律交给后续显式 API，不在 run 里做。
     explicit_signer = task.get("signer") or task.get("approver") or task.get("boss_signer")
-    _add_opt(cmd, flags, "--signer", explicit_signer)
+    _add_opt(cmd, flags, "--signer", explicit_signer if include_signer else "")
     _add_opt(cmd, flags, "--workflow-result", _workflow_result(cfg, task, tdir))
     _add_opt(cmd, flags, "--analysis-json", _resolve(cfg, task.get("analysis_json")))
     _add_opt(cmd, flags, "--goal-json", _resolve(cfg, task.get("goal_json")))
@@ -567,27 +1009,31 @@ def _append_common_run_opts(cfg, task, tdir, flags, cmd):
     return cmd
 
 
-def build_run_command(cfg, task, tdir):
-    """把 task.json 映射成 tools/run_task.py 调用；识别不了契约时抛 ApiError(422)。"""
+def build_run_command(cfg, task, tdir, extra_args=None, include_signer=True):
+    """把 task.json 映射成 tools/run_task.py 调用；识别不了契约时抛 ApiError(422)。
+
+    extra_args：runner 特有 flag（fixture → --demo 等），插在脚本名之后。
+    """
     if not isinstance(task, dict):
         task = {}
+    extra_args = [str(item) for item in (extra_args or [])]
     script = cfg.root / "tools" / "run_task.py"
     if not script.is_file():
         raise ApiError(503, "tools/run_task.py 不存在（B1 后端尚未落盘），无法运行；请先在 $BT 下补齐 tools/")
     explicit_args = task.get("run_args")
     if isinstance(explicit_args, list) and explicit_args and all(isinstance(x, str) for x in explicit_args):
-        return [find_python(cfg), "-B", str(script)] + explicit_args
+        return [find_python(cfg), "-B", str(script)] + extra_args + explicit_args
 
     flags = run_task_help_flags(cfg)
     if not flags:
         raise ApiError(422, "无法识别 tools/run_task.py 参数（--help 未返回可用 flag）；"
                             "请在 task.json 里写 run_args 显式传参，或让 B1 落定 CLI 契约")
-    cmd = [find_python(cfg), "-B", str(script)]
+    cmd = [find_python(cfg), "-B", str(script)] + extra_args
 
     task_json_flags = [name for name in ("--task-json", "--intake", "--task-file", "--task") if name in flags]
     if task_json_flags:
         cmd.extend([task_json_flags[0], str(tdir / "task.json")])
-        _append_common_run_opts(cfg, task, tdir, flags, cmd)
+        _append_common_run_opts(cfg, task, tdir, flags, cmd, include_signer=include_signer)
         return cmd
 
     if "--csv" in flags:
@@ -613,7 +1059,7 @@ def build_run_command(cfg, task, tdir):
             raise ApiError(422, "旧版 run_task.py 缺少必填字段: " + ", ".join(missing))
         cmd.extend(["--csv", csv, "--t-start", t_start, "--t-end", t_end,
                     "--base-start", b_start, "--base-end", b_end])
-        _append_common_run_opts(cfg, task, tdir, flags, cmd)
+        _append_common_run_opts(cfg, task, tdir, flags, cmd, include_signer=include_signer)
         if "--workflow-result" in flags and not _workflow_result(cfg, task, tdir):
             raise ApiError(422, "缺 workflow result：把 team-workflow.mjs 的返回写到 "
                                 "runs/<id>/result.json（或 workflow-result.json），"
@@ -637,9 +1083,11 @@ def _read_status_state(tdir):
     return str(doc.get("state") or "") if isinstance(doc, dict) else ""
 
 
-def run_task_thread(cfg, tdir, task):
+def run_task_thread(cfg, tdir, task, runner="external", extra_args=None, include_signer=True):
     """后台执行 tools/run_task.py。
 
+    runner=external 时先等 outdir/result.json（最长 600s，状态 running/waiting_result）；
+    runner=fixture 时由 post_run 预先写好 result.json，并强制校验报告 is_demo=true。
     run.log / status.json 由 run_task.py 单写（B1 约定）；server 不双写，只在子进程退出后：
     - 非 0 退出且状态未落 failed -> 兜底 failed + error（无 run.log 写入）；
     - 0 退出但状态仍停在 created/running（旧版 CLI 不写 status）-> 按产物推导终态。
@@ -647,8 +1095,22 @@ def run_task_thread(cfg, tdir, task):
     task_id = tdir.name
     captured = []
     try:
-        cmd = build_run_command(cfg, task, tdir)
-        log(f"run start {task_id}: {_cmd_display(cmd)}")
+        if runner == "external":
+            with cfg.task_lock(task_id):
+                write_status(tdir, state="running", step="waiting_result", runner=runner)
+            target = tdir / "result.json"
+            deadline = time.time() + EXTERNAL_WAIT_SECONDS
+            while time.time() < deadline:
+                if target.is_file():
+                    break
+                time.sleep(1.0)
+            if not target.is_file():
+                message = f"runner=external 等待 result.json 超时（{EXTERNAL_WAIT_SECONDS}s）：{target} 未出现"
+                _fail_task(cfg, tdir, message)
+                log(f"run timeout {task_id}: {message}")
+                return
+        cmd = build_run_command(cfg, task, tdir, extra_args=extra_args, include_signer=include_signer)
+        log(f"run start {task_id}: runner={runner} {_cmd_display(cmd)}")
         proc = subprocess.Popen(
             cmd, cwd=str(cfg.root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", env=child_env(),
@@ -670,13 +1132,21 @@ def run_task_thread(cfg, tdir, task):
             if re.search(r"(?i)(error|failed|traceback|拒绝|失败)", line):
                 tip = line[:400]
                 break
+        if runner == "fixture" and code == 0:
+            if not isinstance(report, dict) or report.get("is_demo") is not True:
+                with cfg.task_lock(task_id):
+                    write_status(tdir, state="failed", step="fixture", exit_code=0,
+                                 error="runner=fixture 必须产出 is_demo=true 的演示报告（禁止冒充真实）",
+                                 runner=runner, finished_at=now_iso())
+                log(f"run rejected {task_id}: fixture 报告 is_demo 不为 true")
+                return
         with cfg.task_lock(task_id):
             state = _read_status_state(tdir)
             if code != 0:
                 if state != "failed":
                     write_status(tdir, state="failed", step="run", exit_code=code,
                                  error=tip or f"run_task.py 退出码 {code}",
-                                 finished_at=now_iso())
+                                 runner=runner, finished_at=now_iso())
             elif state in ("", "created", "running"):
                 if signature:
                     state, step = "signed", "signed"
@@ -685,7 +1155,11 @@ def run_task_thread(cfg, tdir, task):
                 else:
                     state, step = "assembled", "assemble"
                 write_status(tdir, state=state, step=step, exit_code=0,
-                             error=None, finished_at=now_iso())
+                             error=None, runner=runner, finished_at=now_iso())
+            elif runner:
+                write_status(tdir, runner=runner)
+            if isinstance(report, dict) and "is_demo" in report:
+                write_status(tdir, is_demo=report.get("is_demo"))
         log(f"run done {task_id}: exit={code} state={_read_status_state(tdir)}")
     except ApiError as exc:
         _fail_task(cfg, tdir, exc.message)
@@ -701,27 +1175,77 @@ def run_task_thread(cfg, tdir, task):
 # --------------------------------------------------------------------------- #
 # 动作：run / sign / finalize
 # --------------------------------------------------------------------------- #
-def post_run(cfg, task_id):
+RUNNERS = ("fixture", "external", "dsh")
+
+
+def demo_result_path(cfg):
+    path = cfg.runs / DEMO_RESULT
+    if not path.is_file():
+        raise ApiError(409, f"runner=fixture 需要 demo 数据源但不存在: {path}")
+    return path
+
+
+def prepare_fixture_result(cfg, tdir):
+    """fixture runner：复制 runs/demo-result-2026-10-19.json -> outdir/result.json。"""
+    source = demo_result_path(cfg)
+    doc = read_json(source)
+    required = ("snapshot", "factorTable", "attribution", "advice")
+    if not isinstance(doc, dict) or any(key not in doc for key in required):
+        raise ApiError(500, f"demo 数据源结构不合法（需要 {required}）: {source}")
+    write_json_atomic(Path(tdir) / "result.json", doc)
+    return source
+
+
+def post_run(cfg, task_id, body=None):
+    body = body if isinstance(body, dict) else {}
     tdir = task_dir(cfg, task_id)
     task = read_json(tdir / "task.json") or {}
+    if not isinstance(task, dict):
+        task = {}
+    raw_runner = body.get("runner") if body.get("runner") not in (None, "") else task.get("runner")
+    runner = str(raw_runner or "fixture").strip().lower()
+    aliases = {"demo": "fixture", "fixtures": "fixture", "手动": "external", "外部": "external", "wait": "external"}
+    runner = aliases.get(runner, runner)
+    if runner not in RUNNERS:
+        raise ApiError(400, f"非法 runner={runner!r}（可选：{'/'.join(RUNNERS)}）")
+    if runner == "dsh":
+        raise ApiError(501, "runner=dsh 未实现：M2 实现（DSH headless/SDK 自动驱动）；"
+                            "当前可用 runner=fixture（演示）或 runner=external（等待外部执行）")
     with cfg.running_lock:
         if task_id in cfg.running:
             raise ApiError(409, f"任务已在运行: {task_id}")
         cfg.running.add(task_id)
+    extra_args = []
+    # 服务端 run 只负责「跑到 assembled」；签字/终审走 /sign、/gate、/finalize，
+    # 避免不可逆报告在 run_task 内部自签后 finalize 撞 gate 被标 failed（丢掉可审批状态）。
+    include_signer = False
     try:
-        cmd = build_run_command(cfg, task, tdir)
+        task["runner"] = runner
+        write_json_atomic(tdir / "task.json", task)
+        if runner == "fixture":
+            source = prepare_fixture_result(cfg, tdir)
+            extra_args = ["--demo"]
+            include_signer = False
+            log(f"fixture result copied: {source.name} -> {tdir / 'result.json'}")
+        cmd = build_run_command(cfg, task, tdir, extra_args=extra_args, include_signer=include_signer)
     except ApiError as exc:
         with cfg.running_lock:
             cfg.running.discard(task_id)
         # 未起子进程：run_task 不会写状态，server 落 failed 供 UI 展示
         with cfg.task_lock(task_id):
-            write_status(tdir, state="failed", step="run", error=exc.message)
+            write_status(tdir, state="failed", step="run", error=exc.message, runner=runner)
         raise
-    thread = threading.Thread(target=run_task_thread, args=(cfg, tdir, task),
-                              name=f"run-{task_id}", daemon=True)
+    if runner == "external":
+        with cfg.task_lock(task_id):
+            write_status(tdir, state="running", step="waiting_result", runner=runner)
+    thread = threading.Thread(
+        target=run_task_thread,
+        args=(cfg, tdir, task, runner, extra_args, include_signer),
+        name=f"run-{task_id}", daemon=True,
+    )
     thread.start()
     return 202, {"ok": True, "task_id": task_id, "state": "running", "accepted": True,
-                 "command": cmd}
+                 "runner": runner, "command": cmd, "identity": cfg.identity()}
 
 
 def _tail_first_line(text, fallback):
@@ -735,7 +1259,8 @@ def _tail_first_line(text, fallback):
 def post_sign(cfg, task_id, body):
     if not isinstance(body, dict):
         body = {}
-    signer = str(body.get("signer") or "").strip() or "老板"
+    signer = str(body.get("signer") or body.get("confirmer") or "").strip() or cfg.owner
+    require_allowed(cfg, signer, "signer")
     tdir = task_dir(cfg, task_id)
     report = tdir / "report.json"
     if not report.is_file():
@@ -745,6 +1270,10 @@ def post_sign(cfg, task_id, body):
         raise ApiError(503, "tools/sign_delivery.py 不存在（B1 后端尚未落盘）")
     out = tdir / "signature.json"
     cmd = [find_python(cfg), "-B", str(tool), str(report), "--signer", signer, "--out", str(out)]
+    # fixture/演示报告允许「练签」，但 core.gates 仍会拒其 finalize（is_demo 不得真实交付）
+    report_doc = read_json(report) or {}
+    if isinstance(report_doc, dict) and report_doc.get("is_demo") is True:
+        cmd.append("--allow-demo")
     proc = subprocess.run(cmd, cwd=str(cfg.root), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=child_env(), timeout=120)
     if proc.returncode != 0:
@@ -771,7 +1300,7 @@ def post_sign(cfg, task_id, body):
                      signature_sha256=sha256, signed_at=sig.get("signed_at"))
     return 200, {"ok": True, "sha256": sha256, "signer": sig.get("signer") or signer,
                  "signed_at": sig.get("signed_at"), "path": str(out),
-                 "signature_file": str(out)}
+                 "signature_file": str(out), "identity": cfg.identity()}
 
 
 def post_finalize(cfg, task_id):
@@ -788,7 +1317,8 @@ def post_finalize(cfg, task_id):
     tool = cfg.root / "tools" / "finalize_delivery.py"
     if not tool.is_file():
         raise ApiError(503, "tools/finalize_delivery.py 不存在（B1 后端尚未落盘）")
-    allow_signers = os.environ.get("BOT_SIGNERS") or "老板,boss"
+    # 白名单为唯一事实源（--allow-signers，默认 老板,boss），不读 env 兜底（M1.5 spec §2.5）
+    allow_signers = ",".join(cfg.allow_signers)
     cmd = [find_python(cfg), "-B", str(tool), "--report", str(report),
            "--loop-dir", str(loop_dir), "--signature", str(sig),
            "--allow-signers", allow_signers]
@@ -829,7 +1359,70 @@ def post_finalize(cfg, task_id):
         sha256 = (read_json(sig) or {}).get("report_sha256")
     return 200, {"ok": True, "decision": decision.get("id"), "status": decision.get("status"),
                  "signer": (decision.get("approval") or {}).get("by"),
-                 "signature_sha256": sha256}
+                 "signature_sha256": sha256, "identity": cfg.identity()}
+
+
+def require_allowed(cfg, who, label):
+    """身份白名单校验（M1.5 spec §2.5）：signer/confirmer 必须在 --allow-signers 内。"""
+    name = str(who or "").strip()
+    if not name:
+        raise ApiError(400, f"缺 {label}")
+    if name not in cfg.allow_signers:
+        raise ApiError(403, f"{label}={name!r} 不在白名单（允许：{', '.join(cfg.allow_signers)}）；"
+                             f"用 --allow-signers 配置")
+    return name
+
+
+def post_gate(cfg, task_id, body):
+    """POST /api/tasks/<id>/gate：不可逆动作的人工确认/拒绝（core.gate.confirm/reject）。"""
+    if not isinstance(body, dict):
+        body = {}
+    raw_action = str(body.get("action") or body.get("decision") or "").strip().lower()
+    aliases = {
+        "approve": "confirm", "confirmed": "confirm", "pass": "confirm", "ok": "confirm",
+        "deny": "reject", "rejected": "reject", "refuse": "reject", "no": "reject",
+    }
+    action = aliases.get(raw_action, raw_action)
+    if action not in ("confirm", "reject"):
+        raise ApiError(400, "action 必须是 confirm 或 reject")
+    confirmer = str(body.get("confirmer") or body.get("signer") or "").strip() or cfg.owner
+    require_allowed(cfg, confirmer, "confirmer")
+    comment = str(body.get("comment") or body.get("note") or "").strip()
+    tdir = task_dir(cfg, task_id)
+    report = read_json(tdir / "report.json")
+    if not isinstance(report, dict):
+        raise ApiError(409, f"report.json 不存在: {task_id}（先 POST /api/tasks/{task_id}/run）")
+    module = import_core(cfg, "gate")
+    try:
+        if action == "confirm":
+            gate = module.confirm(str(tdir), confirmer, comment, report)
+        else:
+            gate = module.reject(str(tdir), confirmer, comment)
+    except ApiError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise ApiError(409, f"securityGate {action} 失败: {exc}")
+    if not isinstance(gate, dict):
+        gate = read_json(tdir / GATE_FILE)
+        if not isinstance(gate, dict):
+            gate = {}
+    payload = dict(gate)
+    payload.setdefault("status", "confirmed" if action == "confirm" else "rejected")
+    payload.update({
+        "ok": True,
+        "task_id": task_id,
+        "action": action,
+        "gate": gate,
+        "identity": cfg.identity(),
+    })
+    try:
+        with cfg.task_lock(task_id):
+            write_status(tdir, step=f"gate_{action}", gate=payload.get("status"),
+                         gate_confirmer=confirmer,
+                         gate_at=payload.get("at") or payload.get("confirmed_at"))
+    except Exception:  # noqa: BLE001 - 状态写失败不回滚 gate 本身
+        log(traceback.format_exc())
+    return 200, payload
 
 
 # --------------------------------------------------------------------------- #
@@ -849,6 +1442,10 @@ def health(cfg):
         "python": find_python(cfg),
         "pid": os.getpid(),
         "time": now_iso(),
+        "owner": cfg.owner,
+        "allow_signers": list(cfg.allow_signers),
+        "identity": cfg.identity(),
+        "runners": ["fixture", "external", "dsh"],
     }
 
 
@@ -881,6 +1478,20 @@ def _int_param(query, name, default):
         return default
 
 
+def _since_param(query):
+    """?since=n 严格校验：非整数/负数 → 400（SSE 与 JSON 增量同一口径）。"""
+    raw = (query.get("since") or [None])[0]
+    if raw is None or str(raw).strip() == "":
+        return 0
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        raise ApiError(400, f"非法 since={raw!r}（必须是 ≥0 的整数）")
+    if value < 0:
+        raise ApiError(400, f"非法 since={value}（必须是 ≥0 的整数）")
+    return value
+
+
 # --------------------------------------------------------------------------- #
 # HTTP
 # --------------------------------------------------------------------------- #
@@ -893,6 +1504,10 @@ def route_api(cfg, method, path, query, body):
         if method != "GET":
             raise ApiError(405, "method not allowed")
         return 200, packs(cfg)
+    if path == "/api/team":
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return team_view(cfg)
     if path == "/api/tasks":
         if method == "GET":
             return 200, list_tasks(cfg)
@@ -913,6 +1528,18 @@ def route_api(cfg, method, path, query, body):
         if method != "GET":
             raise ApiError(405, "method not allowed")
         return 200, get_log(cfg, task_id, _int_param(query, "after", 0))
+    if action == "events":
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return 200, get_events(cfg, task_id, _since_param(query))
+    if action == "data":
+        if method != "POST":
+            raise ApiError(405, "method not allowed")
+        return post_upload_data(cfg, task_id, body)
+    if action == "gate":
+        if method != "POST":
+            raise ApiError(405, "method not allowed")
+        return post_gate(cfg, task_id, body)
     if action == "delivery":
         if method != "GET":
             raise ApiError(405, "method not allowed")
@@ -920,7 +1547,7 @@ def route_api(cfg, method, path, query, body):
     if action == "run":
         if method != "POST":
             raise ApiError(405, "method not allowed")
-        return post_run(cfg, task_id)
+        return post_run(cfg, task_id, body)
     if action == "sign":
         if method != "POST":
             raise ApiError(405, "method not allowed")
@@ -961,6 +1588,12 @@ class BotHandler(BaseHTTPRequestHandler):
             if path.startswith("/api/"):
                 if method not in ("GET", "POST"):
                     raise ApiError(405, "method not allowed")
+                stream = str((query.get("stream") or [""])[0]).strip().lower()
+                if path.startswith("/api/tasks/") and path.endswith("/events") and stream in ("1", "true", "yes"):
+                    if method not in ("GET", "HEAD"):
+                        raise ApiError(405, "method not allowed")
+                    self._handle_sse(cfg, path, query)
+                    return
                 body = self._read_body() if method == "POST" else {}
                 status, payload = route_api(cfg, method, path, query, body)
                 self._send_json(status, payload)
@@ -981,14 +1614,54 @@ class BotHandler(BaseHTTPRequestHandler):
             except Exception:  # noqa: BLE001
                 pass
 
+    def _handle_sse(self, cfg, path, query):
+        """SSE 事件流：id: <seq> / data: <json> / 15s ": ping"；支持 since 续传。"""
+        match = TASK_ROUTE_RE.match(path)
+        if not match:
+            raise ApiError(404, f"未知端点: {path}")
+        task_id = unquote(match.group(1))
+        tdir = task_dir(cfg, task_id)
+        since = _since_param(query)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        self.close_connection = True
+        if self.command == "HEAD":
+            return
+        last = since
+        last_ping = time.time()
+        try:
+            # 首帧：注释行让客户端立刻确认连接已建立
+            self.wfile.write(b": connected\n\n")
+            self.wfile.flush()
+            while True:
+                for event in read_events(cfg, tdir / "run.log", last):
+                    frame = ("id: {}\ndata: {}\n\n".format(
+                        event["seq"], json.dumps(event, ensure_ascii=False)))
+                    self.wfile.write(frame.encode("utf-8"))
+                    last = event["seq"]
+                self.wfile.flush()
+                if time.time() - last_ping >= SSE_PING_SECONDS:
+                    self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+                    last_ping = time.time()
+                time.sleep(SSE_POLL_SECONDS)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            log(f"sse closed {task_id}: last_seq={last}")
+
     def _read_body(self):
         raw_length = self.headers.get("Content-Length")
         try:
             length = int(raw_length or 0)
         except (TypeError, ValueError):
             raise ApiError(400, "非法 Content-Length")
-        if length > 4_000_000:
-            raise ApiError(413, "body 过大")
+        if length > MAX_BODY_BYTES:
+            raise ApiError(413, f"body 过大（上限 {MAX_BODY_BYTES} bytes）")
         raw = self.rfile.read(length) if length > 0 else b""
         if not raw.strip():
             return {}
@@ -1049,20 +1722,24 @@ class BotHTTPServer(ThreadingHTTPServer):
 # main
 # --------------------------------------------------------------------------- #
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="bot-team 本地服务（M1 §2.6）")
+    parser = argparse.ArgumentParser(description="bot-team 本地服务（M1 §2.6 / M1.5 §2.5）")
     parser.add_argument("--host", default=os.environ.get("BOT_HOST") or DEFAULT_HOST,
                         help="绑定地址（默认 127.0.0.1）")
     parser.add_argument("--port", type=int, default=int(os.environ.get("BOT_PORT") or DEFAULT_PORT),
                         help="端口（默认 8787）")
     parser.add_argument("--root", default=os.environ.get("BOT_ROOT") or str(DEFAULT_ROOT),
                         help="代码根 $BT（默认 server/ 的上一级）")
+    parser.add_argument("--owner", default=os.environ.get("BOT_OWNER") or DEFAULT_OWNER,
+                        help=f"工作台所有者/默认签字人（默认 {DEFAULT_OWNER}）")
+    parser.add_argument("--allow-signers", default=DEFAULT_ALLOW_SIGNERS,
+                        help=f"签字人/确认人白名单，逗号分隔（默认 {DEFAULT_ALLOW_SIGNERS}）")
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     _enable_utf8_stdio()
     args = parse_args(argv)
-    cfg = Config(Path(args.root))
+    cfg = Config(Path(args.root), owner=args.owner, allow_signers=args.allow_signers)
     if not cfg.ui.is_dir():
         log(f"[warn] ui/ 不存在: {cfg.ui}")
     if not (cfg.root / "tools").is_dir():
@@ -1076,6 +1753,7 @@ def main(argv=None):
     log(f"root={cfg.root}")
     log(f"ui={cfg.ui} runs={cfg.runs}")
     log(f"python={find_python(cfg)}")
+    log(f"owner={cfg.owner} allow_signers={','.join(cfg.allow_signers)}")
     log(f"health=http://{args.host}:{args.port}/api/health  （Ctrl+C 停止）")
     try:
         httpd.serve_forever(poll_interval=0.2)

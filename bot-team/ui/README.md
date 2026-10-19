@@ -76,3 +76,27 @@ start "D:\项目\bot\bot-team-dsh\ui\index.html?beat=3"
 接线集中在 `ui/api-adapter.js` 的 `bindRealData` 钩子（`onMode/onTasks/onTask/onBeats/onSign/onError`），
 原有像素/动画/演示数据（`team-data.js`、`tape-data.js`、`sprites.js`）与 `tests/validate_structure.py`
 依赖的字面量（`PixelSprites`、`beats`、`openIntake`、`generateTask`、`TEAM_DATA` 等）均保持不变。
+
+## v0.8 多任务 + 事件流 + 接单 + 审批门 + 团队真数据（M1.5 · 2026-10-19）
+
+服务健康时（`/api/health` ok）自动进入工作台模式；服务未起或 `file://` 打开时仍是原静态演示。新增：
+
+- **任务栏**（顶栏下）：`/api/tasks` 列表 + 状态点/标题/更新时间，点击切换当前任务（`APIAdapter.selectTask(id)`）。
+  舞台、交付卡、KPI、本场数据、交付墙全部跟随当前任务；`?task=<task_id>` 可深链。
+- **接单抽屉**：工厂/产线/指标/T 窗口/基线窗口/基线值/负责人 + T 与 T30 JSON 文件选择
+  （浏览器读文本 → 预检条数 → `POST /api/tasks`，服务端落 `runs/<id>/data/`）。提交后显示 `task_id`、数据就绪、
+  runner（`fixture` 演示 / `external` 外部执行 / `dsh` 未接）；fixture 模式顶栏显式角标「演示数据」。
+- **审批门**：报告 `security_gate_requested` 或含 irreversible 动作时，交付卡上方显示 gate 状态；
+  「审批门」按钮 → 确认/拒绝 + 确认人（默认老板）+ 备注 → `POST /api/tasks/<id>/gate`；
+  确认后刷新交付卡并允许 `/finalize`；已确认显示 confirmed_by/at，拒绝显示原因。无报告时按钮禁用。
+- **事件流舞台**：`GET /api/tasks/<id>/events?stream=1` SSE（`EventSource` + `since` 续传 + 断线重连），
+  按 `kind`（user/speak/tool/think/status/artifact）渲染事件流；角色按 `role/agent` 映射座位，
+  s1‖s2 并行阶段同屏；无 SSE 回退 `GET /log?after=n` 轮询；再失败回退静态 5 拍 demo。
+- **团队真数据**：`/api/team` 驱动货架/员工详情/班组卡；货架六态 Tab（全部/在岗/常驻/工序/待上架/缺件/退役）
+  + 状态徽章；详情显示 persona/skills/成果样例/相关任务；用 `sprite_key` 映射像素头像（修长 slug 错位灰头像）。
+- **自适应班组**：座位由当前 crew 的 steps 动态生成（不再写死 4 人）；`<1100px` 任务栏/右侧卡自适应堆叠。
+
+自测（B6）：后台起 `server/app.py --port 8792` → `/api/health` `pack=manufacturing v=1.1.0`、`/api/team` 7 员工 4 班组、
+页面 200 含 `taskbar/stageFeed/gateModal/事件流`；建单（demo T/T30）→ `POST /run {"runner":"fixture"}` →
+state `assembled/awaiting_sign`、`/api/tasks/<id>/events` SSE 164 条、`/gate` confirm 成功、
+`/sign` 返回 sha256 == `runs/<id>/report.json` 文件哈希、demo finalize 409（设计如此）。
