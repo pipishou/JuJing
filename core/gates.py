@@ -4,8 +4,16 @@
 一、validate_real_report(report, base)
     real 报告不允许：demo/占位证据、缺证据、data_refs 不存在或 hash 不符、
     scorecard.total/verdict 缺失或与独立计算不一致。
-二、check_finalize(decision, report, signature, allowlist) -> list[str]
+二、check_finalize(decision, report, signature, allowlist,
+                   gate_confirmed=False) -> list[str]
     空列表 = 可以 approved；任何一条 = 必须拒绝。
+    先做 report_shape_errors 形状校验：畸形结构（顶层非 dict / security_gate 非
+    dict / decision_log_entry 非 dict / recommendation 非 list 等）直接 fail-closed。
+    报告只要「声称需要 securityGate」（security_gate_requested / 自报
+    security_gate / 不可逆建议），就必须由 CLI 侧校验过 gate.json 后带
+    gate_confirmed=True 传入；否则一律 fail-closed——不得仅凭报告自证放行。
+    task-13 起移除 allow_legacy_gate 死开关（demo 链本就无条件拒绝，开关无法
+    真实生效，已删除，不留绕过口）。
 三、finalize 另需在 CLI 侧核对 signature.report_sha256 == sha256(report 文件)，
    这里通过 report["_sha256"]（CLI 注入）比对。
 只依赖 stdlib。
@@ -14,9 +22,18 @@ import json
 
 from . import provenance, report_contract
 
-PLACEHOLDER_TOKENS = ("demo 占位", "demo占位", "占位", "placeholder", "…")
+PLACEHOLDER_TOKENS = ("demo 占位", "demo占位", "占位", "placeholder", "…", "待补充", "待核实")
+
+# 零宽字符（ZWSP/ZWNJ/ZWJ/WORD JOINER/BOM/SOFT HYPHEN/MONGOLIAN VOWEL SEPARATOR）：
+# 用来伪装「占\u200b位」绕过占位检测，判据前必须先剔掉（M1 遗留硬化）
+ZERO_WIDTH_CHARS = "\u200b\u200c\u200d\u2060\ufeff\u00ad\u180e"
 
 DECISION_LOG_REQUIRED = ("id", "actor", "context", "advice", "expected_result", "verification_plan")
+
+
+def strip_zero_width(text):
+    """剔除零宽字符（按码点删除，不改变其余字符）。"""
+    return str(text).translate({ord(ch): None for ch in ZERO_WIDTH_CHARS})
 
 
 class GateError(RuntimeError):
@@ -24,11 +41,14 @@ class GateError(RuntimeError):
 
 
 def is_placeholder_evidence(text):
-    """文本是否含占位标记（demo 占位/占位/placeholder/省略号）。"""
+    """文本是否含占位标记（demo 占位/占位/placeholder/省略号/待补充/待核实）。
+
+    零宽字符先剔除再判，避免「占\\u200b位」这类伪装绕过（M1 遗留硬化）。
+    """
     if text is None:
         return True
-    s = str(text)
-    if not s.strip():
+    s = strip_zero_width(text).strip()
+    if not s:
         return True
     low = s.lower()
     return any(tok.lower() in low for tok in PLACEHOLDER_TOKENS)
@@ -153,11 +173,102 @@ def validate_real_report(report, base):
         raise GateError("；".join(errors))
 
 
-def check_finalize(decision, report, signature, allowlist=()):
+def _nonempty(value):
+    return str(value or "").strip() != ""
+
+
+def report_shape_errors(report):
+    """报告结构校验（task-13：畸形形状不得被静默跳过，一律 fail-closed）。
+
+    判定面形状敏感曾造成 fail-open：把 recommendation 改成 dict、security_gate
+    改成字符串、decision_log_entry 改成非 dict 时，旧实现静默跳过 gate 判定直接
+    approved。这里把「未知/畸形形状」统一判成错误，调用方（CLI/check_finalize）
+    必须在做任何字段判定前先过这一关，且不得让 AttributeError/TypeError 冒泡。
+    """
+    if not isinstance(report, dict):
+        return [f"报告顶层不是 JSON 对象（实际 {type(report).__name__}）：结构畸形，fail-closed 拒绝 approved"]
+    errors = []
+    sg = report.get("security_gate")
+    if sg is not None and not isinstance(sg, dict):
+        errors.append(f"报告 security_gate 不是 dict（实际 {type(sg).__name__}）：结构畸形，fail-closed 拒绝 approved")
+    dl = report.get("decision_log_entry")
+    if dl is not None and not isinstance(dl, dict):
+        errors.append(f"decision_log_entry 不是 dict（实际 {type(dl).__name__}）：结构畸形，fail-closed 拒绝 approved")
+    elif isinstance(dl, dict):
+        dlg = dl.get("security_gate")
+        if dlg is not None and not isinstance(dlg, dict):
+            errors.append(f"decision_log_entry.security_gate 不是 dict（实际 {type(dlg).__name__}）："
+                          "结构畸形，fail-closed 拒绝 approved")
+    recs = report.get("recommendation")
+    if recs is not None and not isinstance(recs, list):
+        errors.append(f"recommendation 不是 list（实际 {type(recs).__name__}）：结构畸形，fail-closed 拒绝 approved")
+    elif isinstance(recs, list):
+        for i, rec in enumerate(recs):
+            if not isinstance(rec, dict):
+                errors.append(f"recommendation[{i}] 不是 dict（实际 {type(rec).__name__}）："
+                              "结构畸形，fail-closed 拒绝 approved")
+    sgr = report.get("security_gate_requested")
+    if sgr is not None and not isinstance(sgr, bool):
+        errors.append(f"security_gate_requested 不是 bool（实际 {type(sgr).__name__}）："
+                      "按「声称需要安全门」处理，fail-closed 拒绝 approved")
+    return errors
+
+
+def report_claims_security_gate(report):
+    """报告是否「声称需要 securityGate」（≠ 已有外部确认）。
+
+    任一成立即视为声称（task-12 收紧 A9 fail-open；task-13 形状硬化）：
+    - report 顶层非 dict（无法判定 → 按声称处理）；
+    - report.security_gate_requested 为真，或为「非 bool 的非 None 值」（如 "false"）；
+    - 顶层 report.security_gate、decision_log_entry、decision_log_entry.security_gate、
+      recommendation 存在但形状异常（非 dict/非 list）；
+    - 顶层或 dl 的 security_gate.status / confirmed_by 非空；
+    - 任一 recommendation.irreversibility == "irreversible"。
+    这种报告缺 gate.json 外部确认记录时必须拒绝，不能靠报告自证。
+    """
+    if not isinstance(report, dict):
+        return True
+    sgr = report.get("security_gate_requested")
+    if isinstance(sgr, bool):
+        if sgr:
+            return True
+    elif sgr is not None:
+        # task-13：非 bool（如字符串 "false"）一律按声称需要安全门处理（fail-closed 方向）
+        return True
+    if "security_gate" in report and report.get("security_gate") is not None \
+            and not isinstance(report.get("security_gate"), dict):
+        return True
+    top = report.get("security_gate")
+    if isinstance(top, dict) and (_nonempty(top.get("status")) or _nonempty(top.get("confirmed_by"))):
+        return True
+    dl = report.get("decision_log_entry")
+    if dl is not None and not isinstance(dl, dict):
+        return True
+    if isinstance(dl, dict):
+        dlg = dl.get("security_gate")
+        if dlg is not None and not isinstance(dlg, dict):
+            return True
+        if isinstance(dlg, dict) and (_nonempty(dlg.get("status")) or _nonempty(dlg.get("confirmed_by"))):
+            return True
+    recs = report.get("recommendation")
+    if recs is not None and not isinstance(recs, list):
+        return True
+    for rec in recs or []:
+        if not isinstance(rec, dict):
+            return True
+        if rec.get("irreversibility") == "irreversible":
+            return True
+    return False
+
+
+def check_finalize(decision, report, signature, allowlist=(), gate_confirmed=False):
     """签字收口门：返回拒绝原因列表；空列表=可 approved。"""
+    # 0) 形状校验优先：畸形结构直接 fail-closed，不进入任何字段判定（task-13）
+    shape_errors = report_shape_errors(report)
+    if shape_errors:
+        return shape_errors
     reasons = []
     decision = decision if isinstance(decision, dict) else {}
-    report = report if isinstance(report, dict) else {}
     signature = signature if isinstance(signature, dict) else {}
 
     # 1) demo 不得走真实交付
@@ -175,10 +286,14 @@ def check_finalize(decision, report, signature, allowlist=()):
 
     # 4) 签名内容
     signer = str(signature.get("signer") or "").strip()
+    allow = [str(x).strip() for x in (allowlist or ()) if str(x).strip()]
     if not signer:
         reasons.append("签名缺少 signer（伪签名：只有 report_sha256、没有签字人）")
-    elif allowlist and signer not in set(str(x) for x in allowlist):
-        reasons.append(f"signer={signer!r} 不在签字人白名单 {list(allowlist)}")
+    elif not allow:
+        # M1 遗留硬化：空白名单必须 fail closed（M1 里 `elif allowlist and ...` 会放行）
+        reasons.append("未配置 signer 白名单（allowlist 为空）：签字收口 fail closed，拒绝 approved")
+    elif signer not in set(allow):
+        reasons.append(f"signer={signer!r} 不在签字人白名单 {allow}")
     sha = signature.get("report_sha256")
     if not sha:
         reasons.append("签名缺少 report_sha256")
@@ -188,17 +303,25 @@ def check_finalize(decision, report, signature, allowlist=()):
     if sig_task and report.get("task_id") and sig_task != report.get("task_id"):
         reasons.append(f"签名 task_id={sig_task!r} 与被签报告 task_id={report.get('task_id')!r} 不一致")
 
-    # 5) securityGate：不可逆动作必须人工确认后才可 approved
+    # 5) securityGate：不可逆动作必须「外部确认」（gate.json 人工确认留痕）才可 approved。
+    #    task-12 收紧：报告自证 security_gate=confirmed 不再算数，必须由 CLI 校验过
+    #    gate.json（status/confirmed_by/白名单/history/审计事件）后传 gate_confirmed=True。
     dl = report.get("decision_log_entry") or {}
     gate = dl.get("security_gate")
-    irreversible = any((x or {}).get("irreversibility") == "irreversible"
-                       for x in (report.get("recommendation") or []) if isinstance(x, dict))
-    need_gate = bool(report.get("security_gate_requested")) or irreversible or gate is not None
-    if need_gate:
-        if not isinstance(gate, dict) or not gate:
-            reasons.append("报告含不可逆动作/请求了 securityGate，但缺少 security_gate 记录")
-        elif gate.get("status") != "confirmed":
-            reasons.append(f"securityGate 未确认（status={gate.get('status')!r}），不得 approved")
+    claims_gate = report_claims_security_gate(report)
+    if claims_gate:
+        if gate_confirmed:
+            if not isinstance(gate, dict) or not gate:
+                reasons.append("gate.json 已验证，但报告缺少 security_gate 记录（未同步人工确认结果）")
+            elif gate.get("status") != "confirmed":
+                reasons.append(f"gate.json 已验证，但报告 security_gate.status={gate.get('status')!r}，不得 approved")
+            elif not str(gate.get("confirmed_by") or "").strip():
+                reasons.append("securityGate 已确认但 confirmed_by 为空（人工确认不可追溯），不得 approved")
+        else:
+            reasons.append(
+                "报告声称需要 securityGate（不可逆动作/security_gate_requested/报告自报 security_gate），"
+                "但缺少 gate.json 外部确认记录（fail-closed）：不得仅凭报告自证 approved"
+            )
     return reasons
 
 

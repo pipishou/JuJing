@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core import gates, pack as pack_mod, provenance, report_contract  # noqa: E402
+from core import events, gates, pack as pack_mod, provenance, report_contract  # noqa: E402
 
 SIX = report_contract.SIX_DIMS
 DEFAULT_DATA_REFS = ["demo/material_refill_T.json", "demo/material_refill_T30.json"]
@@ -43,6 +43,20 @@ def log(msg):
 def fail(msg, code=2):
     print(f"[assemble][FAIL] {msg}", file=sys.stderr)
     return code
+
+
+def emit_event(args, phase, role, line, kind="status", meta=None):
+    """事件统一走 core.events.append_event（M1.5 §2.2）；未给 --events-dir 时不写。"""
+    events_dir = str(getattr(args, "events_dir", "") or "").strip()
+    if not events_dir:
+        return
+    ev = {"phase": phase, "role": role, "kind": kind, "line": line}
+    if isinstance(meta, dict):
+        ev["meta"] = meta
+    try:
+        events.append_event(str(Path(events_dir) / "run.log"), ev)
+    except Exception as exc:  # noqa: BLE001 事件失败不拖垮报告组装
+        log(f"事件写入失败（忽略）：{exc}")
 
 
 def atomic_write_json(path, doc):
@@ -202,7 +216,11 @@ def main():
     ap.add_argument("--cost-json", default="")
     ap.add_argument("--pack-path", default="", help="industry pack json (default from core.pack)")
     ap.add_argument("--pack-id", default=pack_mod.DEFAULT_PACK_ID)
+    ap.add_argument("--events-dir", default=os.environ.get("BOT_EVENTS_DIR", ""),
+                    help="事件目录（写 <dir>/run.log，走 core.events.append_event；默认不写）")
     args = ap.parse_args()
+    emit_event(args, "s5", "host",
+               f"assemble_report start: src={args.src} out={args.out} real={bool(args.real)}")
 
     # 0) 日期先校验：非法日期必须在写任何文件之前失败
     run_day = date.today()
@@ -282,6 +300,11 @@ def main():
         "confirmed_by": None,
         "status": "pending_user_confirmation",
     } if gate_needed else None
+    if gate_needed:
+        emit_event(args, "gate", "host",
+                   "securityGate requested: 报告含不可逆动作，需人工确认 gate.json",
+                   meta={"status": "pending_user_confirmation",
+                         "requested_at": run_day.isoformat()})
 
     # 7) 文本字段缺省值（行业包阈值参与，不再硬编码 5.5%/7.2%）
     context = args.context or (
@@ -351,6 +374,10 @@ def main():
     except OSError as exc:
         return fail(f"写报告失败：{exc}")
     log(f"wrote {args.out} (is_demo={report['is_demo']}, total={scorecard['total']}, verdict={scorecard['verdict']}, roi_filled={roi_filled})")
+    emit_event(args, "s5", "host",
+               f"report written: {args.out} (is_demo={report['is_demo']}, total={scorecard['total']}, verdict={scorecard['verdict']})",
+               kind="artifact",
+               meta={"report": str(args.out), "is_demo": report["is_demo"], "total": scorecard["total"]})
 
     # 10) 四卡（analysis/goal/evidence/decision）落盘
     if args.records_dir:
@@ -374,6 +401,8 @@ def main():
             print(proc.stderr or "", file=sys.stderr, end="")
             return fail(f"四卡落盘失败（write_loop_bundle exit={proc.returncode}）")
         log(f"loop bundle written: {args.records_dir}")
+        emit_event(args, "s5", "host", f"loop bundle written: {args.records_dir}",
+                   kind="artifact", meta={"loop": str(args.records_dir)})
 
     return 0
 
