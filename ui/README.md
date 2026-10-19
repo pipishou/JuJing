@@ -55,3 +55,24 @@ start "D:\项目\bot\bot-team-dsh\ui\index.html?beat=3"
 - 员工/班组数据：`team/employees.yaml`、`team/crews.yaml`、`team/shelf.yaml`、`team/delivery-card.schema.yaml`（v0.2 已落）；
 - 舞台数据：DSH 会话日志（JSONL.zstd）→ 事件适配器 → tape（替代旧 stage-viewer 的 Octop tape）；
 - 交付卡：`runs/demo-report.json` 同构 + 签字状态机。
+
+## 真数据模式（B2 · 2026-10-19）
+
+`index.html` 末尾新增 `api-adapter.js`（`<script src="api-adapter.js">`）。打开页面时先探测同源 `/api/health`：
+
+- **成功** → 真数据模式：从 `/api/tasks` 拉任务与 KPI，从 `/api/tasks/<id>` 渲染交付卡/本场数据，
+  从 `/api/tasks/<id>/log` 的 phase 事件生成舞台五拍台词；顶栏出现「▶ 运行本任务」，
+  签字按钮改为 `POST /api/tasks/<id>/sign`，签字栏显示工具返回的报告 SHA256 前 16 位。
+- **失败**（`file://` 打开或本地服务未启动）→ 自动保持原有静态演示，动画照常、控制台无未捕获异常。
+
+启动本地服务（见 `server/README.md`）：
+
+```powershell
+& "D:\work\产品类\个人产品\bot-2\venv\Scripts\python.exe" -B server/app.py
+# 浏览器打开 http://127.0.0.1:8787/
+```
+
+`?task=<task_id>` 可指定要渲染的 `runs/<task_id>/`；不指定时优先选已有报告的任务。
+接线集中在 `ui/api-adapter.js` 的 `bindRealData` 钩子（`onMode/onTasks/onTask/onBeats/onSign/onError`），
+原有像素/动画/演示数据（`team-data.js`、`tape-data.js`、`sprites.js`）与 `tests/validate_structure.py`
+依赖的字面量（`PixelSprites`、`beats`、`openIntake`、`generateTask`、`TEAM_DATA` 等）均保持不变。

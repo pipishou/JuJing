@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
@@ -250,6 +250,7 @@
       <div class="crumb">AI 员工事务所 / <b>舞台实况</b> · 制造业经营归因班组</div>
       <div class="top-actions">
         <button class="btn" onclick="openIntake()">新建任务</button>
+        <button class="btn" id="runBtn" onclick="runCurrentTask()" style="display:none">▶ 运行本任务</button>
         <button class="btn" onclick="toast('已复制过程链接（原型）')">复制过程链接</button>
         <button class="btn" onclick="toast('交付卡 PDF 已导出（原型）')">导出交付卡</button>
         <button class="btn primary" onclick="openG0()">预派发确认</button>
@@ -258,16 +259,16 @@
 
     <div class="kpis">
       <div class="kpi"><div><div class="lab">在册员工</div><div class="val" id="kpiActive">7</div></div><span class="tag" id="kpiTag">3 在岗 · 3 常驻 · 1 工序</span></div>
-      <div class="kpi"><div><div class="lab">运行班组</div><div class="val">1</div></div><span class="tag">补料率归因</span></div>
-      <div class="kpi"><div><div class="lab">本周交付</div><div class="val">12</div></div><span class="tag">9 已回看</span></div>
-      <div class="kpi"><div><div class="lab">待回看</div><div class="val">3</div></div><span class="tag">最近 T+7</span></div>
+      <div class="kpi"><div><div class="lab">运行班组</div><div class="val" id="kpiCrew">1</div></div><span class="tag" id="kpiCrewTag">补料率归因</span></div>
+      <div class="kpi"><div><div class="lab">本周交付</div><div class="val" id="kpiWeek">12</div></div><span class="tag" id="kpiWeekTag">9 已回看</span></div>
+      <div class="kpi"><div><div class="lab">待回看</div><div class="val" id="kpiReview">3</div></div><span class="tag" id="kpiReviewTag">最近 T+7</span></div>
     </div>
 
     <div class="grid">
       <div class="stack">
       <section class="card stage-wrap">
         <div class="stage-head">
-          <div><div class="act">第 3 场 · 补料率异常归因 · ACT III</div><div class="title">B 产线补料率 7 日爬升（5.1% → 7.2%）</div></div>
+          <div><div class="act" id="stageAct">第 3 场 · 补料率异常归因 · ACT III</div><div class="title" id="stageTitle">B 产线补料率 7 日爬升（5.1% → 7.2%）</div></div>
           <div class="ctrl"><button id="modeBtn" onclick="toggleMode()">真实 tape</button><button id="playBtn" onclick="togglePlay()">⏸ 暂停演出</button><span class="pill live">LIVE</span></div>
         </div>
         <div class="stage" id="stage">
@@ -347,17 +348,17 @@
           <div class="subtitle"><span class="role" id="subRole">S1</span><span id="subText">咨询分析师正在对 T 与 T-30 做快照对比……</span></div>
           <div class="timeline" id="timeline"><div class="beat"><i></i></div><div class="beat"><i></i></div><div class="beat"><i></i></div><div class="beat"><i></i></div><div class="beat"><i></i></div></div>
         </div>
-        <div class="stage-legend"><span>舞台数据：<b>DSH 会话事件</b>（原型用演示数据）</span><span>①快照 ②因素 ③排除 ④建议 ⑤收口</span><span id="beatName">第 1 幕 · 快照</span></div>
+        <div class="stage-legend"><span id="stageSource">舞台数据：<b>DSH 会话事件</b>（原型用演示数据）</span><span>①快照 ②因素 ③排除 ④建议 ⑤收口</span><span id="beatName">第 1 幕 · 快照</span></div>
       </section>
       <section class="card" id="stageInfo">
         <div class="card-h"><div><h3>本场数据</h3><div class="sub">演出级证据：每一步可回看</div></div><span class="pill">演出</span></div>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 14px 12px">
-          <div><div style="font-size:10px;color:#9ca3af">角色</div><div style="font-size:19px;font-weight:700">4</div></div>
-          <div><div style="font-size:10px;color:#9ca3af">步数</div><div style="font-size:19px;font-weight:700">5</div></div>
-          <div><div style="font-size:10px;color:#9ca3af">时长</div><div style="font-size:19px;font-weight:700">24.3<span style="font-size:10px">s</span></div></div>
-          <div><div style="font-size:10px;color:#9ca3af">成本</div><div style="font-size:19px;font-weight:700">¥0.02</div></div>
+          <div><div style="font-size:10px;color:#9ca3af">角色</div><div style="font-size:19px;font-weight:700" id="siRole">4</div></div>
+          <div><div style="font-size:10px;color:#9ca3af">步数</div><div style="font-size:19px;font-weight:700" id="siStep">5</div></div>
+          <div><div style="font-size:10px;color:#9ca3af">时长</div><div style="font-size:19px;font-weight:700" id="siDur">24.3<span style="font-size:10px">s</span></div></div>
+          <div><div style="font-size:10px;color:#9ca3af">成本</div><div style="font-size:19px;font-weight:700" id="siCost">¥0.02</div></div>
         </div>
-        <div class="note" style="padding:0 14px 12px">证据链：数据快照 → 因素表 → 归因 → 建议 → 交付卡；全部随卡归档，T+7 自动回看。成本：AI ¥0.02 · 人工节省 2.5h（示例）。</div>
+        <div class="note" id="stageInfoNote" style="padding:0 14px 12px">证据链：数据快照 → 因素表 → 归因 → 建议 → 交付卡；全部随卡归档，T+7 自动回看。成本：AI ¥0.02 · 人工节省 2.5h（示例）。</div>
       </section>
       </div>
 
@@ -377,17 +378,17 @@
         </section>
 
         <section class="card paper" id="paper">
-          <div class="card-h"><div><h3>交付卡 · 待老板签字</h3><div class="sub">DL-20261018-001 · 2026-10-18 · B 产线</div></div><span class="pill">待签</span></div>
+          <div class="card-h"><div><h3 id="paperTitle">交付卡 · 待老板签字</h3><div class="sub" id="paperSub">DL-20261018-001 · 2026-10-18 · B 产线</div></div><span class="pill" id="paperPill">待签</span></div>
           <div class="stamp" id="stamp">待 签 字</div>
-          <div class="letter">
+          <div class="letter" id="paperLetter">
             <div class="lh"><span>经营异常归因报告</span><span>第 1 / 1 页</span></div>
-            <div class="rt">补料率 7 日爬升（5.1% → 7.2%）</div>
-            <div class="meta"><span>报告编号 DL-20261018-001</span><span>数据：demo T / T-30</span><span>置信：中</span></div>
+            <div class="rt" id="paperRt">补料率 7 日爬升（5.1% → 7.2%）</div>
+            <div class="meta" id="paperMeta"><span>报告编号 DL-20261018-001</span><span>数据：demo T / T-30</span><span>置信：中</span></div>
             <div class="finding-row"><span class="nm">模具状态</span><span class="bar"><i style="width:63%;background:linear-gradient(90deg,#7c3aed,#a78bfa)"></i></span><span class="pct">0.63</span></div>
             <div class="finding-row"><span class="nm">保养记录</span><span class="bar"><i style="width:47%;background:linear-gradient(90deg,#d97706,#fbbf24)"></i></span><span class="pct">0.47</span></div>
-            <div class="meta-row"><span class="chip">不确定性 12 条</span><span class="chip">M-03 超期</span><span class="chip">信息员换人</span><span class="chip" id="chipAiCost">AI 成本 ¥0.02</span><span class="chip" id="chipHumanSaved">人工节省 2.5h</span></div>
-            <div class="roi"><b>¥1,500</b><span>净省：保养 ¥500 &lt; 换模 ¥800 + 停机 ¥1200×1</span></div>
-            <div class="next">下一步：10-25 复查 7 日均值 ≤5.40%；未达标则库存备模更换 M-03。</div>
+            <div class="meta-row" id="paperChips"><span class="chip">不确定性 12 条</span><span class="chip">M-03 超期</span><span class="chip">信息员换人</span><span class="chip" id="chipAiCost">AI 成本 ¥0.02</span><span class="chip" id="chipHumanSaved">人工节省 2.5h</span></div>
+            <div class="roi" id="paperRoi"><b>¥1,500</b><span>净省：保养 ¥500 &lt; 换模 ¥800 + 停机 ¥1200×1</span></div>
+            <div class="next" id="paperNext">下一步：10-25 复查 7 日均值 ≤5.40%；未达标则库存备模更换 M-03。</div>
           </div>
           <div class="sign">
             <div class="line">报告人<b>工作助理（AI）</b></div>
@@ -476,6 +477,7 @@
 <script src="team-data.js"></script>
 <script src="tape-data.js"></script>
 <script src="sprites.js"></script>
+<script src="api-adapter.js"></script>
 <script>
   const EMPLOYEES = [
     {id:'host', name:'工作助理', role:'L3 · 收口', layer:'L3', cat:'resident', state:'res', stateText:'常驻', init:'host', tags:['接单','DAG','交付卡'], sample:'交付卡 DL-20261018-001', summary:'接单、出 DAG、预派发确认、收敛报告、写决策日志与交付卡。', hireable:false},
@@ -802,8 +804,34 @@
 
   /* delivery card sign */
   let signed = false, rejected = false;
+  function applySignedState(signer, sha256, signedAt){
+    signed = true; rejected = false;
+    const s = document.getElementById('stamp');
+    s.textContent = '已 签 字'; s.classList.add('signed');
+    document.getElementById('ok').classList.add('show');
+    const bs = document.getElementById('bossSigned');
+    bs.style.display = 'block';
+    bs.textContent = '已签 · ' + ((signedAt || '').slice(0, 10) || new Date().toISOString().slice(0, 10)) + (signer ? ' · ' + signer : '');
+    document.getElementById('signBtn').disabled = true;
+    const hash = document.getElementById('sigHash');
+    if (hash) hash.textContent = '签字哈希 SHA256 ' + (sha256 || '') + '（sign_delivery.py · signature.json）';
+  }
   async function signPaper(){
     if(signed) return;
+    const adapter = window.APIAdapter;
+    const live = adapter && adapter.isLive() && adapter.currentTaskId();
+    if(live){
+      const signer = prompt('签字人（写入 signature.json 的 signer）', '老板');
+      if(!signer) return;
+      try {
+        const result = await adapter.sign(signer);
+        applySignedState(result.signer || signer, result.sha256, result.signed_at);
+        toast('已签字：SHA256 ' + String(result.sha256 || '').slice(0,8) + '…');
+      } catch(e) {
+        toast('签字失败：' + (e && e.message ? e.message : e));
+      }
+      return;
+    }
     signed = true; rejected = false;
     const s = document.getElementById('stamp');
     s.textContent = '已 签 字'; s.classList.add('signed');
@@ -834,12 +862,11 @@
   /* 接单：生成 task JSON（真实任务入口） */
   function openIntake(){ document.getElementById('intake').classList.add('show'); }
   function closeIntake(){ document.getElementById('intake').classList.remove('show'); }
-  function generateTask(){
+  async function generateTask(){
     const now = new Date();
     const pad = n => String(n).padStart(2,'0');
     const date = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate());
     const task = {
-      task_id: 'T-' + date.replace(/-/g,'') + '-01',
       plant: document.getElementById('iPlant').value || '',
       line: document.getElementById('iLine').value || '',
       metric: document.getElementById('iMetric').value || '',
@@ -852,6 +879,22 @@
       created_at: date,
       notes: '11 因素缺失项见 data-contract.md；不可逆动作只呈请不执行。'
     };
+    const adapter = window.APIAdapter;
+    if (adapter && adapter.isLive()) {
+      try {
+        const saved = await adapter.create(task);
+        const preview = Object.assign({}, saved);
+        delete preview.ok;
+        document.getElementById('intakePreview').textContent = JSON.stringify(preview, null, 2);
+        closeIntake();
+        toast('已建任务：' + (saved.task_id || '?') + '（runs/ 已落盘，可点「运行本任务」）');
+        return;
+      } catch(e) {
+        toast('建任务失败：' + (e && e.message ? e.message : e));
+        return;
+      }
+    }
+    task.task_id = 'T-' + date.replace(/-/g,'') + '-01';
     document.getElementById('intakePreview').textContent = JSON.stringify(task, null, 2);
     const blob = new Blob([JSON.stringify(task, null, 2)], {type:'application/json'});
     const a = document.createElement('a');
@@ -868,6 +911,146 @@
   }
   function openG0(){ document.getElementById('g0').classList.add('show'); }
   function closeG0(){ document.getElementById('g0').classList.remove('show'); }
+
+  /* ---- M1 真数据适配（ui/api-adapter.js）：健康检查失败时静默保持静态演示 ---- */
+  async function runCurrentTask(){
+    const adapter = window.APIAdapter;
+    if (!adapter || !adapter.isLive()) { toast('需本地服务：python -B server/app.py --port 8787'); return; }
+    if (!adapter.currentTaskId()) { toast('先在「新建任务」里建一单'); return; }
+    try {
+      const r = await adapter.run();
+      toast('已开始运行：' + ((r && r.state) || 'running') + '（后台线程）');
+    } catch(e) { toast('运行失败：' + (e && e.message ? e.message : e)); }
+  }
+  async function finalizeCurrentTask(){
+    const adapter = window.APIAdapter;
+    if (!adapter || !adapter.isLive()) { toast('需本地服务'); return; }
+    try {
+      const r = await adapter.finalize();
+      toast('finalize 通过：' + ((r && r.status) || 'approved'));
+    } catch(e) { toast('finalize 未通过：' + (e && e.message ? e.message : e)); }
+  }
+
+  (function bindRealData(){
+    const adapter = window.APIAdapter;
+    if (!adapter) return;
+    const setText = (id, value) => { const el = document.getElementById(id); if (el && value != null) el.textContent = value; };
+    const esc = value => String(value == null ? '' : value).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+    function renderKpis(list, summary){
+      setText('kpiCrew', summary.running);
+      setText('kpiCrewTag', (list[0] && list[0].title) || '班组运行中');
+      setText('kpiWeek', summary.week);
+      setText('kpiWeekTag', summary.delivered + ' 已交付 · ' + summary.review + ' 待回看');
+      setText('kpiReview', summary.review);
+      setText('kpiReviewTag', summary.nextDue ? ('最近回看 ' + summary.nextDue) : '近 7 天无回看');
+    }
+
+    function renderStage(model, summary){
+      if (mode === 'tape') return;
+      if (model && model.title) setText('stageTitle', model.title);
+      if (model) setText('stageAct', (adapter.currentTaskId() || '—') + ' · ' + (model.state || 'created') + (model.isDemo ? ' · DEMO' : ''));
+      const log = adapter.currentLog();
+      const phases = {};
+      log.forEach(ev => { if (ev && ev.phase) phases[ev.phase] = true; });
+      const steps = Object.keys(phases).length;
+      const times = log.map(ev => Date.parse(ev.ts || '')).filter(Number.isFinite);
+      let dur = '—';
+      if (times.length >= 2) {
+        const secs = Math.max(0, (Math.max.apply(null, times) - Math.min.apply(null, times)) / 1000);
+        dur = secs >= 60 ? (secs / 60).toFixed(1) + 'm' : secs.toFixed(1) + 's';
+      }
+      setText('siRole', model && model.report ? (Object.keys(model.report.role_coverage || {}).length || 4) : '—');
+      setText('siStep', steps || (model && model.report ? 5 : '—'));
+      setText('siDur', dur);
+      const detail = adapter.currentDetail();
+      const cost = detail && detail.loop && detail.loop.cost;
+      setText('siCost', cost && cost.ai_cost_cny != null ? ('¥' + cost.ai_cost_cny) : '—');
+      const note = document.getElementById('stageInfoNote');
+      if (note && model && model.log) {
+        const refs = (model.refs || []).map(r => (r && r.path) ? String(r.path).split(/[\\/]/).pop() : String(r)).join(' → ') || '—';
+        note.textContent = '证据链：' + refs + '；决策日志 ' + (model.log.id || '—') + '；' + (model.log.expected_result || 'T+7 自动回看') + '。';
+      }
+    }
+
+    function renderDelivery(model){
+      if (!model || !model.report) return;
+      const report = model.report;
+      const sig = model.signature;
+      setText('paperTitle', sig ? '交付卡 · 已签字' : (model.isDemo ? '交付卡 · DEMO 不可签' : '交付卡 · 待老板签字'));
+      setText('paperSub', ((model.log && model.log.id) || 'DL-—') + ' · ' + (report.generated_at || '—') + ' · ' + ((model.task && model.task.line) ? model.task.line + ' 线' : '—'));
+      setText('paperPill', sig ? '已签' : (model.isDemo ? 'DEMO' : '待签'));
+      setText('paperRt', model.title || '—');
+      const meta = document.getElementById('paperMeta');
+      if (meta) meta.innerHTML = '<span>报告编号 ' + esc(model.log && model.log.id) + '</span><span>数据：' + esc((model.refs || []).length ? (model.refs.length + ' 份带 sha256') : '—') + '</span><span>置信：' + esc(model.score.verdict || '—') + (model.score.total != null ? ' · ' + model.score.total + '/100' : '') + '</span>';
+      const chips = document.getElementById('paperChips');
+      const letter = document.getElementById('paperLetter');
+      document.querySelectorAll('.paper .finding-row').forEach(el => el.remove());
+      if (chips && letter) {
+        (model.finding || []).slice(0, 2).forEach(finding => {
+          const row = document.createElement('div');
+          row.className = 'finding-row';
+          const conf = Number(finding.confidence);
+          const pct = Number.isFinite(conf) ? Math.max(0, Math.min(100, conf <= 1 ? conf * 100 : conf)) : 0;
+          row.innerHTML = '<span class="nm">' + esc(finding.factor || '—') + '</span><span class="bar"><i style="width:' + pct.toFixed(0) + '%;background:linear-gradient(90deg,#7c3aed,#a78bfa)"></i></span><span class="pct">' + esc(finding.confidence == null ? '—' : finding.confidence) + '</span>';
+          letter.insertBefore(row, chips);
+        });
+      }
+      if (chips) {
+        const gate = (model.log && model.log.security_gate && model.log.security_gate.status) || (model.report.security_gate_requested ? 'pending' : 'none');
+        chips.innerHTML = '<span class="chip">finding ' + (model.finding || []).length + ' 条</span>' +
+          '<span class="chip">不确定性 ' + (model.cannot || []).length + ' 条</span>' +
+          '<span class="chip">六维 ' + (model.score.sum != null ? model.score.sum : '—') + '/30</span>' +
+          '<span class="chip">总分 ' + (model.score.total == null ? '—' : model.score.total) + '</span>' +
+          '<span class="chip">' + esc(model.score.verdict || 'verdict 待定') + '</span>' +
+          '<span class="chip">决策 ' + esc(model.log && model.log.id) + '</span>' +
+          '<span class="chip">securityGate ' + esc(gate) + '</span>' +
+          (sig ? '<span class="chip" id="chipSig">已签 ' + esc((sig.signer || '') + ' ' + (sig.signed_at || '')) + '</span>' : '');
+      }
+      if (model.roi) {
+        const roi = document.getElementById('paperRoi');
+        if (roi) roi.innerHTML = '<b>' + esc(adapter.tools.moneyOf(model.roi.avoided || model.roi.cost) || '—') + '</b><span>' + esc(model.roi.anchor || [model.roi.cost, model.roi.avoided].filter(Boolean).join(' → ') || '—') + '</span>';
+      }
+      const next = document.getElementById('paperNext');
+      if (next) next.textContent = '下一步：' + ((model.log && model.log.expected_result) || ((model.recommendation[0] || {}).action) || '—');
+      if (sig && sig.report_sha256) applySignedState(sig.signer || '', sig.report_sha256, sig.signed_at);
+    }
+
+    adapter.init({
+      onMode(live, health, error){
+        const runBtn = document.getElementById('runBtn');
+        if (live) {
+          if (runBtn) runBtn.style.display = '';
+          const foot = document.querySelector('.foot');
+          if (foot) foot.innerHTML = '真数据模式 · 本地服务健康检查通过（pack ' + esc((health && health.version) || '—') + '）<br/>引擎：DeepSeek Harness（不改） · 交付卡读 runs/&lt;task_id&gt;/report.json';
+          const pill = document.querySelector('.stage-head .pill.live');
+          if (pill) pill.textContent = 'LIVE · 真实';
+          toast('已连上本地服务：真数据模式');
+        } else if (adapter.state.health) {
+          const pill = document.querySelector('.stage-head .pill.live');
+          if (pill) pill.textContent = 'LIVE · 离线';
+        }
+      },
+      onTasks(list, summary){ renderKpis(list, summary); },
+      onTask(model, summary){ renderStage(model, summary); renderDelivery(model); },
+      onBeats(beats, source){
+        if (mode === 'tape' || !beats || beats.length < 2) return;
+        BEATS.length = 0;
+        beats.forEach(beat => BEATS.push(beat));
+        clearInterval(timer); timer = null;
+        playing = true;
+        const pb = document.getElementById('playBtn');
+        if (pb) pb.textContent = '⏸ 暂停演出';
+        render(0);
+        timer = setInterval(next, 3000);
+        const src = document.getElementById('stageSource');
+        if (src) src.innerHTML = '舞台数据：<b>' + (source === 'run.log' ? 'run.log 实时事件' : 'report.json 报告') + '</b>';
+        toast('舞台已接入真数据：' + beats.length + ' 幕');
+      },
+      onSign(result, model){ applySignedState(result.signer || '', result.sha256, result.signed_at); },
+      onError(error){ if (adapter.state.failures <= 1) toast('本地服务异常：' + (error && error.message ? error.message : error)); }
+    });
+  })();
 </script>
 </body>
 </html>
