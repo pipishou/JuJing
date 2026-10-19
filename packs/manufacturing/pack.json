@@ -1,0 +1,29 @@
+{
+  "pack_id": "manufacturing",
+  "version": "1.0.0",
+  "industry": "制造业",
+  "thresholds": {
+    "refill_baseline_pct": 5.40,
+    "refill_target_pct": 7.2,
+    "cell_null_rate_manual": 0.10,
+    "t30_window_days": 30
+  },
+  "roi_anchors": {
+    "overtime_clean": 1200,
+    "mold_change": 800,
+    "maintenance": 500
+  },
+  "irreversible_actions": [
+    "conditional_mold_change",
+    "line_stop"
+  ],
+  "six_dims": [
+    "data_completeness",
+    "timeliness",
+    "significance",
+    "exclusivity",
+    "history",
+    "human_ai_consistency"
+  ],
+  "crew_id": "manufacturing-refill"
+}

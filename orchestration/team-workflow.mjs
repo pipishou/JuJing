@@ -8,6 +8,8 @@ const demo = `${base}/demo`;
 const dataDir = args.data_dir || demo; // 真实任务：把 T/T30 JSON 放到 data_dir，传 args.data_dir 即可
 const assets = `${base}/assets`;
 const roles = `${base}/team/roles`;
+// 行业包（§2.4）：ROI 锚点/阈值/不可逆动作的唯一来源；默认制造业包，可传 args.pack_path 覆盖
+const packPath = args.pack_path || `${base}/packs/manufacturing/pack.json`;
 
 const str = { type: 'string' };
 const numOrStr = { oneOf: [{ type: 'string' }, { type: 'number' }] };
@@ -124,8 +126,8 @@ const attribution = await agent(
 
 phase('S4 方向校验与 ROI 建议');
 const advice = await agent(
-  `你是「制造业业务专家」（L2 建议，s4）。先读角色章程 ${roles}/manufacturing-ops-expert.md、${assets}/roi_anchors.yaml、${assets}/irreversible_actions.yaml、${assets}/decision_log.schema.yaml。` +
-  `对下列归因做方向一致性校验，并用 ROI 三锚点（模具更换¥800/保养¥500/停机¥1200）逐条算账：\n` +
+  `你是「制造业业务专家」（L2 建议，s4）。先读角色章程 ${roles}/manufacturing-ops-expert.md、行业包 ${packPath}（ROI 锚点 roi_anchors、不可逆动作 irreversible_actions、阈值 thresholds 均以它为准）、${assets}/irreversible_actions.yaml、${assets}/decision_log.schema.yaml。` +
+  `对下列归因做方向一致性校验，并用行业包 ${packPath} 里的 roi_anchors 逐条算账（金额只能取自该文件的锚点，不得硬编码任何金额）：\n` +
   `attribution=${JSON.stringify(attribution)}\n` +
   `建议必须可执行（谁/哪台设备/何时/花多少/省多少）；若建议含不可逆动作，标记 irreversibility=irreversible 并置 security_gate_requested=true（只呈请、不执行）。` +
   `最后只输出符合 schema 的 JSON：{direction_check, recommendation:[{action,roi:{cost,avoided,anchor},irreversibility}], security_gate_requested}。`,
