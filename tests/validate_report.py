@@ -70,8 +70,14 @@ def main():
             check(f"real scorecard {k} numeric 0-5", ok, repr(v))
         check("real is_demo=false", r.get("is_demo") is False)
         check("real task_id", bool(r.get("task_id")))
-        refs = r.get("decision_log_entry", {}).get("data_refs") or r.get("data_refs") or []
-        check("real data_refs 无 demo/", isinstance(refs, list) and all("demo/" not in str(x) for x in refs), str(refs))
+        # M1.5 §3 B4 硬化：data_refs 可能在顶层与 decision_log_entry 两处，两处都要查 demo/
+        top_refs = r.get("data_refs")
+        dl_refs = (r.get("decision_log_entry") or {}).get("data_refs")
+        for where, refs in (("data_refs", top_refs), ("decision_log_entry.data_refs", dl_refs)):
+            if refs is None:
+                continue
+            check(f"real {where} 无 demo/",
+                  isinstance(refs, list) and all("demo/" not in str(x) for x in refs), str(refs))
         try:
             from core import gates as _gates
 

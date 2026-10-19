@@ -1,0 +1,15 @@
+{
+  "plant": "华东一厂",
+  "line": "B",
+  "metric": "补料率",
+  "metric_unit": "%",
+  "window": {"start": "2026-10-05", "end": "2026-10-11", "days": 7},
+  "baseline_window": {"start": "2026-09-05", "end": "2026-10-04", "days": 30},
+  "baseline_value": 5.01,
+  "target": "≤5.40%",
+  "data_owner": "数据负责人：张伟",
+  "line_owner": "产线负责人：李强",
+  "known_confounders": ["信息员 2026-09-27 换人"],
+  "gate": "G0",
+  "notes": "M1.5 A7-A12 独立验收用 intake（不携带固定 task_id，由服务端发号）"
+}

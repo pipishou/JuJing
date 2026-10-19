@@ -1,0 +1,95 @@
+{
+  "meta": {
+    "dataset": "material_refill_T30",
+    "purpose": "M1.5 验收夹具：基线 30 天（2026-09-05~10-04）",
+    "production_line": "B",
+    "schema_version": "1.3",
+    "null_rate_declared": 0.0,
+    "field_contract": [
+      "date",
+      "production_line",
+      "refill_rate",
+      "output_volume",
+      "mold_status",
+      "maintenance_records",
+      "shift_team",
+      "material_batch",
+      "ambient_env",
+      "mold_change_records",
+      "downtime_records",
+      "reporter"
+    ]
+  },
+  "records": [
+    {
+      "date": "2026-09-05",
+      "production_line": "B",
+      "refill_rate": 5.01,
+      "output_volume": 1106,
+      "mold_status": {"M-01": "normal", "M-02": "normal", "M-03": "normal"},
+      "maintenance_records": [{"date": "2026-09-10", "mold": "M-03", "kind": "planned"}],
+      "shift_team": "甲班",
+      "material_batch": "RM-2026043",
+      "ambient_env": {"temp_c": 23.2, "humidity_pct": 55.4},
+      "mold_change_records": [],
+      "downtime_records": [],
+      "reporter": "王芳"
+    },
+    {
+      "date": "2026-09-12",
+      "production_line": "B",
+      "refill_rate": 5.12,
+      "output_volume": 989,
+      "mold_status": {"M-01": "normal", "M-02": "normal", "M-03": "normal"},
+      "maintenance_records": [],
+      "shift_team": "乙班",
+      "material_batch": "RM-2026043",
+      "ambient_env": {"temp_c": 23.5, "humidity_pct": 55.9},
+      "mold_change_records": [],
+      "downtime_records": [],
+      "reporter": "王芳"
+    },
+    {
+      "date": "2026-09-20",
+      "production_line": "B",
+      "refill_rate": 4.90,
+      "output_volume": 1068,
+      "mold_status": {"M-01": "normal", "M-02": "normal", "M-03": "normal"},
+      "maintenance_records": [],
+      "shift_team": "丙班",
+      "material_batch": "RM-2026043",
+      "ambient_env": {"temp_c": 23.8, "humidity_pct": 56.1},
+      "mold_change_records": [],
+      "downtime_records": [],
+      "reporter": "王芳"
+    },
+    {
+      "date": "2026-09-27",
+      "production_line": "B",
+      "refill_rate": 5.07,
+      "output_volume": 1120,
+      "mold_status": {"M-01": "normal", "M-02": "normal", "M-03": "normal"},
+      "maintenance_records": [],
+      "shift_team": "甲班",
+      "material_batch": "RM-2026043",
+      "ambient_env": {"temp_c": 23.3, "humidity_pct": 55.6},
+      "mold_change_records": [],
+      "downtime_records": [],
+      "reporter": "李强"
+    },
+    {
+      "date": "2026-10-04",
+      "production_line": "B",
+      "refill_rate": 4.95,
+      "output_volume": 1090,
+      "mold_status": {"M-01": "normal", "M-02": "normal", "M-03": "normal"},
+      "maintenance_records": [],
+      "shift_team": "乙班",
+      "material_batch": "RM-2026043",
+      "ambient_env": {"temp_c": 23.6, "humidity_pct": 55.7},
+      "mold_change_records": [],
+      "downtime_records": [],
+      "reporter": "李强"
+    }
+  ]
+}

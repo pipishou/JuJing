@@ -1,0 +1,11 @@
+{
+  "action": "confirm",
+  "status": "confirmed",
+  "confirmer": "伪造者-9000",
+  "confirmed_by": "伪造者-9000",
+  "confirmed_at": "2026-10-19T17:00:00+08:00",
+  "comment": "手写伪造 gate.json：无服务端确认、confirmer 不在白名单",
+  "history": [
+    {"action": "confirm", "by": "伪造者-9000", "at": "2026-10-19T17:00:00+08:00"}
+  ]
+}
