@@ -3,17 +3,24 @@
 """报告校验：demo 报告 or 真实报告是否满足产出契约。
 
 判据（任一 FAIL → 非零退出）：
-  1. finding：1–2 条，每条 factor/confidence/evidence 齐，evidence 非空
+  1. finding：0–2 条，每条 factor/confidence/evidence 齐，evidence 非空
   2. cannot_attribute：非空
   3. scorecard：六维键齐；--require-real 时必须是数值 0-5（拒绝叙述/占位）
   4. recommendation：非空，每条 action/roi(cost,avoided,anchor)/irreversibility 齐
   5. decision_log_entry：id/actor/context/advice/expected_result/verification_plan 齐
   6. 若 any irreversibility=irreversible → security_gate 必须非空
-  7. --require-real：is_demo=false、task_id 非空、data_refs 不含 demo/
+  7. --require-real（M1 可信门，A2）：
+     is_demo=false、task_id 非空、data_refs 不含 demo/、
+     core.gates.real_report_errors 全绿（占位/缺证据/refs 不存在或 sha 不符/
+     scorecard.total 与 verdict 缺失或与独立计算不一致）
 """
 import json
 import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 SIX = ["data_completeness", "timeliness", "significance", "exclusivity", "history", "human_ai_consistency"]
 FAIL = []
@@ -63,8 +70,15 @@ def main():
             check(f"real scorecard {k} numeric 0-5", ok, repr(v))
         check("real is_demo=false", r.get("is_demo") is False)
         check("real task_id", bool(r.get("task_id")))
-        refs = (r.get("decision_log_entry") or {}).get("data_refs") or []
+        refs = r.get("decision_log_entry", {}).get("data_refs") or r.get("data_refs") or []
         check("real data_refs 无 demo/", isinstance(refs, list) and all("demo/" not in str(x) for x in refs), str(refs))
+        try:
+            from core import gates as _gates
+
+            errs = _gates.real_report_errors(r, ROOT)
+        except Exception as exc:  # noqa: BLE001
+            errs = [f"可信门执行异常：{exc}"]
+        check("real 可信门（占位/证据/溯源/total-verdict）", not errs, "；".join(str(e) for e in errs)[:500])
 
     rec = r.get("recommendation") or []
     check("recommendation 非空", len(rec) > 0)
@@ -94,4 +108,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

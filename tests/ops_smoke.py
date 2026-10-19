@@ -65,7 +65,8 @@ def main():
     run([PY, "tools/write_loop_bundle.py", "--report", str(report), "--outdir", str(loop)])
     sig = TMP / "signature.json"
     run([PY, "tools/sign_delivery.py", str(report), "--signer", "smoke", "--out", str(sig)])
-    run([PY, "tools/finalize_delivery.py", "--report", str(report), "--loop-dir", str(loop), "--signature", str(sig)])
+    run([PY, "tools/finalize_delivery.py", "--report", str(report), "--loop-dir", str(loop),
+         "--signature", str(sig), "--allow-signers", "smoke"])
     dec = json.loads((loop / "decision.json").read_text(encoding="utf-8-sig"))
     assert dec.get("status") == "approved", "finalize did not approve decision"
 
