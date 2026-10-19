@@ -1,34 +1,45 @@
-/* ui/api-adapter.js -- M1 构建规格 §2.7 真数据适配层（无第三方依赖，ES2017）。
+/* ui/api-adapter.js -- M1.5 §2.6 工作台适配层（无第三方依赖，ES2017，file:// 下也可加载）。
  *
- * 职责（只做数据接入，不改视觉）：
- *   1. 启动时 GET /api/health：成功 -> 真数据模式；失败（file:// 直开 / 服务未起）-> 静默保持静态演示。
- *   2. 真数据模式：轮询 /api/tasks、/api/tasks/<id>、/api/tasks/<id>/log?after=n，
- *      把 report.json / status.json / run.log 归一化成 model / beats 交给 index.html 的 hooks 渲染。
- *   3. 写操作：create(POST /api/tasks)、run(POST /run)、sign(POST /sign -> sha256)、finalize(POST /finalize)。
+ * 职责（只做数据接入 + 事件归一化，不改视觉）：
+ *   1. 启动时 GET /api/health：成功 -> 真数据模式；失败 -> 静默保持静态演示（不抛未捕获错误）。
+ *   2. 团队数据：GET /api/team -> employees/crews/shelf/pack，供货架/员工详情/班组卡/座位使用。
+ *   3. 多任务：GET /api/tasks 列表 + selectTask(id)；舞台/交付卡/KPI/本场数据全部跟随当前任务。
+ *   4. 事件流：GET /api/tasks/<id>/events?stream=1（EventSource，since 续传、断线重连）；
+ *      失败回退 /log?after=n 轮询；再失败回退静态 demo（index.html 自带）。
+ *   5. 写操作：POST /api/tasks（可带 data_files）、/data、/run(带 runner)、/sign、/gate、/finalize。
  *
- * 设计约束：本文件不直接改 DOM（渲染留在 index.html 内联脚本的 hooks 里），避免与现有动画互踩；
- *           任何 fetch 失败都不得抛出到控制台打断页面（file:// 打开时必须还能看静态演示）。
+ * 设计约束：本文件不直接改 DOM（渲染留在 index.html 的 hooks），避免与动画互踩；
+ *           任何 fetch/EventSource 失败都不得打断页面（file:// 打开时必须还能看静态演示）。
  *
- * 舞台 beat 契约：{role, tag, who, frame, text, pos, short} 与 index.html 的 BEATS 同构；
- * run.log 的 phase ∈ s1..s5|gate 映射为 5 幕（s1 感知 / s2 因素 / s3 归因 / s4 建议 / s5 收口）。
+ * 舞台 beat 契约（与 index.html 的 BEATS 同构，扩展 actors 支持并行阶段同屏）：
+ *   {phase, tag, short, text, actors:[{role,key,name,agent,text}], role?, pos?}
+ *   phase ∈ s1..s5|gate|intake|data|status；旧 run.log 行（ts/phase/role/line）读时补 kind=status、agent=role。
  */
 (function () {
   'use strict';
 
-  var API_BASE = ''; // 同源（index.html 由 server/app.py 提供时）
-  var POLL_MS = 2500;
+  var API_BASE = ''; // 同源（页面由 server/app.py 提供）
+  var POLL_MS = 5000;       // 兜底轮询（SSE 正常时只做 KPI/任务列表刷新）
+  var TASKS_MS = 1500;      // 任务列表/状态轮询
   var PHASE_ORDER = ['s1', 's2', 's3', 's4', 's5'];
-  var PHASE_LABEL = { s1: '快照', s2: '因素', s3: '排除', s4: '建议', s5: '收口', gate: '校验门' };
-  var PHASE_ROLE_HINT = { s1: 'analyst', s2: 'biz', s3: 'attr', s4: 'biz', s5: 'host', gate: 'host' };
-  var ROLE_NAME = { host: '工作助理', analyst: '咨询分析师', attr: 'AI 归因专家', biz: '制造业业务专家' };
-  var ROLE_POS = { host: [50, 36], analyst: [24, 56], attr: [76, 56], biz: [50, 64] };
+  var PHASE_LABEL = { s1: '快照', s2: '因素', s3: '排除', s4: '建议', s5: '收口', gate: '校验门', intake: '接单', data: '数据', status: '状态' };
+  var PHASE_ROLE_HINT = { s1: 'analyst', s2: 'biz', s3: 'attr', s4: 'biz', s5: 'host', gate: 'host', intake: 'host', data: 'data', status: 'host' };
+  var ROLE_NAME = { host: '工作助理', analyst: '咨询分析师', attr: 'AI 归因专家', biz: '制造业业务专家', quality: '合规质检', data: '取数员' };
+  var ROLE_POS = { host: [50, 36], analyst: [24, 56], attr: [76, 56], biz: [50, 64], quality: [70, 58], data: [20, 60] };
   var ROLE_ALIAS = {
     'host': 'host', '工作助理': 'host',
     'consulting-analyst': 'analyst', '咨询分析师': 'analyst', 'data-fetcher': 'analyst', '取数员': 'analyst',
-    'ai-attribution-expert': 'attr', 'AI 归因专家': 'attr',
-    'manufacturing-ops-expert': 'biz', '制造业业务专家': 'biz', '业务专家': 'biz'
+    'ai-attribution-expert': 'attr', 'AI 归因专家': 'attr', 'ai归因专家': 'attr',
+    'manufacturing-ops-expert': 'biz', '制造业业务专家': 'biz', '业务专家': 'biz',
+    'compliance-reviewer': 'quality', '合规质检': 'quality',
+    'report-recorder': 'data', '记录员': 'data'
   };
   var SIX_DIMS = ['data_completeness', 'timeliness', 'significance', 'exclusivity', 'history', 'human_ai_consistency'];
+  var STATE_LABEL = {
+    created: '已建单', running: '运行中', assembled: '已装配', awaiting_sign: '待签字',
+    signed: '已交付', failed: '失败', rejected: '已退回'
+  };
+  var KIND_LABEL = { user: '用户', speak: '发言', tool: '工具', think: '思考', status: '状态', artifact: '产物' };
 
   var state = {
     live: false,
@@ -36,6 +47,8 @@
     stopped: false,
     health: null,
     error: null,
+    team: null,
+    teamError: null,
     tasks: [],
     taskParam: null,
     currentTaskId: null,
@@ -43,33 +56,36 @@
     model: null,
     log: [],
     logAfter: 0,
+    events: [],
+    eventCursor: 0,
+    sse: null,
+    sseFailures: 0,
+    sseLive: false,
     beats: [],
     beatSource: '',
     signature: null,
+    gate: null,
+    runner: 'fixture',
     hooks: {},
     timer: null,
+    taskTimer: null,
     failures: 0,
     lastBeatsKey: ''
   };
 
   // ---------------------------------------------------------------- utils --
-  function has(obj, key) {
-    return Object.prototype.hasOwnProperty.call(obj, key);
-  }
+  function has(obj, key) { return Object.prototype.hasOwnProperty.call(obj, key); }
 
   function queryParam(name) {
-    try {
-      return new URLSearchParams(window.location.search).get(name);
-    } catch (err) {
+    try { return new URLSearchParams(window.location.search).get(name); }
+    catch (err) {
       var match = new RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search || '');
       return match ? decodeURIComponent(match[1]) : null;
     }
   }
 
   function toast(message) {
-    try {
-      if (typeof window.toast === 'function') window.toast(message);
-    } catch (err) { /* 静态演示页没有 toast 也不该崩 */ }
+    try { if (typeof window.toast === 'function') window.toast(message); } catch (err) { /* 静态页没有 toast */ }
   }
 
   function trunc(text, limit) {
@@ -90,20 +106,17 @@
     var list = Array.isArray(refs) ? refs : [refs];
     var names = [];
     list.forEach(function (ref) {
-      if (ref && typeof ref === 'object') names.push(ref.path || ref.file || '');
+      if (ref && typeof ref === 'object') names.push(ref.path || ref.file || ref.name || '');
       else names.push(String(ref || ''));
     });
-    names = names.filter(Boolean).map(function (name) {
-      return String(name).split(/[\\/]/).pop();
-    });
+    names = names.filter(Boolean).map(function (name) { return String(name).split(/[\\/]/).pop(); });
     return names.length ? names.join(' / ') : '—';
   }
 
   function scoreInfo(scorecard, report) {
     var sc = scorecard || {};
     var doc = report || {};
-    var sum = 0;
-    var dims = 0;
+    var sum = 0, dims = 0;
     var total = typeof sc.total === 'number' ? sc.total : null;
     var verdict = sc.verdict || doc.verdict || null;
     SIX_DIMS.forEach(function (key) {
@@ -127,6 +140,67 @@
     if (task.line) parts.push(task.line + '线');
     if (task.metric) parts.push(String(task.metric));
     return parts.length ? parts.join(' · ') : String(task.task_id || '未命名任务');
+  }
+
+  function stateLabel(value) { return STATE_LABEL[value] || value || '未知'; }
+
+  function stateDot(value) {
+    return ({ created: 'wait', running: 'run', assembled: 'wait', awaiting_sign: 'sign', signed: 'ok', failed: 'err', rejected: 'err' })[value] || 'wait';
+  }
+
+  // 员工 id（长 slug 或短 key）-> 精灵 key。 /api/team 的 sprite_key 优先。
+  function spriteKeyFor(id) {
+    var key = String(id == null ? '' : id).trim();
+    if (state.team) {
+      var employees = state.team.employees || [];
+      for (var i = 0; i < employees.length; i += 1) {
+        var emp = employees[i] || {};
+        if (emp.id === key && emp.sprite_key) return emp.sprite_key;
+      }
+      var crews = state.team.crews || [];
+      for (var c = 0; c < crews.length; c += 1) {
+        var steps = (crews[c] && crews[c].steps) || [];
+        for (var s = 0; s < steps.length; s += 1) {
+          var step = steps[s] || {};
+          if (step.agent === key && step.sprite_key) return step.sprite_key;
+        }
+      }
+    }
+    if (has(ROLE_NAME, key)) return key;
+    if (has(ROLE_ALIAS, key)) return ROLE_ALIAS[key];
+    var lower = key.toLowerCase();
+    for (var alias in ROLE_ALIAS) {
+      if (Object.prototype.hasOwnProperty.call(ROLE_ALIAS, alias) && lower.indexOf(alias.toLowerCase()) >= 0) return ROLE_ALIAS[alias];
+    }
+    return 'host';
+  }
+
+  function employeeFor(id) {
+    var team = state.team || {};
+    var employees = team.employees || [];
+    for (var i = 0; i < employees.length; i += 1) {
+      if (employees[i] && employees[i].id === id) return employees[i];
+    }
+    return null;
+  }
+
+  function crewList() {
+    return (state.team && Array.isArray(state.team.crews)) ? state.team.crews : [];
+  }
+
+  function packInfo() {
+    return (state.team && state.team.pack) || {};
+  }
+
+  // 当前任务对应班组：task.crew_id > pack.crew_id > 第一个
+  function currentCrew(task) {
+    var crews = crewList();
+    if (!crews.length) return null;
+    var wanted = (task && (task.crew_id || task.crew)) || packInfo().crew_id;
+    for (var i = 0; i < crews.length; i += 1) {
+      if (crews[i] && (crews[i].id === wanted || crews[i].name === wanted)) return crews[i];
+    }
+    return crews[0];
   }
 
   // ---------------------------------------------------------------- http --
@@ -170,7 +244,8 @@
         report: null, status: status, signature: signature, task: task,
         title: taskTitle(task), score: scoreInfo(null, null), roi: null,
         finding: [], cannot: [], recommendation: [], log: null, pack: null,
-        refs: [], isDemo: false, state: status.state || 'created', step: status.step || ''
+        refs: [], isDemo: Boolean(task.is_demo), state: status.state || task.state || 'created',
+        step: status.step || '', gate: null, irreversible: [], dataReady: Boolean(task.data_ready || (task.data_files && task.data_files.length))
       };
     }
     var recommendation = report.recommendation || [];
@@ -178,11 +253,16 @@
     var decisionLog = report.decision_log_entry || {};
     var refs = decisionLog.data_refs;
     if (refs && !Array.isArray(refs)) refs = [refs];
+    var gate = report.security_gate || null;
+    var irreversible = [];
+    recommendation.forEach(function (item) {
+      if (item && (item.irreversibility === true || (item.irreversibility && item.irreversibility !== false && item.irreversibility !== 'reversible'))) {
+        irreversible.push(item);
+      }
+    });
+    if (!irreversible.length && report.security_gate_requested) irreversible.push({ action: '报告标记需审批门确认（security_gate_requested=true）', irreversibility: true });
     return {
-      report: report,
-      status: status,
-      signature: signature,
-      task: task,
+      report: report, status: status, signature: signature, task: task,
       title: report.goal || taskTitle(task),
       score: scoreInfo(report.scorecard, report),
       roi: first.roi || null,
@@ -193,9 +273,11 @@
       pack: report.pack || null,
       refs: refs || [],
       isDemo: report.is_demo === true,
-      state: status.state || '',
+      state: status.state || task.state || '',
       step: status.step || '',
-      decisionStatus: signature ? 'signed' : 'pending'
+      gate: gate,
+      irreversible: irreversible,
+      dataReady: Boolean(task.data_ready || (task.data_files && task.data_files.length))
     };
   }
 
@@ -210,62 +292,102 @@
       var stamp = Date.parse(task.updated_at || '');
       return !Number.isFinite(stamp) || (now - stamp) < 7 * 24 * 3600 * 1000;
     }).length;
-    var review = list.filter(function (task) { return task && task.signed && !task.reviewed; }).length;
+    var review = list.filter(function (task) { return task && (task.signed || task.state === 'signed') && !task.reviewed; }).length;
     var dues = list.map(function (task) { return task && task.review_due; }).filter(Boolean).sort();
+    var demo = list.filter(function (task) { return task && task.is_demo; }).length;
     return {
-      total: list.length,
-      running: running,
-      week: week,
-      review: review,
-      delivered: withReport.length,
-      nextDue: dues.length ? dues[0] : null
+      total: list.length, running: running, week: week, review: review,
+      delivered: withReport.length, demo: demo, nextDue: dues.length ? dues[0] : null
     };
   }
 
   // ---------------------------------------------------------------- beats --
-  function makeBeat(role, phase, text) {
-    var id = ROLE_NAME[role] ? role : 'host';
+  function normalizePhase(phase) {
+    var key = String(phase == null ? '' : phase).trim().toLowerCase();
+    if (PHASE_ORDER.indexOf(key) >= 0) return key;
+    if (key === 'gate' || key === 'intake' || key === 'data') return key;
+    return 'status';
+  }
+
+  function makeBeat(role, phase, text, meta) {
+    var key = spriteKeyFor(role);
     return {
-      role: id,
-      tag: phase.toUpperCase() + ' ' + ROLE_NAME[id],
-      who: ROLE_NAME[id],
+      role: key,
+      phase: phase,
+      tag: phase.toUpperCase() + ' ' + (ROLE_NAME[key] || key),
+      who: ROLE_NAME[key] || key,
       frame: (phase === 's2' || phase === 's4') ? 'talk' : 'think',
-      text: trunc(text, 220),
-      pos: ROLE_POS[id],
-      short: '第 ' + phase.slice(1) + ' 幕 · ' + (PHASE_LABEL[phase] || phase)
+      text: trunc(text, 260),
+      pos: ROLE_POS[key] || ROLE_POS.host,
+      short: '第 ' + phase.slice(1) + ' 幕 · ' + (PHASE_LABEL[phase] || phase),
+      actors: [{ role: key, name: ROLE_NAME[key] || key, text: trunc(text, 260), agent: (meta && meta.agent) || role }],
+      kind: (meta && meta.kind) || 'status',
+      seq: meta && meta.seq
     };
   }
 
-  function mapRole(role, phase) {
-    var key = String(role == null ? '' : role).trim();
-    if (key && has(ROLE_NAME, key)) return key;
-    if (key && has(ROLE_ALIAS, key)) return ROLE_ALIAS[key];
-    return PHASE_ROLE_HINT[phase] || 'host';
+  function mapRole(role, phase) { return spriteKeyFor(role || PHASE_ROLE_HINT[phase]); }
+
+  // 从事件数组生成"场"：s1‖s2 并行场合并为一场（同屏多角色）；其余 phase 各一场。
+  function scenesFromEvents(events) {
+    var groups = {};
+    var order = [];
+    (events || []).forEach(function (event) {
+      if (!event) return;
+      var phase = normalizePhase(event.phase);
+      if (!has(groups, phase)) { groups[phase] = { phase: phase, actors: [], lines: [], seq: event.seq || 0, kind: event.kind || 'status' }; order.push(phase); }
+      var group = groups[phase];
+      var role = mapRole(event.role || event.agent, phase);
+      group.seq = event.seq || group.seq;
+      group.lines.push(event.line || '');
+      var existing = null;
+      group.actors.forEach(function (actor) { if (actor.role === role) existing = actor; });
+      if (existing) { existing.text = trunc(event.line, 260); existing.agent = event.agent || role; }
+      else {
+        group.actors.push({ role: role, name: ROLE_NAME[role] || role, text: trunc(event.line, 260), agent: event.agent || event.role || role });
+      }
+      if (event.kind) group.kind = event.kind;
+    });
+    var scenes = [];
+    var usedParallel = false;
+    order.forEach(function (phase) {
+      var group = groups[phase];
+      if (!group) return;
+      if (phase === 's1' || phase === 's2') {
+        if (usedParallel) return;
+        usedParallel = true;
+        var merged = { phase: 's1s2', kind: 'status', seq: group.seq, actors: [], lines: [] };
+        ['s1', 's2'].forEach(function (key) {
+          if (!groups[key]) return;
+          merged.actors = merged.actors.concat(groups[key].actors);
+          merged.lines = merged.lines.concat(groups[key].lines);
+          merged.seq = Math.max(merged.seq, groups[key].seq);
+        });
+        scenes.push(finishScene(merged));
+        return;
+      }
+      scenes.push(finishScene(group));
+    });
+    return scenes;
   }
 
-  function beatsFromLog(events, detail) {
-    var byPhase = {};
-    (events || []).forEach(function (event) {
-      if (event && event.phase && !has(byPhase, event.phase)) byPhase[event.phase] = event;
-    });
-    var beats = [];
-    PHASE_ORDER.forEach(function (phase) {
-      var event = byPhase[phase];
-      if (!event) return;
-      var role = mapRole(event.role, phase);
-      beats.push(makeBeat(role, phase, event.line));
-    });
-    if (beats.length >= 2) {
-      state.beatSource = 'run.log';
-      return beats;
-    }
-    var fromReport = beatsFromReport(detail);
-    if (fromReport.length >= 2) {
-      state.beatSource = 'report.json';
-      return fromReport;
-    }
-    state.beatSource = beats.length ? 'run.log' : '';
-    return beats;
+  function finishScene(group) {
+    var actors = group.actors.length ? group.actors : [{ role: 'host', name: ROLE_NAME.host, text: group.lines[0] || '', agent: 'host' }];
+    var phase = group.phase;
+    var label = phase === 's1s2' ? 'S1‖S2 并行 · 快照/因素' : (PHASE_LABEL[phase] || phase);
+    return {
+      phase: phase,
+      tag: phase === 's1s2' ? 'S1‖S2 并行' : (phase.toUpperCase() + ' ' + (PHASE_LABEL[phase] || phase)),
+      short: phase === 's1s2' ? '并行场 · 快照/因素' : ('第 ' + phase.slice(1) + ' 幕 · ' + (PHASE_LABEL[phase] || phase)),
+      text: actors.map(function (actor) { return actor.name + '：' + actor.text; }).join(' ／ '),
+      actors: actors,
+      role: actors[0] ? actors[0].role : 'host',
+      pos: (actors[0] && ROLE_POS[actors[0].role]) || ROLE_POS.host,
+      kind: group.kind || 'status',
+      seq: group.seq,
+      parallel: phase === 's1s2',
+      label: label
+    };
   }
 
   function beatsFromReport(detail) {
@@ -277,27 +399,94 @@
     var rec = (report.recommendation || [])[0] || {};
     var log = report.decision_log_entry || {};
     var beats = [];
-    beats.push(makeBeat('analyst', 's1',
-      '读取数据：' + refsText(log.data_refs) + '；目标：' + (report.goal || '—')));
-    beats.push(makeBeat('biz', 's2',
-      '六维打分：' + (score.total == null ? '—' : score.total + '/100') +
-      (score.verdict ? '（' + score.verdict + '）' : '') +
-      (report.pack && report.pack.pack_id ? '；行业包 ' + report.pack.pack_id : '')));
+    beats.push(makeBeat('analyst', 's1', '读取数据：' + refsText(log.data_refs) + '；目标：' + (report.goal || '—')));
+    beats.push(makeBeat('biz', 's2', '六维打分：' + (score.total == null ? '—' : score.total + '/100') + (score.verdict ? '（' + score.verdict + '）' : '') + (report.pack && report.pack.pack_id ? '；行业包 ' + report.pack.pack_id : '')));
     beats.push(makeBeat('attr', 's3', finding.length
-      ? '主因：' + (first.factor || '—') + '（置信 ' + (first.confidence == null ? '—' : first.confidence) +
-        '）；cannot_attribute ' + (report.cannot_attribute || []).length + ' 条'
+      ? '主因：' + (first.factor || '—') + '（置信 ' + (first.confidence == null ? '—' : first.confidence) + '）；cannot_attribute ' + (report.cannot_attribute || []).length + ' 条'
       : '不可归因：证据不足（cannot_attribute ' + (report.cannot_attribute || []).length + ' 条），建议先补数据'));
-    beats.push(makeBeat('biz', 's4', rec.action
-      ? rec.action
-      : 'ROI 锚点：' + ((rec.roi && rec.roi.anchor) || '—')));
-    beats.push(makeBeat('host', 's5',
-      '交付卡 ' + (log.id || '—') + ' · ' + (score.verdict || '待复核') +
-      '；下一步：' + (log.expected_result || 'T+7 回看')));
+    beats.push(makeBeat('biz', 's4', rec.action ? rec.action : 'ROI 锚点：' + ((rec.roi && rec.roi.anchor) || '—')));
+    beats.push(makeBeat('host', 's5', '交付卡 ' + (log.id || '—') + ' · ' + (score.verdict || '待复核') + '；下一步：' + (log.expected_result || 'T+7 回看')));
+    return beats;
+  }
+
+  function beatsFromLog(events, detail) {
+    var beats = scenesFromEvents(events);
+    if (beats.length >= 2) { state.beatSource = 'run.log'; return beats; }
+    var fromReport = beatsFromReport(detail);
+    if (fromReport.length >= 2) { state.beatSource = 'report.json'; return fromReport; }
+    state.beatSource = beats.length ? 'run.log' : '';
     return beats;
   }
 
   function beatsKey(beats) {
-    return beats.map(function (beat) { return beat.role + '|' + beat.text; }).join('§');
+    return beats.map(function (beat) { return (beat.phase || '') + '|' + (beat.actors || []).map(function (actor) { return actor.role + ':' + actor.text; }).join(',') + '|' + beat.text; }).join('§');
+  }
+
+  function applyScenes(scenes, source) {
+    if (!scenes || scenes.length < 2) return;
+    state.beats = scenes;
+    state.beatSource = source || state.beatSource;
+    var key = beatsKey(scenes);
+    if (key !== state.lastBeatsKey) {
+      state.lastBeatsKey = key;
+      if (state.hooks.onBeats) state.hooks.onBeats(scenes, state.beatSource);
+    }
+  }
+
+  // --------------------------------------------------------------- events --
+  function trimEvents() {
+    if (state.events.length > 600) state.events = state.events.slice(-600);
+  }
+
+  function acceptEvent(event) {
+    if (!event || typeof event !== 'object') return false;
+    var seq = Number(event.seq != null ? event.seq : event.n);
+    if (!Number.isFinite(seq)) seq = state.eventCursor + 1;
+    if (seq <= state.eventCursor && state.events.length) return false;
+    event.seq = seq;
+    state.eventCursor = Math.max(state.eventCursor, seq);
+    state.events.push(event);
+    trimEvents();
+    if (state.hooks.onEvent) state.hooks.onEvent(event, state.events.slice());
+    var scenes = scenesFromEvents(state.events);
+    applyScenes(scenes, 'events');
+    return true;
+  }
+
+  function closeStream() {
+    var sse = state.sse;
+    state.sse = null;
+    state.sseLive = false;
+    if (sse && sse.es) { try { sse.es.close(); } catch (err) { /* ignore */ } }
+    if (state.hooks.onSse) state.hooks.onSse(false);
+  }
+
+  function openStream() {
+    if (!state.live || !state.currentTaskId || typeof EventSource === 'undefined') return;
+    closeStream();
+    var taskId = state.currentTaskId;
+    var url = API_BASE + '/api/tasks/' + encodeURIComponent(taskId) + '/events?stream=1&since=' + state.eventCursor;
+    var es;
+    try { es = new EventSource(url); } catch (err) { return; }
+    state.sse = { es: es, taskId: taskId, failures: 0 };
+    es.onopen = function () { state.sseLive = true; if (state.hooks.onSse) state.hooks.onSse(true); };
+    es.onmessage = function (message) {
+      var payload = null;
+      try { payload = JSON.parse(message.data); } catch (err) { return; }
+      acceptEvent(payload);
+    };
+    es.onerror = function () {
+      if (!state.sse || state.sse.es !== es) return;
+      state.sseLive = false;
+      if (state.hooks.onSse) state.hooks.onSse(false);
+      // 服务端不支持 SSE 或断开：关闭后用 since 游标重连；连续失败则彻底回退 /log 轮询。
+      try { es.close(); } catch (err) { /* ignore */ }
+      state.sse = null;
+      state.sseFailures += 1;
+      if (state.sseFailures <= 4) {
+        setTimeout(function () { openStream(); }, 1200 * state.sseFailures);
+      }
+    };
   }
 
   // --------------------------------------------------------------- refresh --
@@ -312,7 +501,59 @@
     }
     var withReport = tasks.filter(function (task) { return task && task.has_report; })[0];
     if (withReport) return withReport.task_id;
+    var running = tasks.filter(function (task) { return task && task.state === 'running'; })[0];
+    if (running) return running.task_id;
     return tasks.length ? tasks[0].task_id : null;
+  }
+
+  function resetTaskState() {
+    state.log = [];
+    state.logAfter = 0;
+    state.events = [];
+    state.eventCursor = 0;
+    state.beats = [];
+    state.lastBeatsKey = '';
+    state.signature = null;
+    state.gate = null;
+    closeStream();
+  }
+
+  function refreshTask() {
+    var taskId = state.currentTaskId;
+    if (!taskId) {
+      state.detail = null; state.model = null;
+      if (state.hooks.onTask) state.hooks.onTask(null, summarize(state.tasks));
+      return Promise.resolve(state);
+    }
+    var base = '/api/tasks/' + encodeURIComponent(taskId);
+    return requestJSON(base).then(function (detail) {
+      // 切换任务回来时若发现任务变了，丢弃旧事件
+      if (taskId !== state.currentTaskId) return state;
+      state.detail = detail;
+      state.model = buildModel(detail);
+      state.signature = state.model.signature;
+      state.gate = state.model.gate;
+      if (state.hooks.onTask) state.hooks.onTask(state.model, summarize(state.tasks));
+      if (state.hooks.onSignature) state.hooks.onSignature(state.signature, state.model);
+      if (state.hooks.onGate) state.hooks.onGate(state.gate, state.model);
+      if (state.sse || state.eventCursor > 0) return state;
+      // 无 SSE 时的兜底：/log 增量
+      return requestJSON(base + '/log?after=' + state.logAfter).then(function (events) {
+        if (Array.isArray(events) && events.length) {
+          state.log = state.log.concat(events);
+          var last = events[events.length - 1];
+          if (last && typeof last.n === 'number' && last.n > state.logAfter) state.logAfter = last.n;
+          state.events = state.events.concat(events.map(function (event) {
+            return { seq: event.n, ts: event.ts, phase: event.phase, role: event.role, agent: event.role, kind: 'status', line: event.line };
+          }));
+          trimEvents();
+          state.eventCursor = Math.max(state.eventCursor, state.logAfter);
+        }
+        var beats = beatsFromLog(state.events.length ? state.events : state.log, state.detail);
+        if (beats.length >= 2) applyScenes(beats, state.beatSource);
+        return state;
+      });
+    });
   }
 
   function refreshAll() {
@@ -322,60 +563,25 @@
       var wanted = pickCurrentId(state.tasks);
       if (!wanted) {
         state.currentTaskId = null;
-        state.detail = null;
-        state.model = null;
-        state.log = [];
-        state.logAfter = 0;
-        state.beats = [];
-        state.signature = null;
+        resetTaskState();
+        state.detail = null; state.model = null;
         if (state.hooks.onTask) state.hooks.onTask(null, summarize(state.tasks));
         return state;
       }
       var switched = wanted !== state.currentTaskId;
       state.currentTaskId = wanted;
-      if (switched) {
-        state.log = [];
-        state.logAfter = 0;
-        state.beats = [];
-        state.lastBeatsKey = '';
-      }
-      var base = '/api/tasks/' + encodeURIComponent(wanted);
-      return requestJSON(base).then(function (detail) {
-        state.detail = detail;
-        state.model = buildModel(detail);
-        state.signature = state.model.signature;
-        var logPath = base + '/log?after=' + (switched ? 0 : state.logAfter);
-        return requestJSON(logPath).then(function (events) {
-          if (Array.isArray(events) && events.length) {
-            state.log = switched ? events.slice() : state.log.concat(events);
-            var last = events[events.length - 1];
-            if (last && typeof last.n === 'number' && last.n > state.logAfter) state.logAfter = last.n;
-          } else if (switched) {
-            state.log = [];
-          }
-          var beats = beatsFromLog(state.log, state.detail);
-          if (beats.length >= 2) {
-            state.beats = beats;
-            var key = beatsKey(beats);
-            if (key !== state.lastBeatsKey) {
-              state.lastBeatsKey = key;
-              if (state.hooks.onBeats) state.hooks.onBeats(beats, state.beatSource);
-            }
-          }
-          if (state.hooks.onTask) state.hooks.onTask(state.model, summarize(state.tasks));
-          if (state.hooks.onSignature) state.hooks.onSignature(state.signature, state.model);
-          return state;
-        });
+      if (switched) { state.taskParam = wanted; resetTaskState(); }
+      return refreshTask().then(function () {
+        if (state.live && !state.sse) openStream();
+        return state;
       });
     });
   }
 
   // ---------------------------------------------------------------- poll --
   function stopPolling() {
-    if (state.timer) {
-      clearInterval(state.timer);
-      state.timer = null;
-    }
+    if (state.timer) { clearInterval(state.timer); state.timer = null; }
+    if (state.taskTimer) { clearInterval(state.taskTimer); state.taskTimer = null; }
   }
 
   function tick() {
@@ -392,6 +598,7 @@
         stopPolling();
         state.live = false;
         state.error = error;
+        closeStream();
         if (state.hooks.onMode) state.hooks.onMode(false, null, error);
       }
     });
@@ -411,11 +618,29 @@
       state.live = true;
       state.stopped = false;
       state.failures = 0;
+      state.sseFailures = 0;
       if (state.hooks.onMode) state.hooks.onMode(true, health);
-      return refreshAll().then(function () {
+      return loadTeam().catch(function (error) {
+        state.teamError = error;
+        if (state.hooks.onTeamError) state.hooks.onTeamError(error);
+        return null;
+      }).then(function () {
+        return refreshAll();
+      }).then(function () {
         startPolling();
         return state;
       });
+    });
+  }
+
+  function loadTeam() {
+    return requestJSON('/api/team').then(function (team) {
+      if (!team || typeof team !== 'object') throw new Error('/api/team 返回为空');
+      if (team.ok === false) throw new Error(team.error || '/api/team 失败');
+      state.team = team;
+      state.teamError = null;
+      if (state.hooks.onTeam) state.hooks.onTeam(team);
+      return team;
     });
   }
 
@@ -426,6 +651,7 @@
       state.live = false;
       state.error = error;
       stopPolling();
+      closeStream();
       if (state.hooks.onMode) state.hooks.onMode(false, null, error);
       return state;
     });
@@ -433,6 +659,7 @@
 
   function reconnect() {
     stopPolling();
+    closeStream();
     return connect().catch(function (error) {
       state.live = false;
       state.error = error;
@@ -448,20 +675,47 @@
     return id;
   }
 
-  function create(intake) {
-    return postJSON('/api/tasks', intake || {}).then(function (created) {
+  function selectTask(taskId) {
+    var id = String(taskId || '');
+    if (!id) return Promise.resolve(state);
+    if (id === state.currentTaskId) return refreshAll();
+    state.currentTaskId = id;
+    state.taskParam = id;
+    resetTaskState();
+    try { history.replaceState(null, '', '?task=' + encodeURIComponent(id)); } catch (err) { /* file:// 下忽略 */ }
+    return refreshAll();
+  }
+
+  function create(intake, files) {
+    var body = Object.assign({}, intake || {});
+    if (files && files.length) body.data_files = files;
+    var runner = body.runner;
+    delete body.runner;
+    return postJSON('/api/tasks', body).then(function (created) {
+      if (runner) state.runner = runner;
       if (created && created.task_id) {
         state.currentTaskId = created.task_id;
         state.taskParam = created.task_id;
+        resetTaskState();
+        try { history.replaceState(null, '', '?task=' + encodeURIComponent(created.task_id)); } catch (err) { /* ignore */ }
       }
       return refreshAll().then(function () { return created; });
     });
   }
 
-  function run(taskId) {
+  function uploadData(files) {
+    var id = requireTaskId();
+    return postJSON('/api/tasks/' + encodeURIComponent(id) + '/data', { files: files || [] }).then(function (result) {
+      return refreshAll().then(function () { return result; });
+    });
+  }
+
+  function run(taskId, runner) {
     var id = requireTaskId(taskId);
-    return postJSON('/api/tasks/' + encodeURIComponent(id) + '/run', {}).then(function (result) {
-      setTimeout(tick, 400);
+    var mode = runner || state.runner || 'fixture';
+    state.runner = mode;
+    return postJSON('/api/tasks/' + encodeURIComponent(id) + '/run', { runner: mode }).then(function (result) {
+      setTimeout(tick, 500);
       return result;
     });
   }
@@ -480,11 +734,30 @@
     });
   }
 
+  function gate(action, confirmer, comment) {
+    var id = requireTaskId();
+    var body = {
+      action: action === 'reject' ? 'reject' : 'confirm',
+      confirmer: String(confirmer == null ? '' : confirmer).trim() || '老板',
+      comment: String(comment == null ? '' : comment)
+    };
+    return postJSON('/api/tasks/' + encodeURIComponent(id) + '/gate', body).then(function (result) {
+      state.gate = result && (result.gate || result);
+      if (state.hooks.onGate) state.hooks.onGate(state.gate, state.model);
+      return refreshTask().then(function () { return result; });
+    });
+  }
+
   function finalize(taskId) {
     var id = requireTaskId(taskId);
     return postJSON('/api/tasks/' + encodeURIComponent(id) + '/finalize', {}).then(function (result) {
       return refreshAll().then(function () { return result; });
     });
+  }
+
+  function currentCrewForUi() {
+    var task = (state.model && state.model.task) || (state.detail && state.detail.task) || null;
+    return currentCrew(task);
   }
 
   // --------------------------------------------------------------- export --
@@ -494,24 +767,38 @@
     init: init,
     reconnect: reconnect,
     refresh: refreshAll,
+    refreshTask: refreshTask,
+    loadTeam: loadTeam,
+    selectTask: selectTask,
     create: create,
+    uploadData: uploadData,
     run: run,
     sign: sign,
+    gate: gate,
     finalize: finalize,
     isLive: function () { return state.live; },
     currentTaskId: function () { return state.currentTaskId; },
     currentDetail: function () { return state.detail; },
     currentModel: function () { return state.model; },
     currentLog: function () { return state.log.slice(); },
+    events: function () { return state.events.slice(); },
     tasks: function () { return state.tasks.slice(); },
     beats: function () { return state.beats.slice(); },
+    team: function () { return state.team; },
+    crew: currentCrewForUi,
+    runner: function () { return state.runner; },
+    setRunner: function (value) { state.runner = value === 'external' ? 'external' : 'fixture'; return state.runner; },
+    sseLive: function () { return state.sseLive; },
     summarize: summarize,
+    stateLabel: stateLabel,
+    stateDot: stateDot,
+    spriteKeyFor: spriteKeyFor,
+    employeeFor: employeeFor,
+    roleName: function (key) { return ROLE_NAME[key] || key; },
+    kindLabel: function (kind) { return KIND_LABEL[kind] || kind || '状态'; },
     tools: {
-      scoreInfo: scoreInfo,
-      refsText: refsText,
-      moneyOf: moneyOf,
-      trunc: trunc,
-      taskTitle: taskTitle
+      scoreInfo: scoreInfo, refsText: refsText, moneyOf: moneyOf, trunc: trunc,
+      taskTitle: taskTitle, stateLabel: stateLabel
     }
   };
 })();
