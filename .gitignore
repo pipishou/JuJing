@@ -7,6 +7,7 @@
 # personal / project memory
 .junshi/
 skills/*/data/
+jujing-junshi/data/
 bot-team/.junshi/
 # real data / runtime
 runs/task-*/
