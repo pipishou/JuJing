@@ -70,7 +70,9 @@ def _pick_py() -> str:
 
 PY = _pick_py()
 
-# finalize 的 signer allowlist 由实现决定、spec 未定义来源 → 黑盒枚举员工名册里的合法签字人。
+# finalize 的 signer allowlist：M1 时由实现决定、spec 未定义来源 → 黑盒枚举员工名册里的合法签字人。
+# M1.5 身份契约升级：server/finalize 只认 --allow-signers（默认「老板,boss」），A6 已改用固定「老板」+负例 403；
+# 本表仅 A3/A4 的 CLI 级枚举仍在使用（spec 未定义为 CLI 默认值，保留枚举以兼容显式传 --allow-signers 的实现）。
 SIGNER_CANDIDATES = [
     "业务负责人", "用户", "工作助理", "咨询分析师", "AI 归因专家",
     "制造业业务专家", "合规质检", "取数员", "记录员",
@@ -380,6 +382,30 @@ def build_real_report(repo: Path, out_rel: str, task_id: str = "T-20261019-900",
     out = repo / out_rel
     dump_json(out, rep)
     return out
+
+
+def plant_gate(repo: Path, task_id: str, report: Path, confirmer: str,
+               comment: str = "人工确认 securityGate") -> dict:
+    """M1.5 身份/可信门升级后的合法确认夹具：调产品 core.gate.confirm 写 gate.json
+    + run.log phase=gate 审计事件 + 回写报告 security_gate。
+
+    finalize 不再接受「报告字段自证」（A9 裁决），因此合法链必须先有真实 gate 事实源再签字。
+    """
+    script = (
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "sys.path.insert(0, %r)\n"
+        "from core import gate\n"
+        "rep_path = Path(%r)\n"
+        "report = json.loads(rep_path.read_text(encoding='utf-8'))\n"
+        "doc = gate.confirm(Path(%r), %r, %r, report)\n"
+        "print(json.dumps(doc, ensure_ascii=False))\n"
+    ) % (str(repo), str(report), str(repo / "runs" / task_id), confirmer, comment)
+    p = run(["-c", script], cwd=repo)
+    if p.returncode != 0:
+        raise CaseFailure("assert", f"core.gate.confirm 失败 rc={p.returncode}: {tail(p.out, 700)}")
+    lines = [ln for ln in (p.out or "").splitlines() if ln.strip().startswith("{")]
+    return try_json(lines[-1]) if lines else {}
 
 
 def build_task_csv(repo: Path) -> Path:
@@ -781,6 +807,7 @@ def case_a3(ctx: dict):
     # ---- 1) 能力探针（隔离 status）：--allow-signers 存在且白名单内 signer 可过
     rep_probe = build_real_report(repo, "runs/T-20261019-910/report.json",
                                   task_id="T-20261019-910", gate_status="confirmed")
+    plant_gate(repo, "T-20261019-910", rep_probe, ALLOWED)
     try:
         sig = sign_report(rep_probe, "probe", ALLOWED)
         loop = make_loop(rep_probe, "probe", ALLOWED)
@@ -802,6 +829,7 @@ def case_a3(ctx: dict):
     try:
         rep_l = build_real_report(repo, "runs/T-20261019-900/report.json",
                                   gate_status="confirmed")
+        plant_gate(repo, "T-20261019-900", rep_l, ALLOWED)
         sig_l = sign_report(rep_l, "legal")  # 不传 --signer，验默认 signer
         sig_doc = json.loads(sig_l.read_text(encoding="utf-8"))
         check(sig_doc.get("signer") == ALLOWED,
@@ -829,6 +857,7 @@ def case_a3(ctx: dict):
     try:
         rep_e = build_real_report(repo, "runs/T-20261019-911/report.json",
                                   task_id="T-20261019-911", gate_status="confirmed")
+        plant_gate(repo, "T-20261019-911", rep_e, ALLOWED)
         sig_e = sign_report(rep_e, "env", ALLOWED)
         loop_e = make_loop(rep_e, "env", ALLOWED)
         force_status(loop_e, "proposed")
@@ -848,6 +877,7 @@ def case_a3(ctx: dict):
     try:
         rep_c = build_real_report(repo, "runs/T-20261019-912/report.json",
                                   task_id="T-20261019-912", gate_status="confirmed")
+        plant_gate(repo, "T-20261019-912", rep_c, ALLOWED)
         sig_c = sign_report(rep_c, "closed", ALLOWED)
         loop_c = make_loop(rep_c, "closed", ALLOWED)
         force_status(loop_c, "proposed")
@@ -864,6 +894,7 @@ def case_a3(ctx: dict):
     try:
         rep_f = build_real_report(repo, "runs/T-20261019-913/report.json",
                                   task_id="T-20261019-913", gate_status="confirmed")
+        plant_gate(repo, "T-20261019-913", rep_f, ALLOWED)
         try:
             sig_f = sign_report(rep_f, "fake", BOGUS)
         except CaseFailure:
@@ -917,6 +948,7 @@ def case_a3(ctx: dict):
     try:
         rep_r = build_real_report(repo, "runs/T-20261019-902/report.json",
                                   task_id="T-20261019-902", gate_status="confirmed")
+        plant_gate(repo, "T-20261019-902", rep_r, ALLOWED)
         sig_r = sign_report(rep_r, "rejected", ALLOWED)
         loop_r = make_loop(rep_r, "rejected", ALLOWED)
         force_status(loop_r, "rejected")
@@ -1227,17 +1259,21 @@ def case_a6(ctx: dict):
         notes.append("GET /api/tasks/<id>: finding/scorecard/recommendation/decision_log_entry == report.json")
 
         # ---- 5) POST /sign → 返回 sha256 必须 == 磁盘 report.json 的 sha256 == sign_delivery.py 输出
+        # 夹具同步（M1.5 身份契约升级，断言强度不降）：M1.5 server 只认 --allow-signers
+        # （默认「老板,boss」），不再按 M1 员工角色名放行。故合法 signer 固定「老板」，
+        # 并新增负例：白名单外 signer 必须 403。
         file_sha = sha256_file(report)
-        signer_used, sign_resp = None, None
-        for cand in SIGNER_CANDIDATES:
-            st, body = http_post(srv.base + f"/api/tasks/{task_id}/sign", {"signer": cand})
-            if st == 200:
-                signer_used, sign_resp = cand, try_json(body) or {}
-                break
-            if st in (400, 409, 422):
-                continue
-            check(False, f"POST /sign HTTP {st}: {tail(body, 400)}")
-        check(signer_used is not None, "POST /api/tasks/<id>/sign 所有候选 signer 都未返回 200")
+        signer_used = "老板"
+        st, body = http_post(srv.base + f"/api/tasks/{task_id}/sign", {"signer": signer_used})
+        check(st == 200, f"POST /sign 合法 signer={signer_used!r} HTTP {st}: {tail(body, 400)}")
+        sign_resp = try_json(body) or {}
+        # 负例：白名单外 signer 必须被拒（M1.5 身份契约 fail-closed）
+        bad_signer = "fake-signer-zzz-9000"
+        st_bad, body_bad = http_post(srv.base + f"/api/tasks/{task_id}/sign",
+                                     {"signer": bad_signer})
+        check(st_bad == 403,
+              f"POST /sign 白名单外 signer={bad_signer!r} 未 403（实际 HTTP {st_bad}）: {tail(body_bad, 300)}")
+        notes.append("负例: 白名单外 signer → 403")
         srv_sha = sign_resp.get("sha256")
         check(str(srv_sha) == file_sha,
               f"服务端签字 sha256={srv_sha} != 磁盘 report.json sha256={file_sha}")
