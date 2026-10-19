@@ -1,9 +1,9 @@
 ---
 name: jujing-bot-team
-description: 聚鲸 bot 团队结构包（制造业经营归因四角色：工作助理 host＋咨询分析师＋AI 归因专家＋制造业业务专家）；五步 DAG 协作、8 个判据资产、5 份演示数据、可机检校验与决策日志。Use when 用户提到 bot 团队、制造业归因、补料率异常、组建团队、跑归因演示、迁移 bot 团队时使用。不写业务代码，不执行不可逆动作。
+description: 聚鲸 bot 团队结构包（制造业经营归因四角色：工作助理 host＋咨询分析师＋AI 归因专家＋制造业业务专家）；五步 DAG 协作、8 个判据资产、5 份演示数据、本地 Web 工作台、可机检校验与决策日志。Use when 用户提到 bot 团队、制造业归因、补料率异常、组建团队、上传真实数据跑归因、迁移 bot 团队时使用。不写业务代码，不执行不可逆动作。
 ---
 
-# 聚鲸 Bot 团队（DSH 版）· 结构包 v0.2
+# 聚鲸 Bot 团队（DSH 版）· 结构包 v0.11.2
 
 > 本 skill 把一个**可迁移的 bot 团队结构**装进 DeepSeek Harness：6 员工名册（含货架 6 态）、4 套班组模板、五步 DAG、行业资产、交付卡（可签字）、双运行模式、可机检校验。
 > 定位：**结构可跑、可测、可迁移**；不承诺归因正确率（那要靠真实数据与 M1 试点验证）。
@@ -92,5 +92,6 @@ python tests/validate_report.py runs/demo-report.json   # 报告 schema＋断言
 - v0.9.2：`tests/wecom_transport_smoke.py` 用本地 HTTP server 验证企微 POST payload/成功/失败路径（不连真实企微、不需要 webhook）。
 - v0.10：无归因路径（finding=0 → decision.no_finding/chosen=不做，报告门+loop 门允许）；值级合同（日期重复/连续、数值范围）；`review_due --out` 本机清单；`finalize_delivery.py` 签字后 decision=approved（校验 hash）。
 - v0.11：`run_task.py` 一键收口（ingest→合同→real 报告→四卡→签字→approved）；`install_review_task.ps1` 注册本机每周回看任务。
+- v0.11.2：本地 Web 工作台（`tools/task_server.py` 标准库 HTTP + `ui/workbench.html/css/js`）——建任务→上传 CSV/Excel＋字段映射＋workflow-result→运行收口→看报告/证据缺口/评分卡→签字；已签任务锁定；`tests/web_api_smoke.py` 覆盖 HTTP 全链；不新增 Flask/FastAPI 依赖。
 
 
