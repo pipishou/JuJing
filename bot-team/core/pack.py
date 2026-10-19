@@ -99,15 +99,24 @@ def roi_for(pack, action_text):
     }
 
 
+def irreversible_keywords(pack):
+    """行业包声明的「不可逆动作」中文字词（M1 遗留硬化：词表不再写死在代码里）。"""
+    words = []
+    for word in (pack or {}).get("irreversible_keywords") or []:
+        text = str(word or "").strip()
+        if text:
+            words.append(text)
+    return words
+
+
 def is_irreversible(pack, action_text):
-    """动作是否属于行业包声明的不可逆动作。"""
+    """动作是否属于行业包声明的不可逆动作（pack.json 是唯一事实源，无代码兜底词）。"""
     text = str(action_text or "")
     for name in pack.get("irreversible_actions") or []:
         label = str(name)
         if label and (label in text or label.replace("_", "") in text.replace("_", "")):
             return True
-    # 中文动作关键词兜底（停线/换模不可逆按包内声明）
-    for word in ("停线", "line_stop", "换模", "conditional_mold_change"):
+    for word in irreversible_keywords(pack):
         if word in text:
             return True
     return False

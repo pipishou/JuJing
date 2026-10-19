@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core import fsutil, ids, pack as pack_mod  # noqa: E402
+from core import events, fsutil, ids, pack as pack_mod  # noqa: E402
 
 PY = sys.executable
 RUNS = Path(os.environ.get("BOT_RUNS_ROOT") or (ROOT / "runs"))
@@ -42,9 +42,11 @@ def now_iso():
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def log_line(outdir, phase, role, line):
-    fsutil.append_jsonl(Path(outdir) / "run.log",
-                        {"ts": now_iso(), "phase": phase, "role": role, "line": line})
+def log_line(outdir, phase, role, line, kind="status"):
+    """事件统一走 core.events.append_event（M1.5 §2.2；旧 run.log 仍可读）。"""
+    events.append_event(str(Path(outdir) / "run.log"), {
+        "phase": phase, "role": role, "kind": kind, "line": line,
+    })
     print(f"[{phase}] {line}")
 
 
@@ -61,14 +63,13 @@ def read_json(path):
 
 
 def run_step(outdir, phase, role, cmd):
-    """执行子步骤；失败返回 (False, output)。stdout 同时写入 run.log。"""
+    """执行子步骤；失败返回 (False, output)。stdout 逐行作为 tool 事件写入 run.log。"""
     proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True,
                           encoding="utf-8", errors="replace")
     out = (proc.stdout or "") + (proc.stderr or "")
     for text in out.splitlines():
         if text.strip():
-            fsutil.append_jsonl(Path(outdir) / "run.log",
-                                {"ts": now_iso(), "phase": phase, "role": role, "line": text})
+            log_line(outdir, phase, role, text, kind="tool")
     return proc.returncode == 0, out
 
 
@@ -170,6 +171,14 @@ def main():
         doc["updated_at"] = now_iso()
         fsutil.atomic_write_json(task_path, doc)
 
+        # M1.5 §2.2 / A10：阶段事件 s1..s5 齐活（s1‖s2 并行阶段都出现）。
+        window = doc.get("window") or {}
+        log_line(outdir, "s1", "consulting-analyst",
+                 f"s1 拆解任务：line={doc.get('line') or '-'} metric={doc.get('metric') or '-'} "
+                 f"window={window.get('start') or '?'}~{window.get('end') or '?'}")
+        log_line(outdir, "s2", "data-fetcher",
+                 f"s2 取数：intake data_files={len(doc.get('data_files') or [])} 条，读取 outdir 数据文件")
+
         # ---- 3) workflow 结果：参数 > outdir/result.json > outdir/workflow-result.json ----
         result_src = Path(args.workflow_result) if args.workflow_result else None
         if result_src is None:
@@ -182,7 +191,16 @@ def main():
             raise RuntimeError("找不到 team-workflow 结果：请传 --workflow-result 或先写 outdir/result.json")
         target_result = outdir / "result.json"
         if result_src.resolve() != target_result.resolve():
-            fsutil.atomic_write_json(target_result, read_json(result_src))
+            result_doc = read_json(result_src)
+            fsutil.atomic_write_json(target_result, result_doc)
+        else:
+            result_doc = read_json(target_result)
+        attribution = result_doc.get("attribution") if isinstance(result_doc, dict) else {}
+        attribution = attribution if isinstance(attribution, dict) else {}
+        log_line(outdir, "s3", "ai-attribution-expert",
+                 f"s3 归因：候选因子 {len(attribution.get('finding') or [])} 个，"
+                 f"排除 {len(attribution.get('excluded') or [])} 个，"
+                 f"不可归因 {len(attribution.get('cannot_attribute') or [])} 条")
         log_line(outdir, "s4", "manufacturing-ops-expert", f"workflow result: {result_src.name}")
 
         # ---- 4) 数据文件：outdir 内 JSON 优先；旧路径走 ingest（需要 pandas） ----
@@ -239,6 +257,7 @@ def main():
             str(outdir / "result.json"), str(outdir / "report.json"),
             "--task-id", task_id, "--context", context,
             "--records-dir", str(records), "--records-task-id", task_id,
+            "--events-dir", str(outdir),
         ]
         if real:
             cmd += ["--real", "--data-refs", ",".join(str(p) for p in data_files)]
@@ -309,10 +328,13 @@ def main():
                 PY, str(ROOT / "tools" / "finalize_delivery.py"),
                 "--report", str(outdir / "report.json"),
                 "--loop-dir", str(records), "--signature", str(signature_path),
+                "--gate-file", str(outdir / "gate.json"),
             ]
-            # A3②：finalize fail closed —— 白名单 = --allow-signers > env BOT_SIGNERS > 本次显式 --signer
-            allow = args.allow_signers or os.environ.get("BOT_SIGNERS") or args.signer
-            fcmd += ["--allow-signers", allow]
+            # A3②：finalize fail closed —— 白名单 = --allow-signers > env BOT_SIGNERS；
+            # M1.5 硬化：不再回退到本次 --signer（自签自批 = 绕过人工确认）
+            allow = args.allow_signers or os.environ.get("BOT_SIGNERS") or ""
+            if allow:
+                fcmd += ["--allow-signers", allow]
             ok, out = run_step(outdir, "gate", "host", fcmd)
             if not ok:
                 raise RuntimeError("收口拒绝（finalize_delivery）：\n" + out[-2000:])

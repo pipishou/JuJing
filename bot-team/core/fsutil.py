@@ -41,3 +41,9 @@ def append_jsonl(path, record):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def read_json(path):
+    """读 JSON（容忍 BOM）；失败抛 OSError/ValueError，由调用方决定语义。"""
+    with open(Path(path), encoding="utf-8-sig") as fh:
+        return json.load(fh)

@@ -1,6 +1,6 @@
 {
   "pack_id": "manufacturing",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "industry": "制造业",
   "thresholds": {
     "refill_baseline_pct": 5.40,
@@ -17,6 +17,12 @@
     "conditional_mold_change",
     "line_stop"
   ],
+  "irreversible_keywords": [
+    "停线",
+    "line_stop",
+    "换模",
+    "conditional_mold_change"
+  ],
   "six_dims": [
     "data_completeness",
     "timeliness",
@@ -25,5 +31,5 @@
     "history",
     "human_ai_consistency"
   ],
-  "crew_id": "manufacturing-refill"
+  "crew_id": "c-refill-attribution"
 }
