@@ -16,10 +16,13 @@ Two Agent-Skills-compatible skills: a self-evolving multi-role agent development
 - 快速看：[bot-team/README.md](bot-team/README.md) ｜ UI 原型：[bot-team/ui/index.html](bot-team/ui/index.html)
 - 方法论对齐：[docs/METHODOLOGY_INTEGRATION_2026-10-18_zh.md](docs/METHODOLOGY_INTEGRATION_2026-10-18_zh.md)
 - 四段闭环：[docs/FOUR_LOOP_UPGRADE_2026-10-18_zh.md](docs/FOUR_LOOP_UPGRADE_2026-10-18_zh.md)
-- 真实任务手册：[docs/REAL_TASK_PLAYBOOK_2026-10-19_zh.md](docs/REAL_TASK_PLAYBOOK_2026-10-19_zh.md)
+- 真实任务手册：[bot-team/README.md](bot-team/README.md)（v0.12.0 接单/运行/签字全流程）
+- 产品文档：[docs/项目文档/README.md](docs/项目文档/README.md)（经营模型 v1.4、场景化决策卡设计、动态场景引擎、证据附件）
+- 架构与审计：[docs/BOT_TEAM_ARCHITECTURE_2026-10-19.md](docs/BOT_TEAM_ARCHITECTURE_2026-10-19.md) ｜ [docs/audit/](docs/audit/)
+- 决策账本：[docs/决策账本.md](docs/决策账本.md)（快照）
 - 验收：`python bot-team/tests/validate_structure.py`（CI 每次 push 自动跑）
 
-> 公开仓库只放代码/模板/脱敏 demo；真实工厂数据、个人账本、方法论原文不入库。
+> 公开仓库包含代码/模板/脱敏 demo、产品文档、审计报告与决策账本快照；真实工厂原始数据、业务凭据与密钥不入库。
 
 
 ## 安装 / Install
