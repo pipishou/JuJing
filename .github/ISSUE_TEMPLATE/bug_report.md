@@ -6,7 +6,7 @@ labels: ""
 assignees: ""
 ---
 
-**使用的 skill 与版本**：jujing-agent-workflow v2.3.3 / jujing-junshi v0.3
+**使用的 skill 与版本**：jujing-agent-workflow v2.3.3 / jujing-junshi v0.4
 
 **runtime**：Claude Code / Trae / WorkBuddy / Codex / 其他
 

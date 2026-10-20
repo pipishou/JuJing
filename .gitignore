@@ -7,12 +7,14 @@
 # personal / project memory
 .junshi/
 skills/*/data/
+jujing-junshi/data/
 bot-team/.junshi/
 # real data / runtime
 runs/task-*/
 bot-team/runs/task-*/
 bot-team/runs/.task_seq.json
 bot-team/runs/*.log
+**/runs/*/
 *.zst
 *.jsonl.zstd
 dist/

@@ -7,7 +7,7 @@ Two Agent-Skills-compatible skills: a self-evolving multi-role agent development
 | Skill | 版本 | 一句话 | 触发词 |
 |---|---|---|---|
 | [jujing-agent-workflow](jujing-agent-workflow/) | v2.3.3 | 多角色 agent 开发工作流：立项→需求→开发→测试→部署→版本→排障→反馈运营，内核为 AI＋数据飞轮自优化（WAL／棘轮／探针） | 聚鲸、工作流、立项、质量门、三绿、G2.5、飞轮、经验库 |
-| [jujing-junshi](jujing-junshi/) | v0.3 | 念头到产品的思维决策层：取证检索→选项地图→权衡推荐→人拍板→决策落账 | 军师、帮我想想、选型、要不要做、方案对比、复盘 |
+| [jujing-junshi](jujing-junshi/) | v0.4 | 念头到产品的思维决策层：需求三阶（探索/分析/落地交接）→取证检索→选项地图→权衡推荐→人拍板→决策落账 | 军师、帮我想想、用户是谁、需求探索、需求分析、原型、需求假设、需求定稿、落地交接、选型、要不要做、方案对比、复盘 |
 
 ## 产品：bot-team（制造业 AI 经营班组）
 

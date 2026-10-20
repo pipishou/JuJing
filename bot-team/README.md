@@ -1,6 +1,6 @@
 # 聚鲸 Bot 团队（DSH 版）· 可迁移结构包
 
-> 状态：v0.11.0，2026-10-18 本机（DSH 0.2.x / Windows）搭起并测试（v0.7：真实数据入口/真实报告门/评分卡/签字；v0.8：四段闭环 bundle；v0.9：UI 数据绑定 + 回看/月报；v0.10：无归因/值级合同/本机回看/签字收口；v0.11：一键收口）。
+> 状态：v0.11.2，2026-10-19 本机（DSH 0.2.x / Windows）搭起并测试（v0.7：真实数据入口/真实报告门/评分卡/签字；v0.8：四段闭环 bundle；v0.9：UI 数据绑定 + 回看/月报；v0.10：无归因/值级合同/本机回看/签字收口；v0.11：一键收口；v0.11.2：本地 Web 工作台）。
 > 用途：把「制造业经营归因四角色团队」做成**结构可跑、可测、可迁移**的包；明天带到工作电脑继续推进。
 
 ## 它是什么
@@ -11,6 +11,7 @@
 - **两种运行模式**：确定性 `orchestration/team-workflow.mjs`（DSH `workflow` 工具）｜交互式 Agent Teams（`spawn_teammate`×3＋共享任务板）；
 - **可机检**：`tests/validate_structure.py`＋`tests/validate_report.py`；
 - **UI 概念原型**：`ui/index.html`（单文件离线，AI 员工事务所·舞台实况，假数据，用于 G0「第一眼」评审）；设计定稿见 `docs/OPTIMAL_TEAM_AND_UI_2026-10-18.md`；
+- **v0.11.2 本地 Web 工作台**：`ui/workbench.html`＋`tools/task_server.py`（Python 标准库 HTTP，无 Flask/FastAPI）——建任务→上传 CSV/字段映射/workflow-result→运行收口→看报告→签字；真实数据只落 `runs/<task-id>/`，不进入浏览器存储；使用见 `docs/WEB_WORKBENCH_2026-10-19_zh.md`；
 - **v0.2.1 增量**：`ui/sprites.js` 原创像素小人（Kairosoft 风格参考，不含开罗素材）＋ `tools/gen_ui_data.py`（YAML→`ui/team-data.js`）＋ `orchestration/dsh-session-tape.mjs`（DSH 日志→舞台 tape，样例 `runs/dsh-tape-sample.json`）；
 - **v0.3 增量**：角色 8 帧动画（idle/walk0/walk1/blink/talk/happy/think/surprised；说话口型、换拍行走、随机眨眼、按幕表情）＋真实 DSH 会话 tape 回放（`ui/tape-data.js`，`?mode=tape&t=N`；样例 120 beats）；
 - **v0.3.1 增量**：UI「新建任务」接单向导（生成 task JSON）＋`templates/task-intake.example.json`＋`docs/REAL_TASK_PLAYBOOK_2026-10-19_zh.md`＋`docs/PRODUCT_BENCHMARK_2026-10-18_zh.md`；交付卡加成本行（AI 成本/人工节省）；工作流支持 `args.data_dir`；
@@ -20,7 +21,18 @@
 - **v0.7 增量**：真实数据入口 `tools/ingest_task_data.py`（CSV/Excel→T/T30）、`tools/check_data_contract.py`（11 因素/10%/30% 降级）；真实报告门 `assemble_report.py --real`＋`validate_report.py --require-real`；评分卡计算 `tools/score_scorecard.py`；签字持久化 `tools/sign_delivery.py`（拒绝 demo 签字）。
 - **迁移件**：`MIGRATION.md`＋`package.ps1`（zip＋manifest）。
 
-## 真实数据流程（v0.7）
+## Web 工作台（v0.11.2，推荐工作电脑用）
+
+```powershell
+cd D:\项目\JuJing\bot-team
+python tools\task_server.py --port 8765
+# 浏览器打开 http://127.0.0.1:8765/workbench
+```
+
+顺序：**新建任务 → 上传 CSV/Excel＋字段映射 YAML＋workflow-result.json → 运行收口 → 看报告 → 签字**。
+服务端只做 s5（数据合同/真实报告门/四卡/签字）；s1–s4 归因仍由 DSH workflow 产出 `workflow-result.json`。已签字任务锁定，不能换文件/重跑/重复签字；真实数据只落 `runs/<task-id>/`（`.gitignore` 已忽略）。
+
+## 真实数据流程（v0.7，命令行等价路径）
 
 ```powershell
 # 1. CSV/Excel → T/T30 JSON（不补数）
@@ -60,7 +72,10 @@ python tests/contract_values_smoke.py
 python tools/finalize_delivery.py --report runs/task-B/report.json --loop-dir runs/task-B/loop --signature runs/task-B/report.signature.json
 # 16. 一键收口（ingest→合同→real 报告→四卡→签字→approved）
 python tools/run_task.py --csv task.csv --line B --t-start 2026-10-05 --t-end 2026-10-11 --base-start 2026-09-05 --base-end 2026-10-04 --field-map templates/field-map.example.yaml --outdir runs/task-B --workflow-result runs/task-B/workflow-result.json --analysis-json team/loop/example-analysis.json --goal-json team/goals/example-goal.json --cost-json team/cost/example-cost.json --expected "T+7 补料率 ≤5.40%" --signer "业务负责人"
-# 17. 本机 T+7 回看计划任务（每周一 09:00）
+# 17. Web 工作台（建任务→上传→运行→签字；HTTP 全链回归）
+python tools/task_server.py --port 8765
+python tests/web_api_smoke.py
+# 18. 本机 T+7 回看计划任务（每周一 09:00）
 powershell -ExecutionPolicy Bypass -File tools/install_review_task.ps1
 ```
 
@@ -102,7 +117,7 @@ bot-team-dsh/
 
 | 测试 | 结果 |
 |---|---|
-| 结构/名册/DAG/资产/演示数据/门 完整性（`validate_structure.py`，79 项） | **PASS** |
+| 结构/名册/DAG/资产/演示数据/门 完整性（`validate_structure.py`，255 项） | **PASS** |
 | skill 热加载发现（`~/.dsh/skills/jujing-bot-team`） | **PASS**（会话目录出现 `jujing-bot-team`） |
 | DAG 实跑（DSH `workflow`，4 个角色代理，s1‖s2→s3→s4） | **PASS** |
 | 报告契约（`validate_report.py`，41 项） | **PASS**（finding=2 / cannot_attribute=12 / scorecard 六维 / recommendation=4） |
