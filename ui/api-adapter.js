@@ -66,6 +66,7 @@
     signature: null,
     gate: null,
     runner: 'fixture',
+    lastUpload: null,
     hooks: {},
     timer: null,
     taskTimer: null,
@@ -710,6 +711,37 @@
     });
   }
 
+  // B10：上传 Excel/CSV（+ 可选字段映射 YAML）让服务端转 T/T30 数据文件。
+  // 契约：POST /api/tasks/<id>/data multipart
+  //   table(.csv/.xlsx/.xls ≤8MB) / field_map(可选 YAML) / line / t_start / t_end / base_start / base_end
+  //   成功 {ok,t_records,t30_records,files:[{path,sha256,size}]}；失败 4xx/5xx {error}
+  function uploadTable(taskId, options) {
+    var id = requireTaskId(taskId);
+    var opts = options || {};
+    var table = opts.file || opts.table || null;
+    if (!table) throw new Error('请选择 CSV / Excel 表格文件');
+    if (typeof FormData !== 'function') throw new Error('当前浏览器不支持 multipart 上传');
+    var form = new FormData();
+    form.append('table', table, table.name || 'table.csv');
+    if (opts.fieldMapFile) form.append('field_map', opts.fieldMapFile, opts.fieldMapFile.name || 'field-map.yaml');
+    ['line', 't_start', 't_end', 'base_start', 'base_end'].forEach(function (key) {
+      var value = opts[key];
+      if (value != null && String(value).trim() !== '') form.append(key, String(value).trim());
+    });
+    return requestJSON('/api/tasks/' + encodeURIComponent(id) + '/data', {
+      method: 'POST',
+      body: form
+    }).then(function (result) {
+      var body = result || {};
+      if (body.ok === false) throw new Error(body.error || body.message || '上传转换失败');
+      state.lastUpload = body;
+      if (state.hooks.onUpload) state.hooks.onUpload(body, id);
+      return refreshTask().catch(function () { return null; }).then(function () {
+        return refreshAll().then(function () { return body; });
+      });
+    });
+  }
+
   function run(taskId, runner) {
     var id = requireTaskId(taskId);
     var mode = runner || state.runner || 'fixture';
@@ -772,6 +804,7 @@
     selectTask: selectTask,
     create: create,
     uploadData: uploadData,
+    uploadTable: uploadTable,
     run: run,
     sign: sign,
     gate: gate,

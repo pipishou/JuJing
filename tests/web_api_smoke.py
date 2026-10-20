@@ -2,11 +2,13 @@
 # -*- coding: utf-8 -*-
 """Web 工作台冒烟：HTTP API 建任务 → 上传 CSV/工作流 → run_task → 签字 → 状态守卫。
 
-不依赖 Flask/FastAPI；只用 stdlib + pandas。运行：
+不依赖 Flask/FastAPI/pandas；只用 stdlib（csv 造夹具）。运行：
   python tests/web_api_smoke.py
 """
+import csv
 import datetime as dt
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -14,27 +16,31 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-import pandas as pd
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 import task_server  # noqa: E402
+
+# B8 批次一：/sign 走 finalize_delivery（fail-closed 白名单），冒烟用显式白名单配置，
+# 不靠代码默认值放宽断言。
+os.environ["BOT_SIGNERS"] = "smoke"
 
 TMP = Path(tempfile.mkdtemp(prefix="bot-web-"))
 
 
 def build_fixture():
     start = dt.date(2026, 9, 5)
+    header = ["日期", "产线", "补料率", "产量", "模具状态", "保养记录", "班组", "原料批次",
+              "环境温湿度", "换模记录", "停机记录", "信息员"]
     rows = []
     for i in range(37):
         d = start + dt.timedelta(days=i)
-        rows.append({
-            "日期": d.isoformat(), "产线": "B", "补料率": round(5.0 + 0.06 * i, 2), "产量": 1000 + i,
-            "模具状态": "normal", "保养记录": "[]", "班组": "甲班", "原料批次": "RM-2026",
-            "环境温湿度": "{}", "换模记录": "[]", "停机记录": "[]", "信息员": "李强",
-        })
-    csv = TMP / "task.csv"
-    pd.DataFrame(rows).to_csv(csv, index=False, encoding="utf-8-sig")
+        rows.append([d.isoformat(), "B", round(5.0 + 0.06 * i, 2), 1000 + i,
+                     "{}", "[]", "甲班", "RM-2026", "{}", "[]", "[]", "李强"])
+    csv_path = TMP / "task.csv"
+    with csv_path.open("w", encoding="utf-8-sig", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(header)
+        writer.writerows(rows)
     result = {
         "goal": "合成：B线补料率异常 Web 冒烟",
         "attribution": {
@@ -49,7 +55,7 @@ def build_fixture():
     }
     wf = TMP / "workflow-result.json"
     wf.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
-    return csv, wf
+    return csv_path, wf
 
 
 def multipart(fields):

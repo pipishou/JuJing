@@ -3,8 +3,9 @@ name: jujing-bot-team
 description: 聚鲸 bot 团队结构包（制造业经营归因四角色：工作助理 host＋咨询分析师＋AI 归因专家＋制造业业务专家）；五步 DAG 协作、8 个判据资产、5 份演示数据、本地 Web 工作台、可机检校验与决策日志。Use when 用户提到 bot 团队、制造业归因、补料率异常、组建团队、上传真实数据跑归因、迁移 bot 团队时使用。不写业务代码，不执行不可逆动作。
 ---
 
-# 聚鲸 Bot 团队（DSH 版）· 结构包 v0.11.2
+# 聚鲸 Bot 团队（DSH 版）· 结构包 v0.12.0
 
+> 口径（v0.12.0）：合并上游 v0.11.2（本地 Web 工作台）＋ M1/M1.5 可信门与服务化。
 > 本 skill 把一个**可迁移的 bot 团队结构**装进 DeepSeek Harness：6 员工名册（含货架 6 态）、4 套班组模板、五步 DAG、行业资产、交付卡（可签字）、双运行模式、可机检校验。
 > 定位：**结构可跑、可测、可迁移**；不承诺归因正确率（那要靠真实数据与 M1 试点验证）。
 
@@ -72,7 +73,7 @@ python tests/validate_report.py runs/demo-report.json   # 报告 schema＋断言
 
 - 安装：把本目录整体复制到 `<dshHome>/skills/jujing-bot-team/`（默认 `C:\Users\<你>\.dsh\skills\`），DSH 自动发现，无需重启。
 - 迁移：见 `MIGRATION.md`（含工作电脑步骤与验收清单）。
-- 目录：`team/` 名册·章程·DAG·门 ｜ `assets/` 8 个判据 ｜ `demo/` 5 份演示数据 ｜ `orchestration/` 确定性 runner ｜ `tests/` 机检 ｜ `runs/` 运行回执 ｜ `ui/` UI 概念原型 ｜ `docs/` 方向、试点与最优版设计。
+- 目录：`core/` 可信门 ｜ `server/` 主工作台（8787） ｜ `team/` 名册·章程·DAG·门 ｜ `assets/` 8 个判据 ｜ `demo/` 5 份演示数据 ｜ `orchestration/` 确定性 runner ｜ `tests/` 机检 ｜ `runs/` 运行回执 ｜ `ui/` 主工作台页面与概念原型 ｜ `docs/` 方向、试点与最优版设计。
 
 ## 8. UI 概念原型（本轮新增）
 
@@ -93,5 +94,6 @@ python tests/validate_report.py runs/demo-report.json   # 报告 schema＋断言
 - v0.10：无归因路径（finding=0 → decision.no_finding/chosen=不做，报告门+loop 门允许）；值级合同（日期重复/连续、数值范围）；`review_due --out` 本机清单；`finalize_delivery.py` 签字后 decision=approved（校验 hash）。
 - v0.11：`run_task.py` 一键收口（ingest→合同→real 报告→四卡→签字→approved）；`install_review_task.ps1` 注册本机每周回看任务。
 - v0.11.2：本地 Web 工作台（`tools/task_server.py` 标准库 HTTP + `ui/workbench.html/css/js`）——建任务→上传 CSV/Excel＋字段映射＋workflow-result→运行收口→看报告/证据缺口/评分卡→签字；已签任务锁定；`tests/web_api_smoke.py` 覆盖 HTTP 全链；不新增 Flask/FastAPI 依赖。
+- v0.12.0：合并上游 v0.11.2（本地 Web 工作台）＋ M1/M1.5 可信门与服务化——`core/`（ids/provenance/gates/pack/report_contract/team/events/gate/paths）、行业包 `packs/manufacturing` v1.1.0、主工作台 `server/app.py`（默认 127.0.0.1:8787；`/api/team`、`/api/tasks`、`/api/tasks/<id>/data`、`/events`（SSE）、`/gate`、`/sign`、`/finalize`；多任务；runner=fixture/external/dsh(501)；审批门 `gate.json` history append-only＋审计事件）；测试证据 `tests/test_core_m15.py`（188 项）、`tests/test_m15_acceptance.py`（A7–A12）、`tests/m1_smoke.py`（A1–A5）。**legacy**：`tools/task_server.py`＋`ui/workbench.html` 保留参考，CSV/Excel 上传与复核签字已并入主工作台。
 
 
