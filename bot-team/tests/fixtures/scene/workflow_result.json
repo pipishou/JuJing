@@ -1,0 +1,85 @@
+{
+  "goal": "判断 B 线补料率 7 日爬升是否由模具磨损/保养不足引起，并给出可逆处置",
+  "snapshot": {
+    "line": "B",
+    "t_window": "2026-10-05~2026-10-11",
+    "baseline_window": "2026-09-05~2026-10-04",
+    "data_ok": true,
+    "null_rate": 0.0
+  },
+  "factorTable": [
+    {"factor": "模具状态", "direction": "+", "weight": 0.6},
+    {"factor": "原料批次", "direction": "+", "weight": 0.3},
+    {"factor": "停机", "direction": "0", "weight": 0.1}
+  ],
+  "attribution": {
+    "finding": [
+      {
+        "factor": "模具状态",
+        "confidence": 0.55,
+        "evidence": [
+          "M-03 状态在 T 段单向推进：10-05~07 normal、10-08~09 slight_wear、10-10~11 wear_detected，与补料率 5.10→7.20 同向同序",
+          "M-01/M-02 在 37 天窗口 37/37 天 normal，构成产线内对照"
+        ]
+      },
+      {
+        "factor": "原料批次",
+        "confidence": 0.25,
+        "evidence": [
+          "RM-2026043 与 T 窗口起点同日首现，需补 IQC 含水率/熔指证据后方可排除或确认"
+        ]
+      }
+    ],
+    "cannot_attribute": [
+      "信息员 09-27 换人导致的口径变化，需人工核对交接记录",
+      "10-12 之后数据缺失，无法判断当前趋势是否延续"
+    ],
+    "excluded": [
+      {"factor": "停机", "reason": "T 窗口 7/7 天停机记录为空"},
+      {"factor": "换模", "reason": "T 窗口无换模记录"}
+    ],
+    "scorecard": {
+      "data_completeness": 4,
+      "timeliness": 4,
+      "significance": 5,
+      "exclusivity": 3,
+      "history": 4,
+      "human_ai_consistency": 4
+    }
+  },
+  "advice": {
+    "direction_check": "方向校验有条件通过：模具磨损→型腔间隙→补料率上行链条与现场常识一致，量级站得住；但动设备前必须先补型腔间隙实测与 IQC 证据。",
+    "recommendation": [
+      {
+        "action": "补拉 2026-10-12~10-19 日台账并核对 M-03 台账状态是实测变更还是巡检补录",
+        "roi": {"cost": "¥0（内部工时）", "avoided": "避免误停机 ¥1200/次", "anchor": "数据复核"},
+        "irreversibility": "reversible"
+      },
+      {
+        "action": "换批对照试跑一个班次，并向品质部取 RM-2026043 的 IQC 来料检验",
+        "roi": {"cost": "¥0（现有同规格余料）", "avoided": "避免盲目换模 ¥800/次", "anchor": "换批对照"},
+        "irreversibility": "reversible"
+      },
+      {
+        "action": "补保养并实测型腔间隙与剩余寿命",
+        "roi": {"cost": "¥500", "avoided": "若磨损成立可避免停机损失 ¥1200/次", "anchor": "maintenance"},
+        "irreversibility": "reversible"
+      },
+      {
+        "action": "核对模具台账与工装台账两套编号，统一后归档",
+        "roi": {"cost": "¥0（内部工时）", "avoided": "避免后续统计口径错误", "anchor": "数据治理"},
+        "irreversibility": "reversible"
+      },
+      {
+        "action": "复盘会更新 SOP 并设定 T+7 复查补料率阈值",
+        "roi": {"cost": "¥0（内部工时）", "avoided": "防止同类问题复发", "anchor": "复盘"},
+        "irreversibility": "reversible"
+      }
+    ],
+    "security_gate_requested": false
+  },
+  "source": {
+    "workflow_result": "team-workflow.mjs",
+    "note": "B11 独立验收夹具（真实模式 workflow-result，人为构造，不含占位词与 demo 路径）"
+  }
+}

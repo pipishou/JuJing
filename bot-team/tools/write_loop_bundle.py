@@ -14,6 +14,7 @@ M1 修复：
 """
 import argparse
 import json
+import re
 import shutil
 import sys
 from datetime import date, timedelta
@@ -24,6 +25,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core import fsutil, ids  # noqa: E402
+
+_WINDOW_RE = re.compile(r"^\d{1,4}d$")
 
 
 def _ids_root(outdir):
@@ -117,12 +120,27 @@ def main():
     )
 
     rec = (report.get("recommendation") or [{}])[0] if (report.get("recommendation") or []) else {}
+    entry = report.get("decision_log_entry") if isinstance(report.get("decision_log_entry"), dict) else {}
+    roi = rec.get("roi") if isinstance(rec.get("roi"), dict) else {}
     no_finding = len(findings) == 0
     options = [f.get("factor") for f in findings if f.get("factor")] + ["不做"]
     chosen = options[0] if options else "不做"
     if no_finding:
         chosen = "不做"
     status = "proposed"  # 四卡生成时只能 proposed；人工签字后由 finalize_delivery 置 approved
+    # B17：DEC 扩展字段（设计文档 §3.3）；全部可选、有值才写，不写 null 占位（lead 指令 #2）。
+    method = str(entry.get("attribution_method") or "").strip()
+    if method not in ("exclusion", "counterfactual", "rule_based"):
+        method = "exclusion"
+    outcome_window = f"{args.review_days}d"
+    if not _WINDOW_RE.match(outcome_window):
+        outcome_window = "7d"
+    action_cost = entry.get("action_cost")
+    if action_cost in (None, "", [], {}):
+        action_cost = roi.get("cost")
+    increment_value = entry.get("increment_value")
+    if increment_value in (None, "", [], {}):
+        increment_value = roi.get("avoided")
     decision = {
         "id": did,
         "task_id": task_id,
@@ -135,24 +153,27 @@ def main():
         "confidence": "LOW" if no_finding else "MED",
         "reversibility": rec.get("irreversibility", "reversible"),
         "approval": {"by": "pending", "at": day, "mode": "explicit" if args.approver else "default"},
-        "reversal_conditions": [report.get("decision_log_entry", {}).get("expected_result") or "T+7 未达预期"],
-        "expected_outcome": report.get("decision_log_entry", {}).get("expected_result") or "待填",
+        "reversal_conditions": [entry.get("expected_result") or "T+7 未达预期"],
+        "expected_outcome": entry.get("expected_result") or "待填",
         "review_due": (date.fromisoformat(day) + timedelta(days=args.review_days)).isoformat(),
         "status": status,
         "no_finding": no_finding,
         "entity_id": (task_id or "task"),
         "metric": report.get("goal") or "",
-        "context": report.get("decision_log_entry", {}).get("context") or "",
+        "context": entry.get("context") or "",
         "recommendation": rec.get("action") or "",
-        "actual_action": "",
-        "override_reason": "",
-        "attribution_method": "exclusion",
-        "outcome_window": f"{args.review_days}d",
-        "action_cost": {"cny": 0, "items": []},
-        "increment_value": (rec.get("roi") or {}).get("avoided", ""),
+        "attribution_method": method,
+        "outcome_window": outcome_window,
         "calibration_version": "cold-start-16.67",
         "notes": "由 write_loop_bundle 自动生成；approval.pending 表示尚未人工签字",
     }
+    for key, value in (("actual_action", entry.get("actual_action")),
+                       ("override_reason", entry.get("override_reason")),
+                       ("observed_outcome", entry.get("observed_outcome")),
+                       ("action_cost", action_cost),
+                       ("increment_value", increment_value)):
+        if value not in (None, "", [], {}):
+            decision[key] = value
     fsutil.atomic_write_json(outdir / "decision.json", decision)
 
     cid = _alloc(id_root, "closure", task_key) or f"C-{compact}-001"
@@ -166,8 +187,9 @@ def main():
         "verdict": "unverified",
         "lessons": ["待回填"],
         "action": "keep",
-        "increment_value": "",
-        "attribution_method": "exclusion",
+        "increment_value": decision.get("increment_value", ""),
+        "attribution_method": method,
+        "outcome_window": outcome_window,
         "scorecard_snapshot": report.get("scorecard") or {},
         "failure_mode": "none",
         "calibration_version": "cold-start-16.67",

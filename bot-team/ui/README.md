@@ -12,7 +12,7 @@
 # 主工作台（v0.12.0 推荐；默认 127.0.0.1:8787）
 cd <bot-team 仓库根>
 python -B server/app.py
-start http://127.0.0.1:8787/
+start http://127.0.0.1:8787/      # 服务端会 302 到 /ui/index.html（见下）
 
 # 舞台原型（离线直接开；也可 ?beat=3 直接停在第四拍）
 start ui\index.html
@@ -90,6 +90,13 @@ python -B server/app.py
 原有像素/动画/演示数据（`team-data.js`、`tape-data.js`、`sprites.js`）与 `tests/validate_structure.py`
 依赖的字面量（`PixelSprites`、`beats`、`openIntake`、`generateTask`、`TEAM_DATA` 等）均保持不变。
 
+> **基址约定（2026-10-20 实测修正）**：`index.html` 用**相对路径**引同级资源（`team-data.js`/`tape-data.js`/`sprites.js`/`api-adapter.js`）。
+> 相对路径只有在 `/ui/` 基址下才解析得到同级文件；若在 `/` 下打开，`/api-adapter.js` → 404 → `window.APIAdapter` 缺失 →
+> 页面**静默退化为静态演示**（任务栏/审批门/签字全断，且不报错）。
+> 因此服务端 `GET /` 与 `GET /index.html` 一律 **302 → `/ui/index.html`**（`server/app.py::_send_static`）。
+> 离线 `file://` 直接打开 `ui/index.html` 不受影响，仍是静态演示。
+> 回归护栏：`tests/test_gate_sign_order.py::case_static_assets_resolvable`（断言 302 目标 + 每个相对资源 `/ui/<src>` 均 200）。
+
 ## v0.8 多任务 + 事件流 + 接单 + 审批门 + 团队真数据（M1.5 · 2026-10-19）
 
 服务健康时（`/api/health` ok）自动进入工作台模式；服务未起或 `file://` 打开时仍是原静态演示。新增：
@@ -119,4 +126,20 @@ state `assembled/awaiting_sign`、`/api/tasks/<id>/events` SSE 164 条、`/gate`
 - 版本口径：合并上游 v0.11.2（本地 Web 工作台）＋ M1/M1.5 可信门与服务化；`index.html` 为主工作台页面（8787），`workbench.html` 转 legacy。
 - 回归证据：`tests/test_core_m15.py` 188 项 PASS、`tests/test_m15_acceptance.py` A7–A12 PASS、`tests/m1_smoke.py` A1–A5 PASS、`tests/validate_structure.py` PASS。
 - 已知限制：`runner=dsh` 仍返回 501（M2 实现）；审批门/签字是本机留痕，不是法律电子签名。
+
+## 签字 / 审批门 / 收口 的顺序（2026-10-20 实测修正）
+
+正确顺序：**gate confirm → sign → finalize**。
+
+- **为什么是这个顺序**：`POST /api/tasks/<id>/gate confirm` 会**回写 `report.json`**（`core/gate.py::_apply_to_report`），
+  报告字节一变 → 先签下的指纹立即失效 → `POST /finalize` 报 `signature hash mismatch`。
+- **`/sign` 不阻断**：门未确认时 `/sign` 仍返 200，响应体附 `gate_pending: true` + `warning`（提示确认门会使指纹失效）。
+  fail-closed 发生在 `/finalize`（未确认门 → 409）。
+- **`signature_stale` 字段**：`GET /api/tasks/<id>` 返回 `signature_stale`（布尔）——`true` 表示
+  `signature.json.report_sha256` 已与 `report.json` **现字节**脱钩。UI 据此把签字按钮解禁并改标签
+  「重新签字（指纹已失效）」，否则用户在浏览器里**无路可走**（finalize 报 mismatch，但重签按钮被禁用）。
+- **UI 提示**：门未确认时签字 → `#gateNote` 显示 ⚠ 顺序警告，toast 提示「已签字，但审批门未确认：确认后需重新签字再收口」。
+- 回归护栏：`tests/test_gate_sign_order.py` 4 例（提示版 / 正确顺序 / 指纹失效可恢复 / 静态资源可达），
+  浏览器真机验证 3 轮 PASS。
+
 

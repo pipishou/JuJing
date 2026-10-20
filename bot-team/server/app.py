@@ -7,15 +7,20 @@
     ... --port 8787 --root "D:\\work\\产品类\\个人产品\\bot-2\\JuJing\\bot-team"
 
 端点（M1 spec §2.6 + M1.5 spec §2.5）：
-    GET  /                                    ui/index.html
+    GET  /                                    302 → /ui/index.html（相对路径的同级 JS 必须在 /ui/ 下才解析得到）
     GET  /ui/<path>                           ui/ 静态资源
     GET  /api/health                          {ok, pack, version, owner, allow_signers, ...}
     GET  /api/packs                           已装行业包列表
     GET  /api/team                            core.team.load_team：employees/crews/shelf/roster/pack
+    GET  /api/scenes                          场景种子（core.scene.load_seeds；未就绪回退 packs/<pack>/scenes/*.json）
+    POST /api/scenes/derive                   body {prompt?,metric_id?,data_ref?} -> preset / discovered / user_prompt(501)
     GET  /api/tasks                           [{task_id,title,state,updated_at,...}]（扫描 runs/）
     POST /api/tasks                           body=intake JSON，可含 data_files[{name,content[,encoding]}]
-    GET  /api/tasks/<id>                      {task,report,status,loop,signature,gate,task_id}
-    GET  /api/tasks/<id>/delivery             交付卡字段投影（finding/scorecard/roi/decision_log/signature）
+    GET  /api/tasks/<id>                      {task,report,status,loop,signature,gate,scene,outcome,outcome_pending,task_id}
+    GET  /api/tasks/<id>/delivery             交付卡字段投影（finding/scorecard/roi/decision_log/signature/outcome）
+    GET  /api/tasks/<id>/outcome              T+7 回填：{ok,outcome_pending,outcome,decision_log_entry}
+    POST /api/tasks/<id>/outcome              body {observed_outcome,actual_action?,override_reason?,action_cost?,increment_value?}
+                                              finalized 任务回填（幂等覆盖，写 runs/<id>/outcome.json，签字字节不变；
     GET  /api/tasks/<id>/log?after=<n>        旧增量端点（保留兼容，读 run.log）
     GET  /api/tasks/<id>/events?since=<n>     事件增量 [{seq,ts,phase,role,agent,kind,line}]
     GET  /api/tasks/<id>/events?since=<n>&stream=1
@@ -78,7 +83,7 @@ DEFAULT_PORT = 8787
 TZ = timezone(timedelta(hours=8))
 VENV_PY = r"D:\work\产品类\个人产品\bot-2\venv\Scripts\python.exe"
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,95}$")
-TASK_ROUTE_RE = re.compile(r"^/api/tasks/([^/]+)(?:/([a-z]+))?$")
+TASK_ROUTE_RE = re.compile(r"^/api/tasks/([^/]+)(?:/([a-z][a-z-]*))?$")
 SIX_DIMS = ("data_completeness", "timeliness", "significance", "exclusivity", "history", "human_ai_consistency")
 DEFAULT_OWNER = "老板"
 DEFAULT_ALLOW_SIGNERS = "老板,boss"
@@ -153,6 +158,24 @@ def read_json(path, default=None):
         return default
 
 
+def replace_with_retry(tmp, path, attempts=10, delay=0.05):
+    """os.replace 在 Windows 上会因目标文件被并发读句柄占用而报 WinError 5。
+
+    读句柄（另一个线程的 read_json / 另一个进程的 status 轮询）与原子替换撞上时，
+    目标文件不带 FILE_SHARE_DELETE，替换被系统拒绝。重试即可稳定落盘。
+    """
+    last = None
+    for attempt in range(attempts):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError as exc:
+            last = exc
+            if attempt < attempts - 1:
+                time.sleep(delay)
+    raise last
+
+
 def write_json_atomic(path, payload):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -162,7 +185,7 @@ def write_json_atomic(path, payload):
         fh.write("\n")
         fh.flush()
         os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    replace_with_retry(tmp, path)
 
 
 def write_bytes_atomic(path, data):
@@ -175,7 +198,7 @@ def write_bytes_atomic(path, data):
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        replace_with_retry(tmp, path)
     finally:
         if tmp.exists():
             try:
@@ -568,6 +591,14 @@ class ApiError(Exception):
         self.extra = extra or {}
 
 
+class RawBody:
+    """route_api 的非 JSON 响应体（导出/打印端点用）：原样字节 + Content-Type。"""
+
+    def __init__(self, body, content_type="text/html; charset=utf-8"):
+        self.body = str(body if body is not None else "")
+        self.content_type = str(content_type or "text/html; charset=utf-8")
+
+
 class Config:
     def __init__(self, root, owner=DEFAULT_OWNER, allow_signers=DEFAULT_ALLOW_SIGNERS):
         self.root = Path(root).resolve()
@@ -666,6 +697,28 @@ def signature_doc(tdir):
         if isinstance(doc, dict):
             return doc
     return None
+
+
+def signature_stale(tdir):
+    """当前 signature.json 的指纹是否已与 report.json 现字节脱钩。
+
+    securityGate 人工确认会回写 report.json（core/gate.py::_apply_to_report），
+    报告字节一变 → 先前签下的指纹失效 → finalize 报 signature hash mismatch。
+    此处如实暴露「签已失效」，供 UI 放开「重新签字」，避免用户卡在无解状态。
+    """
+    sig = signature_doc(tdir)
+    if not isinstance(sig, dict):
+        return False
+    signed = str(sig.get("report_sha256") or "")
+    if not signed:
+        return False
+    report_file = Path(tdir) / "report.json"
+    if not report_file.is_file():
+        return False
+    try:
+        return sha256_file(report_file) != signed
+    except OSError:
+        return False
 
 
 def read_loop(tdir):
@@ -1128,16 +1181,172 @@ def post_upload_data(cfg, task_id, body):
                  "status": status, "identity": cfg.identity()}
 
 
+# --------------------------------------------------------------------------- #
+# B17：T+7 回填（POST /api/tasks/<id>/outcome，设计文档 §3.3 / §4 批次 B17）
+#   - 只接受 finalized 任务（status.state=signed 或 loop/decision.status=approved）
+#   - 幂等覆盖：重复提交覆盖 outcome.json，history 保留最近 20 次
+#   - 落盘 runs/<id>/outcome.json（原子写）；run.log 追加 kind=status / phase=followup 事件
+#   - 已签字 report.json 字节不动（保签字哈希与 A6）；回填字段通过 decision_log_view
+#     合并进 GET /api/tasks/<id> 与 /delivery 的 decision_log 视图
+# --------------------------------------------------------------------------- #
+OUTCOME_FILE = "outcome.json"
+OUTCOME_FIELDS = ("observed_outcome", "actual_action", "override_reason",
+                  "action_cost", "increment_value", "outcome_window")
+_OUTCOME_HISTORY_MAX = 20
+
+
+def outcome_path(tdir):
+    return Path(tdir) / OUTCOME_FILE
+
+
+def read_outcome(tdir):
+    doc = read_json(outcome_path(tdir))
+    return doc if isinstance(doc, dict) else None
+
+
+def task_finalized(tdir):
+    """finalized 判定：status.state=signed 优先，其次 loop/decision.json status=approved。"""
+    status = read_status(tdir)
+    if str(status.get("state") or "") == "signed":
+        return True
+    decision = (read_loop(tdir) or {}).get("decision")
+    return isinstance(decision, dict) and str(decision.get("status") or "") == "approved"
+
+
+def decision_log_view(report, outcome=None):
+    """report.decision_log_entry + T+7 回填（有值才覆盖）→ 合并视图；不改 report 文件。
+
+    B17：回填字段全部可选、有值才写，不写 null 占位。合并视图只用于 POST /outcome 的响应回显；
+    GET（任务详情/交付卡）仍返回 report.decision_log_entry 原值，回填单独放 outcome 字段。
+    """
+    entry = dict((report or {}).get("decision_log_entry") or {})
+    if isinstance(outcome, dict):
+        for key in OUTCOME_FIELDS:
+            value = outcome.get(key)
+            if value in (None, "", [], {}):
+                continue
+            entry[key] = value
+    return entry
+
+
+def append_followup_event(cfg, tdir, outcome, outcome_sha256=""):
+    """outcome 提交 → run.log 追一条 kind='status' / phase='followup' 审计事件（core.events）。"""
+    module = import_core(cfg, "events")
+    meta = {"task_id": Path(tdir).name,
+            "report_sha256": outcome.get("report_sha256"),
+            "observed_outcome": outcome.get("observed_outcome")}
+    if outcome_sha256:
+        meta["outcome_sha256"] = outcome_sha256
+    return module.append_event(str(Path(tdir) / "run.log"), {
+        "phase": "followup",
+        "role": "host",
+        "kind": "status",
+        "line": "T+7 回填：observed_outcome 已记入 outcome.json（签字 report 字节不变）",
+        "meta": meta,
+    })
+
+
+def post_outcome(cfg, task_id, body):
+    """POST /api/tasks/<id>/outcome：T+7 实测回填（幂等覆盖，重复提交 200）。"""
+    tdir = task_dir(cfg, task_id)
+    report_file = tdir / "report.json"
+    report = read_json(report_file)
+    if not isinstance(report, dict):
+        raise ApiError(409, f"report.json 不存在: {task_id}（先 POST /api/tasks/{task_id}/run）")
+    if not task_finalized(tdir):
+        raise ApiError(409, f"任务尚未 finalized（先 POST /api/tasks/{task_id}/finalize）: {task_id}")
+    contract = import_core(cfg, "report_contract")
+    validator = getattr(contract, "validate_outcome", None)
+    if not callable(validator):
+        raise ApiError(500, "core.report_contract.validate_outcome 不可用（B17 契约缺失）")
+    try:
+        clean, errors = validator(body if isinstance(body, dict) else {})
+    except ApiError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - 校验器异常按 500 暴露，不吐 traceback
+        raise ApiError(500, f"outcome 校验失败: {exc}")
+    if errors:
+        raise ApiError(400, "；".join(str(item) for item in errors))
+    report_sha = sha256_file(report_file)
+    previous = read_outcome(tdir)
+    history = list(previous.get("history") or []) if previous else []
+    if previous:
+        snapshot = {}
+        for key in ("submitted_at", "report_sha256", "sha256") + OUTCOME_FIELDS:
+            value = previous.get(key)
+            if value not in (None, "", [], {}):
+                snapshot[key] = value
+        history.append(snapshot)
+        history = history[-_OUTCOME_HISTORY_MAX:]
+    now = now_iso()
+    record = {
+        "ok": True,
+        "task_id": task_id,
+        "submitted_at": now,
+        "submitted_by": cfg.owner,
+        "report_sha256": report_sha,
+        "decision_id": (report.get("decision_log_entry") or {}).get("id"),
+        "decision_log_entry": decision_log_view(report, clean),
+    }
+    for key in OUTCOME_FIELDS:
+        if key in clean:
+            record[key] = clean[key]
+    if history:
+        record["history"] = history
+    data = (json.dumps(record, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    write_bytes_atomic(outcome_path(tdir), data)
+    sha256 = sha256_bytes(data)
+    with cfg.task_lock(task_id):
+        write_status(tdir, step="outcome", outcome_submitted_at=now,
+                     outcome_sha256=sha256, outcome_report_sha256=report_sha)
+    event_seq = None
+    try:
+        event_seq = append_followup_event(cfg, tdir, record, sha256)
+    except Exception as exc:  # noqa: BLE001 - 审计事件失败不回滚回填（handoff 记录）
+        log(f"outcome 事件落 run.log 失败: {exc}")
+    record["sha256"] = sha256
+    if event_seq is not None:
+        record["event_seq"] = event_seq
+    record["identity"] = cfg.identity()
+    return 200, record
+
+
+def get_outcome(cfg, task_id):
+    """GET /api/tasks/<id>/outcome：回填记录 + 报告原 decision_log_entry（未回填时 outcome=null）。"""
+    tdir = task_dir(cfg, task_id)
+    report = read_json(tdir / "report.json")
+    if not isinstance(report, dict):
+        raise ApiError(404, f"report.json 不存在: {task_id}")
+    outcome = read_outcome(tdir)
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "outcome_pending": outcome is None,
+        "outcome": outcome,
+        "decision_log_entry": report.get("decision_log_entry") or {},
+    }
+
+
 def get_task(cfg, task_id):
     tdir = task_dir(cfg, task_id)
     gate = read_json(tdir / GATE_FILE)
+    scene_doc = read_json(tdir / "scene.json") if (tdir / "scene.json").is_file() else None
+    report = read_json(tdir / "report.json")
+    outcome = read_outcome(tdir)
     return {
         "task": read_json(tdir / "task.json"),
-        "report": read_json(tdir / "report.json"),
+        "report": report,
         "status": read_status(tdir),
         "loop": read_loop(tdir),
         "signature": signature_doc(tdir),
+        # 签字指纹是否已与报告现字节脱钩（gate 确认回写报告后为 true → 需重新签字）
+        "signature_stale": signature_stale(tdir),
         "gate": gate if isinstance(gate, dict) else None,
+        # B18：场景实例（runs/<id>/scene.json，含 current_value/因素快照/评分），无则 null
+        "scene": scene_doc if isinstance(scene_doc, dict) else None,
+        # B17：T+7 回填记录（未回填时 outcome=null）；报告本身仍是唯一事实源
+        "outcome": outcome,
+        "outcome_pending": outcome is None,
         "task_id": task_id,
         "identity": cfg.identity(),
     }
@@ -1153,6 +1362,14 @@ def delivery_view(cfg, task_id):
     signature = signature_doc(tdir) or {}
     if not signature and (tdir / "report.signature.json").is_file():
         signature = read_json(tdir / "report.signature.json") or {}
+    outcome = read_outcome(tdir)
+    card = _decision_card(cfg, tdir)
+    # B19 裁定：降级不是失败，但降级态呈现层不出建议（report.json 保持机器真值不动）
+    degradation = ((card.get("context") or {}).get("degradation")
+                   if isinstance(card, dict) else None)
+    if degradation:
+        recommendation = []
+        first = {}
     return {
         "ok": True,
         "task_id": report.get("task_id") or task_id,
@@ -1164,10 +1381,51 @@ def delivery_view(cfg, task_id):
         "scorecard": report.get("scorecard") or {},
         "roi": first.get("roi") if isinstance(first, dict) else None,
         "recommendation": recommendation,
+        # B17：decision_log 保持报告原值（report 是唯一事实源）；T+7 回填单独暴露 outcome
         "decision_log": report.get("decision_log_entry") or {},
+        "outcome": outcome,
+        "outcome_pending": outcome is None,
         "signature": signature,
         "signature_sha256": signature.get("report_sha256"),
+        # B16：P2 决策卡（DEC §3.3）——report 的呈现层视图，不新增事实源
+        "decision_card": card,
+        # 降级态：只给原因与缺失项，不给建议
+        "degradation": degradation,
     }
+
+
+def _decision_card(cfg, tdir):
+    """组装 DEC 决策卡（core.decision_card.build_for_run）；不可用时返回 None 不阻断交付视图。"""
+    try:
+        module = import_core(cfg, "decision_card")
+    except ApiError:
+        return None
+    builder = getattr(module, "build_for_run", None)
+    if not callable(builder):
+        return None
+    try:
+        return builder(tdir, pack=_pack_doc(cfg), root=cfg.root)
+    except Exception as exc:  # noqa: BLE001 - 决策卡是增强项，失败不拖垮交付视图
+        log(f"decision card build failed: {exc}")
+        return None
+
+
+def delivery_card_html(cfg, task_id):
+    """GET /api/tasks/<id>/delivery-card：可打印/可转发的单页 HTML 决策卡。"""
+    tdir = task_dir(cfg, task_id)
+    if not (tdir / "report.json").is_file():
+        raise ApiError(404, f"report.json 不存在: {task_id}（先 POST /api/tasks/{task_id}/run）")
+    card = _decision_card(cfg, tdir)
+    if not isinstance(card, dict):
+        raise ApiError(500, "决策卡无法组装（core.decision_card 不可用）")
+    try:
+        module = import_core(cfg, "decision_card")
+        html = module.render_html(card)
+    except ApiError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise ApiError(500, f"决策卡渲染失败: {exc}")
+    return RawBody(html, "text/html; charset=utf-8")
 
 
 def get_log(cfg, task_id, after):
@@ -1223,6 +1481,509 @@ def team_view(cfg):
     out["warnings"] = warnings
     out["identity"] = cfg.identity()
     return 200, out
+
+
+# --------------------------------------------------------------------------- #
+# 经营决策台：场景引擎（B18，设计文档 §4.5 / §4.5.1–§4.5.3）
+#
+# 契约：GET /api/scenes -> {ok, scenes:[SceneSpec...], pack_id, generated_at, contract_errors}
+#       POST /api/scenes/derive -> 三通道 preset / discovered / user_prompt
+#       runs/<id>/scene.json 存在时，GET /api/tasks/<id> 透出 scene 字段
+#
+# 纪律：前端只认 SceneSpec，不认具体场景；此处不写任何场景业务常量。
+#       core.scene 未落盘时回退读 packs/<pack>/scenes/*.json（preset 种子，属数据非代码），
+#       并用下方 validate_scene_spec 副本做 §4.5.3 校验。
+# TODO(B18): core.scene.load_seeds / core.scene.validate / core.scene.discover 落盘后，
+#       把 _load_scene_seeds 的 fallback 分支与 _validate_scene_spec 副本删除，改为直接调用 core。
+# --------------------------------------------------------------------------- #
+SCENE_SPEC_VERSION = "scene.v1"
+SCENE_ORIGINS = ("preset", "discovered", "user_prompt")
+SCENE_CONTROL_METHODS = ("mean_2sigma", "target", "cusum")
+SCENE_MAX_PROMPT = 2000
+
+
+def _scene_contract_error(code, reason):
+    return {"code": code, "reason": reason}
+
+
+def _pack_doc(cfg):
+    doc = read_json(cfg.root / "packs" / "manufacturing" / "pack.json")
+    return doc if isinstance(doc, dict) else {}
+
+
+def _validate_scene_spec(spec, pack):
+    """SceneSpec v1 校验器副本（§4.5.3 六类拒绝；TODO 与 core.scene.validate 合并）。
+
+    规则 1（metric 必须存在于 data_manifest）需要 dat_manifest 才能判定，这里仅做结构校验，
+    由 derive/scene 实例写入方保证；规则 2/3 的因子/动作封闭世界依赖 pack 声明，
+    pack 未声明 factors/actions 时只校验可判定部分（不静默放行不可逆动作）。
+    """
+    errors = []
+    if not isinstance(spec, dict):
+        return ["spec 必须是 JSON 对象"]
+    version = spec.get("spec_version")
+    if version != SCENE_SPEC_VERSION:
+        errors.append(f"未知 spec_version：{version!r}（只接受 {SCENE_SPEC_VERSION}，前端不做兼容猜测）")
+    scene_id = spec.get("scene_id")
+    if not isinstance(scene_id, str) or not scene_id.strip():
+        errors.append("scene_id 必须是非空字符串")
+    origin = spec.get("origin")
+    if origin is not None and origin not in SCENE_ORIGINS:
+        errors.append(f"origin 非法：{origin!r}（允许 {list(SCENE_ORIGINS)}）")
+    title = spec.get("title")
+    if not isinstance(title, str) or not title.strip():
+        errors.append("title 必须是非空字符串")
+    metric = spec.get("metric")
+    if not isinstance(metric, dict):
+        errors.append("metric 必须是对象")
+    else:
+        metric_id = metric.get("id")
+        if not isinstance(metric_id, str) or not metric_id.strip():
+            errors.append("metric.id 缺失")
+        if metric.get("unit") is not None and not isinstance(metric.get("unit"), str):
+            errors.append("metric.unit 必须是字符串")
+        control = metric.get("control_line")
+        if not isinstance(control, dict) or control.get("method") not in SCENE_CONTROL_METHODS:
+            errors.append(f"metric.control_line.method 必须在白名单 {list(SCENE_CONTROL_METHODS)}")
+        elif not isinstance(control.get("params"), dict):
+            errors.append("metric.control_line.params 必须是对象（阈值只能来自 pack/params）")
+    scope = spec.get("entity_scope")
+    if scope is not None:
+        if not isinstance(scope, dict) or not isinstance(scope.get("values"), list):
+            errors.append("entity_scope 必须是 {field, values[]}")
+    anchors = pack.get("roi_anchors") if isinstance(pack.get("roi_anchors"), dict) else {}
+    irreversible = {str(item) for item in (pack.get("irreversible_actions") or [])}
+    keywords = [str(item) for item in (pack.get("irreversible_keywords") or [])]
+    actions = spec.get("actions")
+    if actions is not None:
+        if not isinstance(actions, list):
+            errors.append("actions 必须是数组")
+        else:
+            for index, action in enumerate(actions):
+                if not isinstance(action, dict) or not str(action.get("id") or "").strip():
+                    errors.append(f"actions[{index}] 缺 id")
+                    continue
+                key = str(action.get("cost_anchor_key") or action.get("id"))
+                if anchors and key not in anchors:
+                    errors.append(f"actions[{index}].cost_anchor_key={key!r} 不在 pack.roi_anchors {sorted(anchors)}")
+                if action.get("reversible") is False:
+                    action_id = str(action.get("id"))
+                    if not irreversible:
+                        errors.append(f"actions[{index}].id={action_id!r} 声明不可逆但 pack.irreversible_actions 为空")
+                    elif action_id not in irreversible and not any(word and word in action_id for word in keywords):
+                        errors.append(f"actions[{index}].id={action_id!r} 不可逆但未登记在 pack.irreversible_actions")
+    requirements = spec.get("data_requirements")
+    if requirements is not None:
+        if not isinstance(requirements, list):
+            errors.append("data_requirements 必须是数组")
+        else:
+            for index, item in enumerate(requirements):
+                if not isinstance(item, dict) or not str(item.get("field") or "").strip():
+                    errors.append(f"data_requirements[{index}] 缺 field")
+    scorecard = spec.get("scorecard")
+    if scorecard is not None:
+        if not isinstance(scorecard, dict):
+            errors.append("scorecard 必须是对象")
+        elif scorecard.get("scale") not in (None, 100):
+            errors.append("scorecard.scale 只支持 100（B16 已统一 100 分制）")
+    generated_at = spec.get("generated_at")
+    if generated_at is not None and not isinstance(generated_at, str):
+        errors.append("generated_at 必须是 ISO8601 字符串")
+    return errors
+
+
+def _seed_specs_from_files(cfg):
+    """preset 种子回退读取：packs/*/scenes/*.json，统一返回 (specs, errors)。"""
+    specs, errors = [], []
+    pack = _pack_doc(cfg)
+    packs_dir = cfg.root / "packs"
+    if not packs_dir.is_dir():
+        return specs, errors
+    for path in sorted(packs_dir.glob("*/scenes/*.json")):
+        doc = read_json(path)
+        candidates = []
+        if isinstance(doc, list):
+            candidates = [item for item in doc if isinstance(item, dict)]
+        elif isinstance(doc, dict):
+            if isinstance(doc.get("spec"), dict):
+                candidates = [doc["spec"]]
+            elif isinstance(doc.get("scene"), dict):
+                candidates = [doc["scene"]]
+            elif doc.get("spec_version"):
+                candidates = [doc]
+            elif isinstance(doc.get("scenes"), list):
+                candidates = [item for item in doc["scenes"] if isinstance(item, dict)]
+        if not candidates:
+            errors.append({"code": "scene_contract", "reason": f"种子无法解析为 SceneSpec: {path}"})
+            continue
+        for spec in candidates:
+            problems = _validate_scene_spec(spec, pack)
+            if problems:
+                errors.append({"code": "scene_invalid", "file": str(path),
+                               "scene_id": spec.get("scene_id"), "errors": problems})
+            else:
+                specs.append(spec)
+    return specs, errors
+
+
+def _load_scene_seeds(cfg):
+    """优先 core.scene.load_seeds；未就绪时回退种子文件。返回 (seeds, errors, rejected)。"""
+    pack = _pack_doc(cfg)
+    try:
+        module = import_core(cfg, "scene")
+    except ApiError:
+        module = None
+    errors, rejected = [], []
+    if module is not None:
+        loader = getattr(module, "load_seeds", None)
+        raw = None
+        if not callable(loader):
+            errors.append(_scene_contract_error("scene_contract", "core.scene 缺 load_seeds（契约 §4.5.1）"))
+        else:
+            last_error = None
+            for args in ((pack,), (str(cfg.root),), ()):
+                try:
+                    raw = loader(*args)
+                    last_error = None
+                    break
+                except TypeError as exc:  # 参数个数不符，换下一种调用方式
+                    last_error = exc
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(_scene_contract_error("scene_load_error", f"core.scene.load_seeds 失败：{exc}"))
+                    last_error = None
+                    break
+            if raw is None and last_error is not None:
+                errors.append(_scene_contract_error(
+                    "scene_contract", f"core.scene.load_seeds 签名不符合 load_seeds(pack)/load_seeds(root)：{last_error}"))
+        if raw is not None:
+            if isinstance(raw, dict):
+                rejected = [item for item in (raw.get("rejected") or []) if isinstance(item, (dict, str))]
+                raw = raw.get("scenes")
+                if raw is None:
+                    raw = []
+            if not isinstance(raw, list):
+                errors.append(_scene_contract_error(
+                    "scene_contract", "core.scene.load_seeds 必须返回 SceneSpec 列表或 {scenes:[...]}"))
+                return [], errors, rejected
+            seeds = []
+            validator = getattr(module, "validate", None)
+            for item in raw:
+                if not isinstance(item, dict):
+                    errors.append(_scene_contract_error("scene_contract", "load_seeds 列表内存在非对象条目"))
+                    continue
+                problems = _validate_scene_spec(item, pack)
+                if callable(validator):
+                    try:
+                        reasons = validator(item, pack) or []
+                    except TypeError:
+                        try:
+                            reasons = validator(item, pack, None) or []
+                        except Exception:  # noqa: BLE001
+                            reasons = []
+                    except Exception:  # noqa: BLE001
+                        reasons = []
+                    if reasons:
+                        problems = list(problems) + [str(reason) for reason in reasons]
+                if problems:
+                    errors.append({"code": "scene_invalid", "scene_id": item.get("scene_id"), "errors": problems})
+                    rejected.append({"scene_id": item.get("scene_id"), "file": item.get("_path"), "reasons": problems})
+                else:
+                    seeds.append(item)
+            return seeds, errors, rejected
+    seeds, file_errors = _seed_specs_from_files(cfg)
+    for item in file_errors:
+        errors.append(item)
+        if isinstance(item, dict) and item.get("code") == "scene_invalid":
+            rejected.append({"scene_id": item.get("scene_id"), "file": item.get("file"), "reasons": item.get("errors")})
+    if module is None:
+        errors.insert(0, _scene_contract_error(
+            "core_scene_missing",
+            "core.scene 未就绪（core-builder 并行中）：回退读取 packs/<pack>/scenes/*.json 并用 §4.5.3 校验副本；" 
+            "TODO 与 core.scene.load_seeds/validate 合并，不硬编码假场景"))
+    return seeds, errors, rejected
+
+
+def _scene_latest(cfg, spec):
+    """P0 场景卡的「最近决策/当前值」：优先按 task.scene_id 命中，其次按 metric 名/id；无匹配则 null。"""
+    scene_id = str(spec.get("scene_id") or "").strip()
+    metric = spec.get("metric") if isinstance(spec.get("metric"), dict) else {}
+    names = {str(metric.get("name") or "").strip(), str(metric.get("id") or "").strip()}
+    names.discard("")
+    latest = None
+    for row in list_tasks(cfg):
+        task = read_json(cfg.runs / row["task_id"] / "task.json")
+        if not isinstance(task, dict):
+            continue
+        if scene_id and str(task.get("scene_id") or "").strip() == scene_id:
+            latest = row
+            break
+        raw_metric = str(task.get("metric") or "").strip()
+        if not raw_metric:
+            continue
+        if raw_metric in names or any(name and (name in raw_metric or raw_metric in name) for name in names):
+            latest = row
+            break
+    if latest is None:
+        return None
+    tdir = cfg.runs / latest["task_id"]
+    report = read_json(tdir / "report.json") if (tdir / "report.json").is_file() else {}
+    scene_doc = read_json(tdir / "scene.json") if (tdir / "scene.json").is_file() else {}
+    if not isinstance(report, dict):
+        report = {}
+    if not isinstance(scene_doc, dict):
+        scene_doc = {}
+    closure = {}
+    closure_path = tdir / "loop" / "closure.json"
+    if closure_path.is_file():
+        closure = read_json(closure_path)
+        if not isinstance(closure, dict):
+            closure = {}
+    decision = report.get("decision_log_entry") if isinstance(report.get("decision_log_entry"), dict) else {}
+    scorecard = report.get("scorecard") if isinstance(report.get("scorecard"), dict) else {}
+    instance_metric = scene_doc.get("metric") if isinstance(scene_doc.get("metric"), dict) else {}
+    finding = report.get("finding") if isinstance(report.get("finding"), list) else []
+    confidence = None
+    if finding and isinstance(finding[0], dict):
+        confidence = finding[0].get("confidence")
+    recommendations = report.get("recommendation") if isinstance(report.get("recommendation"), list) else []
+    advice = None
+    if recommendations and isinstance(recommendations[0], dict):
+        first = recommendations[0]
+        advice = {
+            "action": first.get("action") or first.get("name"),
+            "irreversibility": first.get("irreversibility"),
+            "roi": first.get("roi"),
+        }
+    cannot = report.get("cannot_attribute") if isinstance(report.get("cannot_attribute"), list) else []
+    next_step = decision.get("next_step") or decision.get("verification_plan")
+    review_due = None
+    decision_path = tdir / "loop" / "decision.json"
+    if decision_path.is_file():
+        loop_decision = read_json(decision_path)
+        if isinstance(loop_decision, dict):
+            review_due = loop_decision.get("review_due")
+    return {
+        "task_id": latest["task_id"],
+        "title": latest["title"],
+        "state": latest["state"],
+        "updated_at": latest["updated_at"],
+        "is_demo": latest["is_demo"],
+        "has_report": bool(latest["has_report"]),
+        "decision_id": decision.get("id"),
+        "verdict": scorecard.get("verdict"),
+        "total": scorecard.get("total"),
+        "current_value": scene_doc.get("current_value", instance_metric.get("current_value")),
+        "control_line": scene_doc.get("control_line") or instance_metric.get("control_line"),
+        "scene_instance": bool(scene_doc),
+        # U1：P0 五秒内可读「建议动作 + 置信度」；U4：T+7 回看
+        "advice": advice,
+        "confidence": confidence,
+        "cannot_count": len(cannot),
+        "next_step": next_step,
+        "review_due": review_due,
+        "review_status": closure.get("verdict") or closure.get("status") or ("verified" if closure else "unverified"),
+        "actual_outcome": closure.get("actual_outcome") or closure.get("actual_result"),
+        "increment_value": closure.get("increment_value"),
+    }
+
+
+def scenes_view(cfg, include_rejected=False):
+    pack = _pack_doc(cfg)
+    seeds, errors, rejected = _load_scene_seeds(cfg)
+    scenes = []
+    for spec in seeds:
+        item = dict(spec)
+        item["latest"] = _scene_latest(cfg, spec)
+        scenes.append(item)
+    payload = {
+        "ok": True,
+        "scenes": scenes,
+        "pack_id": pack.get("pack_id") or "manufacturing",
+        "pack_version": pack.get("version"),
+        "spec_version": SCENE_SPEC_VERSION,
+        "generated_at": now_iso(),
+        "contract_errors": errors,
+    }
+    if include_rejected:
+        payload["rejected"] = rejected
+    return payload
+
+
+def _find_preset(cfg, key):
+    if not key:
+        return None
+    seeds, _errors, _rejected = _load_scene_seeds(cfg)
+    key = str(key).strip()
+    for spec in seeds:
+        metric = spec.get("metric") if isinstance(spec.get("metric"), dict) else {}
+        if key in (str(spec.get("scene_id")), str(metric.get("id")), str(metric.get("name"))):
+            return spec
+    return None
+
+
+def _derive_validate(cfg, spec):
+    """派生派生-校验模式（Lead 契约 m01016）：core.scene.validate 六类拒绝。
+
+    spec_version 未知 / 缺必填 → 400 单行 JSON；其余拒绝 → 200 {ok:false, cannot_derive:[人话原因]}。
+    """
+    pack = _pack_doc(cfg)
+    spec_version = spec.get("spec_version")
+    if spec_version != SCENE_SPEC_VERSION:
+        raise ApiError(
+            400,
+            f"spec_version 未知：{spec_version!r}（只支持 {SCENE_SPEC_VERSION}）")
+    required = ("scene_id", "pack_id", "origin", "title", "question", "metric")
+    missing = []
+    for key in required:
+        value = spec.get(key)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing.append(key)
+    if missing:
+        raise ApiError(400, "spec 缺必填字段：" + "、".join(missing))
+    if not isinstance(spec.get("metric"), dict) or not str(spec["metric"].get("id") or "").strip():
+        raise ApiError(400, "spec.metric 必须是含 id 的对象")
+    try:
+        module = import_core(cfg, "scene")
+    except ApiError:
+        raise ApiError(501, "core.scene 未就绪：/api/scenes/derive 校验模式暂不可用（core-builder 并行中）")
+    validator = getattr(module, "validate", None)
+    if not callable(validator):
+        raise ApiError(501, "core.scene 缺 validate（契约 §4.5.3）")
+    try:
+        reasons = validator(spec, pack) or []
+    except TypeError:
+        try:
+            reasons = validator(spec, pack, None) or []
+        except Exception as exc:  # noqa: BLE001
+            reasons = [f"core.scene.validate 执行失败：{exc}"]
+    except Exception as exc:  # noqa: BLE001
+        reasons = [f"core.scene.validate 执行失败：{exc}"]
+    reasons = [str(reason) for reason in reasons]
+    if reasons:
+        return {
+            "ok": False,
+            "channel": "validate",
+            "spec_version": SCENE_SPEC_VERSION,
+            "cannot_derive": reasons,
+            "rejected": [{"scene_id": spec.get("scene_id"), "reasons": reasons}],
+        }
+    return {"ok": True, "channel": "validate", "valid": True, "scene": spec, "spec_version": SCENE_SPEC_VERSION}
+
+
+def derive_scene(cfg, body):
+    """双模式派生（Lead 契约 m01016 + 文档 §4.5.2）：
+    - body 含 spec → 校验模式（core.scene.validate）；
+    - 否则生成模式：preset 命中种子直接回；discovered 走 core.scene.discover；user_prompt 由 M2 DSH 执行器承接。"""
+    if body is None:
+        body = {}
+    if not isinstance(body, dict):
+        raise ApiError(400, "body 必须是 JSON 对象")
+    if "spec" in body:
+        spec = body.get("spec")
+        if not isinstance(spec, dict):
+            raise ApiError(400, "body.spec 必须是 SceneSpec 对象（校验模式）")
+        return _derive_validate(cfg, spec)
+    prompt = body.get("prompt")
+    metric_id = body.get("metric_id")
+    data_ref = body.get("data_ref")
+    if prompt is not None and (not isinstance(prompt, str) or not prompt.strip()):
+        raise ApiError(400, "body.prompt 必须是非空字符串（≤2000 字）")
+    if isinstance(prompt, str) and len(prompt) > SCENE_MAX_PROMPT:
+        raise ApiError(400, f"body.prompt 超过 {SCENE_MAX_PROMPT} 字上限")
+    if metric_id is not None and not isinstance(metric_id, str):
+        raise ApiError(400, "body.metric_id 必须是字符串")
+    if data_ref is not None and not isinstance(data_ref, str):
+        raise ApiError(400, "body.data_ref 必须是字符串")
+    if not any([(prompt and prompt.strip()), (metric_id and metric_id.strip()), (data_ref and data_ref.strip())]):
+        raise ApiError(400, "body 需至少包含 prompt / metric_id / data_ref 之一")
+
+    if prompt and prompt.strip():
+        # 文档 §4.5.2：T0 server 内不调 LLM，user_prompt 通道由 DSH workflow 的 s0_scene 承接。
+        raise ApiError(501, "user_prompt 通道由 M2 DSH 执行器（team-workflow s0_scene）承接，当前 server 不调 LLM（§4.5.2）")
+
+    preset = _find_preset(cfg, metric_id)
+    if preset is not None and not (data_ref and data_ref.strip()):
+        return {
+            "ok": True,
+            "channel": "preset",
+            "scene": preset,
+            "spec_version": SCENE_SPEC_VERSION,
+            "source": "packs/<pack>/scenes/*.json 或 core.scene.load_seeds",
+        }
+    try:
+        module = import_core(cfg, "scene")
+    except ApiError:
+        module = None
+    discover = getattr(module, "discover", None) if module is not None else None
+    if not callable(discover):
+        raise ApiError(501, "discovered 通道需 core.scene.discover（core-builder 尚未落盘；§4.5.2）")
+    raw = None
+    last_error = None
+    attempts = (
+        lambda: discover(str(cfg.root), metric_id=metric_id, data_ref=data_ref),
+        lambda: discover(str(cfg.root)),
+        lambda: discover(),
+    )
+    for attempt in attempts:
+        try:
+            raw = attempt()
+            last_error = None
+            break
+        except TypeError as exc:  # 签名不符 → 试下一种
+            last_error = exc
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "channel": "discovered",
+                "cannot_derive": [f"core.scene.discover 执行失败：{exc}"],
+            }
+    if raw is None:
+        return {
+            "ok": False,
+            "channel": "discovered",
+            "cannot_derive": [f"core.scene.discover 签名不符（契约 §4.5.2）：{last_error}"],
+        }
+    candidates = []
+    if isinstance(raw, dict):
+        if isinstance(raw.get("scene"), dict):
+            candidates = [raw["scene"]]
+        elif isinstance(raw.get("scenes"), list):
+            candidates = [item for item in raw["scenes"] if isinstance(item, dict)]
+        elif raw.get("spec_version"):
+            candidates = [raw]
+        else:
+            candidates = []
+    elif isinstance(raw, list):
+        candidates = [item for item in raw if isinstance(item, dict)]
+    if not candidates:
+        return {
+            "ok": False,
+            "channel": "discovered",
+            "cannot_derive": ["core.scene.discover 未返回可用 SceneSpec（可能当前数据无 μ±2σ 异常）"],
+        }
+    pack = _pack_doc(cfg)
+    valid, rejected = [], []
+    for spec in candidates:
+        problems = _validate_scene_spec(spec, pack)
+        if problems:
+            rejected.append({"scene_id": spec.get("scene_id"), "errors": problems})
+        else:
+            valid.append(spec)
+    if not valid:
+        return {
+            "ok": False,
+            "channel": "discovered",
+            "cannot_derive": ["派生结果未通过 SceneSpec 校验（§4.5.3），前端回退最近合法 preset"],
+            "rejected": rejected,
+        }
+    return {
+        "ok": True,
+        "channel": "discovered",
+        "scene": valid[0],
+        "candidates": valid,
+        "rejected": rejected,
+        "spec_version": SCENE_SPEC_VERSION,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -1674,6 +2435,16 @@ def post_sign(cfg, task_id, body):
     report_doc = read_json(report) or {}
     if isinstance(report_doc, dict) and report_doc.get("is_demo") is True:
         cmd.append("--allow-demo")
+    # 顺序提示（不阻断）：securityGate 确认会回写 report.json（core/gate.py::_apply_to_report），
+    # 报告字节一变 → 先前签下的指纹失效（finalize 报 signature hash mismatch）。
+    # 正确顺序 gate confirm → sign → finalize；此处只提示，不拦签字
+    # （A6 契约：含未确认 securityGate 的真实报告允许签字，finalize 才按 fail-closed 拒收）。
+    gate_pending = False
+    if isinstance(report_doc, dict) and report_doc.get("is_demo") is not True:
+        gates_mod = import_core(cfg, "gates")
+        if gates_mod.report_claims_security_gate(report_doc):
+            gate_doc = import_core(cfg, "gate").read(tdir) or {}
+            gate_pending = str(gate_doc.get("status") or "") != "confirmed"
     proc = subprocess.run(cmd, cwd=str(cfg.root), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=child_env(), timeout=120)
     if proc.returncode != 0:
@@ -1698,9 +2469,16 @@ def post_sign(cfg, task_id, body):
         # 签名落盘后仍是「待 approved」：awaiting_sign，等 /finalize 才变 signed
         write_status(tdir, state="awaiting_sign", step="signature_written", signer=signer,
                      signature_sha256=sha256, signed_at=sig.get("signed_at"))
-    return 200, {"ok": True, "sha256": sha256, "signer": sig.get("signer") or signer,
-                 "signed_at": sig.get("signed_at"), "path": str(out),
-                 "signature_file": str(out), "identity": cfg.identity()}
+    payload = {"ok": True, "sha256": sha256, "signer": sig.get("signer") or signer,
+               "signed_at": sig.get("signed_at"), "path": str(out),
+               "signature_file": str(out), "identity": cfg.identity()}
+    if gate_pending:
+        # 只提示、不阻断：A6 契约允许「含未确认 securityGate 的真实报告」先签字，
+        # fail-closed 发生在 /finalize（core.gates.check_finalize）。
+        payload["gate_pending"] = True
+        payload["warning"] = ("报告含不可逆动作，securityGate 尚未人工确认："
+                              "确认门会回写 report.json 使本次指纹失效，届时需重新签字再收口")
+    return 200, payload
 
 
 def post_finalize(cfg, task_id):
@@ -1747,6 +2525,9 @@ def post_finalize(cfg, task_id):
                     reasons.extend(str(item) for item in value)
         message = "; ".join(reasons) or _tail_first_line(
             proc.stderr or proc.stdout, f"finalize_delivery.py exit={proc.returncode}")
+        if "hash mismatch" in message:
+            message += ("（报告在签字后被变更——securityGate 确认会回写 report.json，"
+                        "使旧指纹失效；请重新 POST /api/tasks/%s/sign 再收口）" % task_id)
         raise ApiError(409, message)
     decision = read_json(loop_dir / "decision.json") or {}
     if not isinstance(decision, dict):
@@ -1908,6 +2689,15 @@ def route_api(cfg, method, path, query, body):
         if method != "GET":
             raise ApiError(405, "method not allowed")
         return team_view(cfg)
+    if path == "/api/scenes":
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        include_rejected = str((query.get("include_rejected") or [""])[0]).strip().lower() in ("1", "true", "yes", "on")
+        return 200, scenes_view(cfg, include_rejected)
+    if path == "/api/scenes/derive":
+        if method != "POST":
+            raise ApiError(405, "method not allowed")
+        return 200, derive_scene(cfg, body)
     if path == "/api/tasks":
         if method == "GET":
             return 200, list_tasks(cfg)
@@ -1944,6 +2734,16 @@ def route_api(cfg, method, path, query, body):
         if method != "GET":
             raise ApiError(405, "method not allowed")
         return 200, delivery_view(cfg, task_id)
+    if action == "delivery-card":
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return 200, delivery_card_html(cfg, task_id)
+    if action == "outcome":
+        if method == "GET":
+            return 200, get_outcome(cfg, task_id)
+        if method == "POST":
+            return post_outcome(cfg, task_id, body)
+        raise ApiError(405, "method not allowed")
     if action == "run":
         if method != "POST":
             raise ApiError(405, "method not allowed")
@@ -2002,7 +2802,10 @@ class BotHandler(BaseHTTPRequestHandler):
                 else:
                     body = self._read_body() if method == "POST" else {}
                 status, payload = route_api(cfg, method, path, query, body)
-                self._send_json(status, payload)
+                if isinstance(payload, RawBody):
+                    self._send_raw(status, payload.body.encode("utf-8"), payload.content_type)
+                else:
+                    self._send_json(status, payload)
             else:
                 if method not in ("GET", "HEAD"):
                     raise ApiError(405, "method not allowed")
@@ -2126,11 +2929,28 @@ class BotHandler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(data)
 
+    def _send_raw(self, status, data: bytes, content_type: str):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
     def _send_static(self, cfg, path, head=False):
         ui = cfg.ui.resolve()
         if path in ("/", "/index.html"):
-            rel = "index.html"
-        elif path.startswith("/ui/"):
+            # ui/index.html 用相对路径引 team-data.js / api-adapter.js 等同级资源：
+            # 在 / 下解析成 /team-data.js → 404，页面只剩静态演示、真数据全断。
+            # 重定向到 /ui/index.html 让相对路径落到 /ui/ 下（file:// 直接打开磁盘文件仍照常）。
+            self.send_response(302)
+            self.send_header("Location", "/ui/index.html")
+            self.send_header("Content-Length", "0")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+        if path.startswith("/ui/"):
             rel = path[len("/ui/"):]
         else:
             raise ApiError(404, f"not found: {path}")

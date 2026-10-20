@@ -18,6 +18,8 @@ import time
 from datetime import date
 from pathlib import Path
 
+from core import fsutil
+
 PREFIXES = {
     "task": "T",
     "report": "DL",
@@ -75,7 +77,7 @@ def _atomic_write_json(path, doc):
             fh.flush()
             os.fsync(fh.fileno())
         fd = None
-        os.replace(tmp, path)
+        fsutil.replace_with_retry(tmp, path)
         tmp = None
     finally:
         if fd is not None:

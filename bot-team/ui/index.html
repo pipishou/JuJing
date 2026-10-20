@@ -276,9 +276,172 @@
     .grid{grid-template-columns:1fr}.shelf{grid-template-columns:repeat(2,1fr)}.wall{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,1fr)}
     .taskbar{margin:0 0 10px}
   }
+  /* ================= B15 场景化决策台（P0 驾驶舱 / P1 场景工作台 / P2 决策卡） ================= */
+  body.mode-desk .app{display:none}
+  body:not(.mode-desk) #deskRoot{display:none}
+  #deskRoot{min-height:100vh;display:flex;flex-direction:column}
+  .desk-top{display:flex;align-items:center;gap:18px;padding:12px 28px;background:linear-gradient(180deg,#fffdf8,#f8f2e8);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+  .desk-brand{display:flex;align-items:center;gap:10px}
+  .desk-brand .mark{width:32px;height:32px;border-radius:10px;background:linear-gradient(145deg,#0f766e,#115e59);display:flex;align-items:center;justify-content:center;box-shadow:0 6px 14px rgba(15,118,110,.28)}
+  .desk-brand h1{margin:0;font-size:15px;letter-spacing:.5px}
+  .desk-brand p{margin:1px 0 0;font-size:11px;color:var(--muted)}
+  .desk-nav{display:flex;gap:6px;margin-left:8px}
+  .dbtn{border:1px solid var(--line);background:#fff;color:#374151;border-radius:9px;padding:6px 11px;font-size:11.5px;cursor:pointer;font-family:inherit;transition:.15s;white-space:nowrap}
+  .dbtn:hover{border-color:#0f766e;color:#0f766e}
+  .dbtn.primary{background:#0f766e;border-color:#0f766e;color:#fff}
+  .dbtn.primary:hover{background:#115e59;color:#fff}
+  .dbtn.on{background:#0f766e;border-color:#0f766e;color:#fff}
+  .desk-actions{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .dstate{font-size:11px;color:var(--muted)}
+  .dstate.live{color:#047857}
+  .desk-main{flex:1;padding:22px 28px 46px;max-width:1300px;margin:0 auto;width:100%;box-sizing:border-box}
+  .pane{display:block}
+  .pane[hidden]{display:none!important}
+  .pane-h{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+  .pane-h h2{margin:6px 0 3px;font-size:21px;letter-spacing:.3px}
+  .pane-h p{margin:0;font-size:12px;color:var(--muted);line-height:1.65;max-width:760px}
+  .pane-h .dbtn{margin-bottom:6px}
+  .scene-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(305px,1fr));gap:14px}
+  .scene-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px 17px;box-shadow:0 10px 30px rgba(31,36,48,.05);display:flex;flex-direction:column;gap:9px;cursor:pointer;transition:.18s;text-align:left;font-family:inherit;color:var(--ink);width:100%}
+  .scene-card:hover{transform:translateY(-2px);box-shadow:0 16px 36px rgba(31,36,48,.10);border-color:#cbd5cf}
+  .scene-card .sc-h{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+  .scene-card h3{margin:0;font-size:15px;line-height:1.35}
+  .scene-card .sc-q{font-size:11.5px;color:var(--muted);line-height:1.55;min-height:34px}
+  .scene-card .sc-val{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .scene-card .sc-val b{font-size:26px;letter-spacing:.5px}
+  .scene-card .sc-val span{font-size:11px;color:var(--muted)}
+  .scene-card .sc-meta{font-size:10.5px;color:#6b7280;line-height:1.6;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .badge-status{font-size:10px;border-radius:99px;padding:2px 8px;border:1px solid transparent;white-space:nowrap}
+  .badge-status.ok{background:#d1fae5;color:#047857;border-color:#6ee7b7}
+  .badge-status.warn{background:#fef3c7;color:#92400e;border-color:#fcd34d}
+  .badge-status.bad{background:#fee2e2;color:#b91c1c;border-color:#fca5a5}
+  .badge-status.none{background:#f3f4f6;color:#6b7280;border-color:#e5e7eb}
+  .badge-origin{font-size:9.5px;border-radius:6px;padding:1px 6px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;white-space:nowrap}
+  .badge-irrev{font-size:9.5px;border-radius:6px;padding:1px 6px;background:#f3e8ff;color:#6b21a8;border:1px solid #d8b4fe;white-space:nowrap}
+  .desk-empty{background:var(--card);border:1px dashed #d7cdbc;border-radius:16px;padding:26px;color:#6b7280;font-size:12px;line-height:1.8}
+  .wb-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px;align-items:start}
+  .wb-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+  .wcard{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;box-shadow:0 8px 22px rgba(31,36,48,.04)}
+  .wcard h4{margin:0 0 10px;font-size:12.5px;letter-spacing:.3px;display:flex;justify-content:space-between;gap:8px;color:#111827}
+  .wbody{font-size:11.5px;color:#374151;line-height:1.65}
+  .wrow{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px dashed #eee7da}
+  .wrow:last-child{border-bottom:none}
+  .wrow .k{color:#6b7280;flex:0 0 auto}
+  .wrow .v{text-align:right;word-break:break-word}
+  .spark{display:flex;gap:3px;align-items:flex-end;height:58px;margin:6px 0 10px}
+  .spark i{flex:1;background:linear-gradient(180deg,#5eead4,#0f766e);border-radius:3px 3px 0 0;min-height:3px;opacity:.88}
+  .spark i.cur{background:linear-gradient(180deg,#fbbf24,#d97706)}
+  .bar{height:7px;border-radius:99px;background:#f1e9db;overflow:hidden;display:block}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,#0f766e,#5eead4)}
+  .dim-row{display:grid;grid-template-columns:90px 1fr 34px;gap:9px;align-items:center;margin:5px 0;font-size:10.5px;color:#4b5563}
+  .degraded{border-left:3px solid #f59e0b;background:#fffbeb;border-radius:8px;padding:7px 10px;font-size:11px;color:#92400e;line-height:1.6;margin:5px 0}
+  .dec-card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:26px 30px;max-width:920px;margin:0 auto;box-shadow:0 18px 50px rgba(31,36,48,.08)}
+  .dec-head{display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid #0f766e;padding-bottom:12px;margin-bottom:16px;flex-wrap:wrap}
+  .dec-head h2{margin:0;font-size:20px}
+  .dec-head .id{font-size:11px;color:var(--muted);letter-spacing:.4px;margin-top:5px}
+  .dec-sec{margin:16px 0}
+  .dec-sec h4{margin:0 0 8px;font-size:13px;color:#0f766e;letter-spacing:.4px}
+  .dec-sec .body{font-size:12px;color:#374151;line-height:1.75}
+  .finding{border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin:6px 0;background:#fffdf8}
+  .finding b{font-size:12px}
+  .finding .conf{font-size:10.5px;color:#6b7280;margin-left:6px}
+  .evidence{font-family:Consolas,"Courier New",monospace;font-size:10.5px;color:#4b5563;word-break:break-all;line-height:1.7}
+  .dec-sign{border:1px dashed #94a3b8;border-radius:10px;padding:12px 14px;display:flex;gap:20px;flex-wrap:wrap;font-size:11.5px;color:#475569}
+  .dec-sign b{color:#0f172a}
+  .hash{font-family:Consolas,"Courier New",monospace;font-size:10px;color:#64748b}
+  @media (max-width:1100px){.wb-grid{grid-template-columns:1fr}.desk-main{padding:16px 14px 32px}.desk-top{padding:10px 14px;flex-wrap:wrap}.desk-nav{margin-left:0}}
+  @media print{
+    body{background:#fff}
+    body.mode-desk .app{display:none!important}
+    body.mode-desk .desk-top{display:none!important}
+    .pane-h{display:none!important}
+    .pane[hidden]{display:none!important}
+    body.mode-desk #d-p2{display:block!important}
+    .dec-card{box-shadow:none;border:none;max-width:none;padding:0}
+  }
 </style>
 </head>
-<body>
+<body class="mode-desk">
+<!-- ================= B15 经营决策台（P0 / P1 / P2，场景驱动，零场景常量） ================= -->
+<div id="deskRoot">
+  <header class="desk-top">
+    <div class="desk-brand">
+      <div class="mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 20V9l8-5 8 5v11" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 20v-6h6v6" stroke="#fff" stroke-width="1.6"/></svg></div>
+      <div><h1>AI 员工事务所</h1><p>经营决策台 · 一屏一场景</p></div>
+    </div>
+    <nav class="desk-nav">
+      <button class="dbtn on" onclick="showP('p0')">场景驾驶舱</button>
+      <button class="dbtn" onclick="setView('office')">事务所工作台</button>
+    </nav>
+    <div class="desk-actions">
+      <span class="dstate" id="deskState">场景：连接本地服务……</span>
+      <button class="dbtn" onclick="deskRefresh()">刷新</button>
+    </div>
+  </header>
+  <main class="desk-main">
+    <section class="pane" id="d-p0">
+      <div class="pane-h">
+        <div>
+          <h2>今天先看什么</h2>
+          <p>场景来自 pack 的 SceneSpec 种子（0 处场景常量，换行业只换 pack）。点击场景进入 P1 场景工作台：趋势、因素、六步排除、评分卡、建议一屏答完；一单交付后出 P2 决策卡。</p>
+        </div>
+        <button class="dbtn" onclick="setView('office')">去事务所接单 / 看舞台</button>
+      </div>
+      <div class="scene-grid" id="sceneGrid"></div>
+      <div class="desk-empty" id="sceneEmpty">正在连接本地服务……</div>
+    </section>
+
+    <section class="pane" id="d-p1" hidden>
+      <div class="pane-h">
+        <div>
+          <button class="dbtn" onclick="showP('p0')">← 场景列表</button>
+          <h2 id="p1Title">场景</h2>
+          <p id="p1Q"></p>
+        </div>
+        <div class="desk-actions">
+          <span class="badge-origin" id="p1Origin">—</span>
+          <button class="dbtn primary" onclick="sceneAttribution()">发起归因</button>
+          <button class="dbtn" onclick="renderP2();showP('p2')">生成决策卡</button>
+        </div>
+      </div>
+      <div class="wb-grid">
+        <div class="wb-col">
+          <div class="wcard"><h4>趋势 · 控制线 μ±2σ</h4><div class="wbody" id="p1Trend"></div></div>
+          <div class="wcard"><h4>因素快照</h4><div class="wbody" id="p1Factors"></div></div>
+          <div class="wcard"><h4>六步排除（过程可追溯）</h4><div class="wbody" id="p1Six"></div></div>
+          <div class="wcard"><h4>评分卡 · 六维</h4><div class="wbody" id="p1Score"></div></div>
+          <div class="wcard"><h4>排除不了的原因（强制非空）</h4><div class="wbody" id="p1Cannot"></div></div>
+          <div class="wcard"><h4>建议 · ROI 三锚 · 可逆性</h4><div class="wbody" id="p1Advice"></div></div>
+        </div>
+        <div class="wb-col">
+          <div class="wcard"><h4>场景信息</h4><div class="wbody" id="p1Meta"></div></div>
+          <div class="wcard"><h4>数据与证据</h4><div class="wbody" id="p1Data"></div></div>
+          <div class="wcard"><h4>降级状态</h4><div class="wbody" id="p1Degrade"></div></div>
+          <div class="wcard"><h4>下一步</h4><div class="wbody">
+            <div class="wrow"><span class="k">决策卡（P2）</span><span class="v"><button class="dbtn" onclick="renderP2();showP('p2')">打开</button></span></div>
+            <div class="wrow"><span class="k">归因 / 签字</span><span class="v">事务所工作台</span></div>
+          </div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="pane" id="d-p2" hidden>
+      <div class="pane-h">
+        <div>
+          <button class="dbtn" onclick="showP('p1')">← 场景工作台</button>
+          <h2>决策卡</h2>
+          <p>签字前核对：结论 / 建议 / 证据指纹 / 不可逆动作 / 回看时间。一单一卡，一屏可读完。</p>
+        </div>
+        <div class="desk-actions">
+          <button class="dbtn" onclick="printDecision()">打印 / 导出 PDF</button>
+          <button class="dbtn" onclick="setView('office')">去交付卡签字</button>
+        </div>
+      </div>
+      <div id="decisionCard"></div>
+    </section>
+  </main>
+</div>
+
 <div class="app">
   <aside class="side">
     <div class="brand">
@@ -305,7 +468,8 @@
     <div class="topbar">
       <div class="crumb">AI 员工事务所 / <b>舞台实况</b> · 制造业经营归因班组 <span class="demo-tag" id="demoTag" style="display:none">演示数据</span></div>
       <div class="top-actions">
-        <button class="btn primary" onclick="openIntake()">接单 · 新建任务</button>
+        <button class="btn primary" onclick="setView('desk')">◈ 经营决策台</button>
+        <button class="btn" onclick="openIntake()">接单 · 新建任务</button>
         <button class="btn" id="runBtn" onclick="runCurrentTask()" style="display:none">▶ 运行本任务</button>
         <button class="btn" id="gateTopBtn" onclick="openGate('auto')" style="display:none">审批门</button>
         <button class="btn" onclick="copyTraceLink()">复制过程链接</button>
@@ -1126,8 +1290,9 @@
 
   /* ------------------------------------------------------------ 签字 / 审批门 */
   let signed = false, rejected = false;
+  let gateSignWarning = '';   // 签字时审批门未确认的顺序提示（确认门会回写报告 → 指纹失效 → 需重签）
   function resetSignState() {
-    signed = false; rejected = false;
+    signed = false; rejected = false; gateSignWarning = '';
     const stamp = $('stamp');
     if (stamp) { stamp.textContent = '待 签 字'; stamp.className = 'stamp'; stamp.style.borderColor = ''; stamp.style.color = ''; }
     const ok = $('ok'); if (ok) ok.classList.remove('show');
@@ -1145,11 +1310,19 @@
       bs.style.display = 'block';
       bs.textContent = '已签 · ' + ((signedAt || '').slice(0, 10) || new Date().toISOString().slice(0, 10)) + (signer ? ' · ' + signer : '');
     }
-    const btn = $('signBtn'); if (btn) btn.disabled = true;
+    const btn = $('signBtn');
+    if (btn) {
+      // 指纹失效（gate 确认回写报告后）→ 必须保留「重新签字」能力，否则 UI 无解
+      const stale = Boolean(UI.model && UI.model.signatureStale);
+      btn.disabled = !stale;
+      btn.textContent = stale ? '重新签字（指纹已失效）' : '签字确认';
+    }
     setText('sigHash', '签字哈希 SHA256 ' + (sha256 || '') + '（sign_delivery.py · signature.json）');
   }
   async function signPaper() {
-    if (signed) return;
+    // 已签但指纹失效（gate 确认回写了报告）→ 允许重新签字，否则 finalize 永远收不了口
+    const staleNow = Boolean(UI.model && UI.model.signatureStale);
+    if (signed && !staleNow) return;
     const adapter = window.APIAdapter;
     const live = adapter && adapter.isLive() && adapter.currentTaskId();
     if (live) {
@@ -1160,7 +1333,16 @@
       try {
         const result = await adapter.sign(signer);
         applySignedState(result.signer || signer, result.sha256, result.signed_at);
-        toast('已签字：SHA256 ' + String(result.sha256 || '').slice(0, 8) + '…');
+        if (result.gate_pending) {
+          // 顺序提示（API 契约：含未确认门的报告允许签字，fail-closed 在 finalize）：
+          // 确认门会回写 report.json → 本次指纹失效 → 确认后必须重新签字，否则 finalize 报 hash mismatch。
+          gateSignWarning = result.warning || '审批门尚未确认：确认门会回写报告使本次指纹失效，确认后需重新签字再收口';
+          renderGate(UI.model);
+          toast('已签字，但审批门未确认：确认后需重新签字再收口');
+        } else {
+          gateSignWarning = '';
+          toast('已签字：SHA256 ' + String(result.sha256 || '').slice(0, 8) + '…');
+        }
       } catch (e) {
         toast('签字失败：' + (e && e.message ? e.message : e));
       }
@@ -1201,18 +1383,23 @@
     const state = gateState(model);
     const hasReport = Boolean(model && model.report);
     if (note) {
-      if (!hasReport || !state.requested) { note.className = 'gate-note'; note.textContent = ''; }
+      if (!hasReport) { note.className = 'gate-note'; note.textContent = ''; }
       else if (state.status === 'confirmed') {
         note.className = 'gate-note confirmed show';
         note.textContent = '审批门：已确认 · ' + (state.gate.confirmed_by || '—') + (state.gate.confirmed_at ? ' · ' + state.gate.confirmed_at : '') + (state.gate.comment ? ' · ' + state.gate.comment : '');
       } else if (state.status === 'rejected') {
         note.className = 'gate-note rejected show';
         note.textContent = '审批门：已拒绝 · ' + (state.gate.confirmed_by || '—') + (state.gate.comment ? ' · 原因：' + state.gate.comment : '');
-      } else {
+      } else if (state.requested) {
         note.className = 'gate-note pending show';
         const actions = state.irrev.map(a => a.action || a.factor || '').filter(Boolean).slice(0, 2).join('、');
-        note.textContent = '审批门：' + state.irrev.length + ' 项不可逆动作待确认' + (actions ? '（' + actions + '）' : '') + '；确认后才能 finalize。';
-      }
+        note.textContent = '审批门：' + state.irrev.length + ' 项不可逆动作待确认' + (actions ? '（' + actions + '）' : '') + '；确认后才能 finalize。'
+          + (gateSignWarning ? ' ⚠ ' + gateSignWarning : '');
+      } else if (gateSignWarning) {
+        // 报告未自报不可逆动作，但签字时 API 判定需安全门（fail-closed 口径：畸形也按「声称需要」处理）
+        note.className = 'gate-note pending show';
+        note.textContent = '⚠ ' + gateSignWarning;
+      } else { note.className = 'gate-note'; note.textContent = ''; }
     }
     const topBtn = $('gateTopBtn');
     if (topBtn) topBtn.style.display = (UI.live && hasReport && state.requested && state.status !== 'confirmed') ? '' : 'none';
@@ -1221,7 +1408,13 @@
     const finalBtn = $('finalizeBtn');
     if (finalBtn) finalBtn.style.display = (UI.live && hasReport && model.signature) ? '' : 'none';
     const signBtn = $('signBtn');
-    if (signBtn && model && model.report) signBtn.disabled = Boolean(model.isDemo) || Boolean(model.signature);
+    // 签字指纹已与报告现字节脱钩（gate 确认回写报告后）→ 必须允许重新签字，
+    // 否则 UI 卡在无解状态（finalize 报 hash mismatch，而签字按钮被禁用）。
+    if (signBtn && model && model.report) {
+      signBtn.disabled = Boolean(model.isDemo) || (Boolean(model.signature) && !model.signatureStale);
+      if (model.signatureStale) signBtn.textContent = '重新签字（指纹已失效）';
+      else signBtn.textContent = '签字确认';
+    }
   }
   function renderGateBox(model) {
     const box = $('gateBox'); if (!box) return;
@@ -1424,7 +1617,8 @@
       baseline_value: intakeField('iBaseVal'),
       data_owner: intakeField('iOwner'),
       gate: 'G0',
-      notes: '接单抽屉创建；不可逆动作只呈请不执行。'
+      notes: '接单抽屉创建；不可逆动作只呈请不执行。',
+      scene_id: UI.sceneIntake || undefined
     };
     const runner = ($('iRunner') && $('iRunner').value) || 'fixture';
     UI.runner = runner;
@@ -1699,6 +1893,7 @@
         } else if (adapter.state && adapter.state.health) {
           if (legend) legend.innerHTML = '舞台数据：<b>DSH 会话事件</b>（静态演示）';
         }
+        try { renderP0(); } catch (err) { /* 场景驾驶舱静默回退 */ }
       },
       onTeam(team) {
         try { mapTeam(team); } catch (err) { /* 团队数据异常不拖垮页面 */ }
@@ -1747,6 +1942,9 @@
         }
         if (summary) renderKpis(UI.tasks, summary);
         renderTaskbar(UI.tasks, adapter.currentTaskId(), summary || UI.summary);
+        if (document.body.classList.contains('mode-desk')) {
+          try { renderP0(); if (DESK.p === 'p1') renderP1(); if (DESK.p === 'p2') renderP2(); } catch (err) { /* 场景渲染异常不影响工作台 */ }
+        }
       },
       onBeats(beats, source) {
         if (UI.mode === 'tape' || !beats || beats.length < 1) return;
@@ -1762,6 +1960,29 @@
         renderFeed(events);
       },
       onSse(live) { renderSseState(live); },
+      onScenes(scenes, meta) {
+        DESK.scenes = scenes || [];
+        DESK.meta = meta || null;
+        renderP0();
+        const st = $('deskState');
+        if (st) {
+          st.textContent = '场景 ' + DESK.scenes.length + ' 个 · pack ' + ((meta && meta.pack_id) || '—') + ' · ' + ((meta && meta.spec_version) || 'scene.v1');
+          st.classList.add('live');
+        }
+        if (DESK.scene) {
+          const fresh = DESK.scenes.filter(function (s) { return s.scene_id === DESK.scene.scene_id; })[0];
+          if (fresh) { DESK.scene = fresh; renderP1(); }
+        }
+        if (DESK.pendingScene) {
+          const pending = DESK.pendingScene;
+          DESK.pendingScene = null;
+          openScene(pending);
+        }
+      },
+      onScene(scene, meta) {
+        if (meta) DESK.meta = meta;
+        if (scene) { DESK.scene = scene; renderP1(); }
+      },
       onGate(gate, model) { if (model) { UI.model = model; renderGate(model); } },
       onSignature(sig, model) { if (sig) applySignedState(sig.signer || '', sig.report_sha256, sig.signed_at); },
       onSign(result) { applySignedState(result.signer || '', result.sha256, result.signed_at); },
@@ -1769,6 +1990,17 @@
         if (adapter.state && adapter.state.failures <= 1) toast('本地服务异常：' + (error && error.message ? error.message : error));
       }
     });
+    /* 视图启动：默认经营决策台；?view=office 打开事务所；?scene=<id> 直开场景工作台 */
+    let params = null;
+    try { params = new URLSearchParams(location.search); } catch (err) { params = null; }
+    const view = params ? params.get('view') : null;
+    const sceneId = params ? params.get('scene') : null;
+    if (view === 'office') {
+      setView('office');
+    } else {
+      setView('desk');
+      if (sceneId) DESK.pendingScene = sceneId;
+    }
   }
 
   /* ------------------------------------------------------------ 其它交互 */
@@ -1809,6 +2041,387 @@
   }
   function openG0() { $('g0').classList.add('show'); }
   function closeG0() { $('g0').classList.remove('show'); }
+
+  /* ================= B15 场景化决策台：P0 / P1 / P2（SceneSpec 驱动，换行业只换 pack） ================= */
+  const DESK = { scenes: [], meta: null, scene: null, p: 'p0' };
+  const ORIGIN_CN = { preset: '预设种子', user_prompt: 'AI 生成', discovered: '统计发现' };
+  const DESK_LABEL = { s1: '① 快照', s2: '② 因素', s3: '③ 排除', s4: '④ 建议', s5: '⑤ 收口' };
+
+  function deskEsc(v) { return esc(v == null ? '' : String(v)); }
+  function deskNum(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+  function deskPick(obj, keys) {
+    if (!obj) return null;
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
+    }
+    return null;
+  }
+  function deskCut(s, n) { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n) + '…' : s; }
+  function deskSet(id, html) { const el = $(id); if (el) el.innerHTML = html; }
+  function deskVal(v, unit) {
+    const n = deskNum(v);
+    if (n == null) return '—';
+    const txt = Math.abs(n) >= 1000 ? n.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : String(Math.round(n * 100) / 100);
+    return txt + (unit ? ' ' + unit : '');
+  }
+  function deskSha(h) {
+    h = String(h || '');
+    return h ? (h.slice(0, 10) + (h.length > 14 ? '…' + h.slice(-4) : '')) : '—';
+  }
+  function deskStateText(s) {
+    if (window.APIAdapter && APIAdapter.stateLabel) return APIAdapter.stateLabel(s);
+    return s || '—';
+  }
+  function deskCurrentInstance(sceneId) {
+    const adapter = window.APIAdapter;
+    const detail = adapter && adapter.currentDetail ? adapter.currentDetail() : null;
+    if (detail && detail.scene && detail.scene.scene_id === sceneId) return detail.scene;
+    if (UI.model && UI.model.scene && UI.model.scene.scene_id === sceneId) return UI.model.scene;
+    if (DESK.scene && DESK.scene.scene_id === sceneId) return DESK.scene.instance || null;
+    return null;
+  }
+  function deskStatus(spec, inst) {
+    inst = inst || {};
+    const raw = String(deskPick(inst, ['status', 'state', 'health']) || '').toLowerCase();
+    const map = { normal: 'ok', ok: 'ok', warning: 'warn', warn: 'warn', alert: 'bad', bad: 'bad', insufficient: 'none' };
+    const unit = spec && spec.metric ? spec.metric.unit : '';
+    const cur = deskPick(inst, ['current_value', 'current', 'value']);
+    const cl = (inst && inst.control_line) || (spec && spec.control_line) || {};
+    const mean = deskNum(deskPick(cl, ['mean', 'target', 'center']));
+    const sigma = deskNum(deskPick(cl, ['sigma', 'stdev', 'std']));
+    const upper = deskNum(deskPick(cl, ['upper_2sigma', 'upper', 'usl']));
+    let kind = map[raw] || '';
+    if (!kind && deskNum(cur) != null && mean != null) {
+      const lim = upper != null ? upper : (sigma ? mean + 2 * sigma : null);
+      if (lim != null) kind = deskNum(cur) > lim ? 'bad' : (deskNum(cur) > mean ? 'warn' : 'ok');
+    }
+    if (!kind) kind = 'none';
+    return { kind: kind, text: { ok: '正常', warn: '预警', bad: '异常', none: '数据不足' }[kind] };
+  }
+  function deskBars(values) {
+    const nums = (values || []).map(function (v) { return (v && typeof v === 'object') ? deskNum(v.value) : deskNum(v); }).filter(function (v) { return v != null; });
+    if (nums.length < 2) return '';
+    const max = Math.max.apply(null, nums), min = Math.min.apply(null, nums), span = (max - min) || 1;
+    return '<div class="spark">' + nums.map(function (v, i) {
+      const h = 8 + Math.round(((v - min) / span) * 46);
+      return '<i class="' + (i === nums.length - 1 ? 'cur' : '') + '" style="height:' + h + 'px" title="' + deskEsc(deskVal(v)) + '"></i>';
+    }).join('') + '</div>';
+  }
+  function deskShowP(which) {
+    DESK.p = which;
+    ['p0', 'p1', 'p2'].forEach(function (p) { const el = $('d-' + p); if (el) el.hidden = (p !== which); });
+    document.querySelectorAll('.desk-nav .dbtn').forEach(function (b, i) { b.classList.toggle('on', i === 0 && which === 'p0'); });
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); }
+  }
+  function setView(view, sceneId) {
+    const desk = String(view || 'desk') !== 'office';
+    document.body.classList.toggle('mode-desk', desk);
+    if (desk) {
+      deskShowP('p0');
+      if (sceneId) openScene(sceneId);
+      deskRefresh();
+    }
+    try {
+      const u = new URL(location.href);
+      if (desk) u.searchParams.delete('view'); else u.searchParams.set('view', 'office');
+      history.replaceState(null, '', u.toString());
+    } catch (e) { /* file:// 忽略 */ }
+  }
+  function deskRefresh() {
+    const adapter = window.APIAdapter;
+    if (!adapter || !adapter.isLive || !adapter.isLive()) { renderP0(); return; }
+    try { if (adapter.loadScenes) adapter.loadScenes(); } catch (e) { /* 场景 API 未就绪时静默 */ }
+    try { if (adapter.refresh) adapter.refresh(); } catch (e) { /* ignore */ }
+    try { if (adapter.refreshTask) adapter.refreshTask(); } catch (e) { /* ignore */ }
+  }
+  function renderP0() {
+    const grid = $('sceneGrid'), empty = $('sceneEmpty');
+    if (!grid || !empty) return;
+    const adapter = window.APIAdapter;
+    const live = !!(adapter && adapter.isLive && adapter.isLive());
+    const list = DESK.scenes || [];
+    const st = $('deskState');
+    if (st) st.textContent = live ? ('场景 ' + list.length + ' 个 · pack ' + ((DESK.meta && DESK.meta.pack_id) || '—') + ' · ' + ((DESK.meta && DESK.meta.spec_version) || 'scene.v1')) : '本地服务未连接 · 静态演示回退';
+    if (st) st.classList.toggle('live', live);
+    if (!list.length) {
+      grid.innerHTML = '';
+      empty.style.display = '';
+      empty.innerHTML = live
+        ? '本地服务已连接，但当前 pack 没有可用场景（SceneSpec 为空）。可先去<a href="#" onclick="setView(\'office\');return false;">事务所工作台</a>接单运行。'
+        : '未连接本地服务：当前为静态演示回退，静态数据不参与交付判定。启动服务后自动加载场景：<br/><span class="hash">python -B server/app.py --port 8787</span><br/>也可先<a href="#" onclick="setView(\'office\');return false;">打开事务所工作台</a>查看静态演示。';
+      return;
+    }
+    empty.style.display = 'none';
+    const tasks = UI.tasks || [];
+    grid.innerHTML = list.map(function (spec) {
+      const inst = spec.latest || deskCurrentInstance(spec.scene_id);
+      const s = deskStatus(spec, inst);
+      const metric = spec.metric || {};
+      const cur = deskPick(inst || {}, ['current_value', 'current', 'value']);
+      const cl = (inst && inst.control_line) || spec.control_line || {};
+      const mean = deskPick(cl, ['mean', 'target', 'center']);
+      const sigma = deskPick(cl, ['sigma', 'stdev', 'std']);
+      const origin = ORIGIN_CN[spec.origin] || spec.origin || '—';
+      const irrev = (spec.actions || []).filter(function (a) { return a && a.irreversible; }).length;
+      const recent = (spec.latest && spec.latest.decision_id) ? spec.latest
+        : tasks.slice().filter(function (t) { return t && t.scene_id === spec.scene_id; }).sort(function (a, b) { return String(b.updated_at || '').localeCompare(String(a.updated_at || '')); })[0];
+      const advice = (inst && inst.advice) || null;
+      const confidence = (inst && inst.confidence) || null;
+      return '<button class="scene-card" type="button" data-scene="' + deskEsc(spec.scene_id) + '">' +
+        '<div class="sc-h"><h3>' + deskEsc(spec.title || spec.scene_id) + '</h3><span class="badge-status ' + s.kind + '">' + s.text + '</span></div>' +
+        '<div class="sc-q">' + deskEsc(spec.question || '') + '</div>' +
+        '<div class="sc-val"><b>' + deskEsc(deskVal(cur, metric.unit)) + '</b><span>' + (mean != null ? '控制线 ' + deskEsc(deskVal(mean, metric.unit)) + (sigma != null ? ' · σ ' + deskEsc(deskVal(sigma, metric.unit)) : '') : '尚无控制线数据') + '</span></div>' +
+        '<div class="sc-meta">指标：' + deskEsc(metric.name || metric.id || '—') + '</div>' +
+        '<div class="sc-meta">建议动作：' + (advice && advice.action ? deskEsc(advice.action) + (confidence != null ? ' · 置信 ' + deskEsc(confidence) : '') : '<span class="muted">待生成决策卡</span>') + '</div>' +
+        '<div class="sc-meta">最近决策：' + (recent ? deskEsc((recent.decision_id || recent.task_id) + ' · ' + deskStateText(recent.state)) : '暂无') + '</div>' +
+        '<div class="sc-meta"><span class="badge-origin">' + deskEsc(origin) + '</span>' + (irrev ? '<span class="badge-irrev">含不可逆动作 ' + irrev + '</span>' : '') + '</div>' +
+        '</button>';
+    }).join('');
+  }
+  function openScene(sceneId) {
+    const adapter = window.APIAdapter;
+    let scene = null;
+    if (adapter && adapter.selectScene) { try { scene = adapter.selectScene(sceneId); } catch (e) { scene = null; } }
+    if (!scene) scene = (DESK.scenes || []).filter(function (s) { return s.scene_id === sceneId; })[0] || null;
+    if (!scene) { toast('场景不存在：' + sceneId); return; }
+    DESK.scene = scene;
+    renderP1();
+    deskShowP('p1');
+  }
+  function renderP1() {
+    const spec = DESK.scene;
+    if (!spec) return;
+    const inst = deskCurrentInstance(spec.scene_id) || (spec.latest || null);
+    const model = UI.model || null;
+    const metric = spec.metric || {};
+    const title = $('p1Title'); if (title) title.textContent = spec.title || spec.scene_id;
+    const q = $('p1Q'); if (q) q.textContent = spec.question || '';
+    const og = $('p1Origin'); if (og) og.textContent = ORIGIN_CN[spec.origin] || spec.origin || '—';
+    /* 趋势 */
+    const trendValues = inst ? deskPick(inst, ['trend', 'series', 'history', 'points']) : null;
+    const cl = (inst && inst.control_line) || spec.control_line || {};
+    const mean = deskPick(cl, ['mean', 'target', 'center']);
+    const sigma = deskPick(cl, ['sigma', 'stdev', 'std']);
+    const cur = deskPick(inst || {}, ['current_value', 'current', 'value']);
+    let trend = trendValues && trendValues.length ? deskBars(trendValues) : '<div class="degraded">暂无趋势序列：等任务运行生成 runs/&lt;task_id&gt;/scene.json 后显示 μ±2σ 与控制线。</div>';
+    trend += '<div class="wrow"><span class="k">当前值</span><span class="v"><b>' + deskEsc(deskVal(cur, metric.unit)) + '</b></span></div>';
+    if (mean != null) trend += '<div class="wrow"><span class="k">控制线 μ</span><span class="v">' + deskEsc(deskVal(mean, metric.unit)) + '</span></div>';
+    if (sigma != null) trend += '<div class="wrow"><span class="k">σ</span><span class="v">' + deskEsc(deskVal(sigma, metric.unit)) + '</span></div>';
+    deskSet('p1Trend', trend);
+    /* 因素快照 */
+    const factors = (model && model.finding) || (inst && deskPick(inst, ['factors', 'finding'])) || [];
+    let fx = factors.length ? factors.map(function (f) {
+      if (typeof f === 'string') return '<div class="finding">' + deskEsc(f) + '</div>';
+      const name = deskPick(f, ['factor', 'name', 'label', 'cause']) || '—';
+      const conf = deskPick(f, ['confidence', 'score', 'weight']);
+      const ev = f.evidence || f.evidence_refs || [];
+      return '<div class="finding"><b>' + deskEsc(name) + '</b>' + (conf != null ? '<span class="conf">置信 ' + deskEsc(conf) + '</span>' : '') +
+        (ev && ev.length ? '<div class="evidence">' + deskEsc(Array.isArray(ev) ? ev.join('；') : ev) + '</div>' : '') + '</div>';
+    }).join('') : '<div class="degraded">因素快照来自任务报告 finding；当前该场景无已装配报告。</div>';
+    deskSet('p1Factors', fx);
+    /* 六步排除 */
+    const adapter = window.APIAdapter;
+    const log = (adapter && adapter.currentLog) ? adapter.currentLog() : [];
+    const steps = (adapter && adapter.crew && adapter.crew() && adapter.crew().steps) || [];
+    let six = '';
+    if (log && log.length) {
+      six = ['s1', 's2', 's3', 's4', 's5'].map(function (p) {
+        const evs = log.filter(function (e) { return e.phase === p; });
+        const line = evs.length ? evs[evs.length - 1].line : '';
+        return '<div class="wrow"><span class="k">' + DESK_LABEL[p] + '</span><span class="v">' + (line ? deskEsc(deskCut(line, 52)) : '<span class="muted">待运行</span>') + '</span></div>';
+      }).join('');
+    } else if (steps.length) {
+      six = steps.map(function (s, i) {
+        return '<div class="wrow"><span class="k">' + (i + 1) + '. ' + deskEsc(s.agent || '') + '</span><span class="v">' + deskEsc(deskCut(s.what || '', 40)) + '</span></div>';
+      }).join('');
+    } else {
+      six = '<div class="degraded">六步排除链由任务事件流（s1–s5）提供；当前无运行中任务，暂不展示。</div>';
+    }
+    deskSet('p1Six', six);
+    /* 评分卡 */
+    const dims = (model && model.score && model.score.dims) || (inst && (inst.scorecard || inst.dims)) || null;
+    const dimCn = { data_completeness: '数据完整性', timeliness: '时效性', significance: '显著性', exclusivity: '排他性', history: '历史对照', human_ai_consistency: '人机一致性' };
+    let dimObj = null;
+    if (Array.isArray(dims)) {
+      dimObj = {};
+      dims.forEach(function (d) { if (d && (d.name || d.dim || d.id)) dimObj[d.name || d.dim || d.id] = (d.score != null ? d.score : d.value); });
+    } else if (dims && typeof dims === 'object') dimObj = dims;
+    const total = (model && model.score && model.score.total != null) ? model.score.total : (inst && (inst.total != null ? inst.total : (inst.scorecard && inst.scorecard.total)));
+    let sc = '';
+    if (dimObj) {
+      sc = Object.keys(dimCn).map(function (k) {
+        const v = deskNum(dimObj[k]);
+        const pct = v == null ? 0 : (v > 10 ? v : v * 10);
+        return '<div class="dim-row"><span>' + dimCn[k] + '</span><span class="bar"><i style="width:' + Math.max(0, Math.min(100, pct)) + '%"></i></span><span>' + (v == null ? '—' : deskEsc(v)) + '</span></div>';
+      }).join('');
+    } else {
+      sc = '<div class="degraded">评分卡六维待任务报告（数据完整性 / 时效性 / 显著性 / 排他性 / 历史对照 / 人机一致性）。</div>';
+    }
+    const verdict = (model && model.score && verdictText(model.score.verdict)) || (inst && verdictText(inst.verdict)) || '—';
+    sc += '<div class="wrow"><span class="k">总分 / 判定</span><span class="v"><b>' + deskEsc(total != null ? total : '—') + '</b> ' + deskEsc(verdict) + '</span></div>';
+    deskSet('p1Score', sc);
+    /* 排除不了 */
+    const cannot = (model && (model.cannot || (model.report && model.report.cannot_attribute))) || (inst && (inst.cannot_attribute || inst.cannotAttribute)) || [];
+    deskSet('p1Cannot', (cannot && cannot.length)
+      ? '<div class="finding"><b>强制非空</b><span class="conf">' + cannot.length + ' 条</span><div class="evidence">' + deskEsc(cannot.join('；')) + '</div></div>'
+      : '<div class="degraded">「排除不了的原因」为强制非空字段：报告生成前显示待任务，生成后必须列出。</div>');
+    /* 建议（U5 渐进降级：数据不足 / 空值率>10% 时只显示降级原因与缺失字段，不显示建议） */
+    const reqFields = (spec.data_requirements || []).map(function (r) { return (r && (r.field || r.name)) || ''; }).filter(Boolean);
+    const knownFields = [];
+    (inst && (inst.available_fields || inst.data_fields || inst.fields) || []).forEach(function (f) { knownFields.push(String(f)); });
+    if (inst && inst.fields && typeof inst.fields === 'object') Object.keys(inst.fields).forEach(function (k) { knownFields.push(k); });
+    ((model && model.refs) || []).forEach(function (r) { const p = (r && r.path) ? r.path : r; if (p) knownFields.push(String(p)); });
+    const missingFields = reqFields.filter(function (f) {
+      return !knownFields.some(function (k) { return String(k).indexOf(f) >= 0; });
+    });
+    const rawNull = deskPick(inst || {}, ['null_rate', 'nullRate']);
+    const rawNull2 = deskPick((inst && inst.quality) || {}, ['null_rate', 'nullRate', 'missing_rate']);
+    let nullRate = deskNum(rawNull != null ? rawNull : rawNull2);
+    if (nullRate != null && nullRate > 1) nullRate = nullRate / 100;
+    const instHasData = !!(inst && (inst.current_value != null || inst.trend || inst.series || inst.factors));
+    const degradedAdvice = !model
+      || (nullRate != null && nullRate > 0.1)
+      || (missingFields.length > 0 && !instHasData);
+    const recs = degradedAdvice ? [] : ((model && model.recommendation) || (inst && inst.recommendation) || spec.actions || []);
+    if (degradedAdvice) {
+      const reasons = [];
+      if (nullRate != null && nullRate > 0.1) reasons.push('空值率 ' + Math.round(nullRate * 100) + '% > 10%：数据不足，建议区进入降级态。');
+      if (!model) reasons.push('尚无装配完成的交付报告：建议动作待任务运行后生成（先「发起归因」）。');
+      if (missingFields.length) reasons.push('缺失必填字段：' + missingFields.join('、'));
+      if (!reasons.length) reasons.push('数据不足：建议区进入降级态。');
+      deskSet('p1Advice', '<div class="degraded"><b>降级原因</b><br/>' + reasons.map(deskEsc).join('<br/>') + '</div>');
+    } else {
+      deskSet('p1Advice', recs.length ? recs.map(function (r) {
+      const roi = r.roi || {};
+      const irrev = String(r.irreversibility || (r.irreversible ? 'irreversible' : 'reversible')).toLowerCase();
+      const bad = irrev.indexOf('irreversible') >= 0 && irrev.indexOf('semi') < 0;
+      const cost = deskPick(roi, ['cost', 'action_cost', 'cost_cny']);
+      const avoided = deskPick(roi, ['avoided', 'avoided_loss', 'avoided_cny']);
+      const anchor = deskPick(roi, ['anchor', 'anchor_ref', 'anchor_id']);
+      return '<div class="finding"><b>' + deskEsc(r.action || r.name || '—') + '</b>' + (bad ? ' <span class="badge-status bad">不可逆</span>' : ' <span class="badge-status ok">可逆</span>') +
+        '<div class="wrow"><span class="k">成本 / 避免损失</span><span class="v">' + deskEsc(deskVal(cost, '元')) + ' / ' + deskEsc(deskVal(avoided, '元')) + '</span></div>' +
+        (anchor ? '<div class="wrow"><span class="k">ROI 锚点</span><span class="v">' + deskEsc(anchor) + '</span></div>' : '') + '</div>';
+      }).join('') : '<div class="degraded">暂无建议。</div>');
+    }
+    /* 场景信息 */
+    const metaRows = [
+      ['场景 ID', spec.scene_id], ['版本', spec.version || '—'], ['来源', ORIGIN_CN[spec.origin] || spec.origin || '—'],
+      ['指标', (metric.name || '—') + (metric.id ? '（' + metric.id + '）' : '')], ['单位', metric.unit || '—'],
+      ['控制方法', spec.control_method || '—'],
+      ['责任人角色', (spec.owner_roles || []).join(' / ') || '—'],
+      ['数据要求', (spec.data_requirements || []).length + ' 项'],
+      ['动作', (spec.actions || []).length + ' 个（不可逆 ' + (spec.actions || []).filter(function (a) { return a && a.irreversible; }).length + '）']
+    ];
+    deskSet('p1Meta', metaRows.map(function (r) { return '<div class="wrow"><span class="k">' + deskEsc(r[0]) + '</span><span class="v">' + deskEsc(r[1]) + '</span></div>'; }).join(''));
+    /* 数据与证据 */
+    let data = (spec.data_requirements || []).length
+      ? (spec.data_requirements || []).map(function (r) { return '<div class="wrow"><span class="k">' + deskEsc(r.field || r.name || '—') + (r.required ? ' *' : '') + '</span><span class="v">' + deskEsc(r.source || r.note || '') + '</span></div>'; }).join('')
+      : '<div class="muted">未声明数据要求。</div>';
+    const refs = (model && model.refs) || [];
+    if (refs && refs.length) {
+      data += '<div class="wrow" style="border-bottom:none;padding-top:8px"><span class="k">证据链</span><span class="v"></span></div><div class="evidence">' +
+        refs.map(function (r) { const p = (r && r.path) ? r.path : r; const h = (r && r.sha256) ? String(r.sha256).slice(0, 8) : ''; return deskEsc(String(p) + (h ? ' · ' + h : '')); }).join('<br/>') + '</div>';
+    }
+    deskSet('p1Data', data);
+    /* 降级状态 */
+    const issues = [];
+    if (!inst) issues.push('场景实例（runs/<task_id>/scene.json）尚未生成：当前值/趋势/因素按「待数据」展示。');
+    if (model) {
+      if (model.task && !model.task.data_ready) issues.push('任务数据未就绪（data_ready=false）：建议区降级为「仅参考」。');
+      if (model.isDemo) issues.push('演示数据（fixture runner）：交付卡带「演示数据」角标，不得冒充真实。');
+      if (model.task && model.task.scene_id && model.task.scene_id !== spec.scene_id) issues.push('当前任务属于其他场景（' + model.task.scene_id + '）：请切换任务或发起本场景归因。');
+    } else if (!(adapter && adapter.isLive && adapter.isLive())) {
+      issues.push('本地服务未连接：当前为静态演示回退，不参与交付判定。');
+    }
+    deskSet('p1Degrade', issues.length ? issues.map(function (s) { return '<div class="degraded">' + deskEsc(s) + '</div>'; }).join('') : '<div class="wrow"><span class="k">状态</span><span class="v">数据要求已满足</span></div>');
+  }
+  function renderP2() {
+    const host = $('decisionCard');
+    if (!host) return;
+    const model = UI.model || null;
+    const spec = DESK.scene || null;
+    if (!model || !model.report) {
+      host.innerHTML = '<div class="dec-card"><div class="desk-empty">本场景尚无交付报告：请先去事务所工作台接单并运行任务，或点「发起归因」创建任务；报告装配后这里自动生成决策卡。</div></div>';
+      return;
+    }
+    const r = model.report || {};
+    const finding = model.finding || r.finding || [];
+    const recs = model.recommendation || r.recommendation || [];
+    const log = model.log || r.decision_log_entry || {};
+    const score = model.score || {};
+    const sig = model.signature || null;
+    const outcome = model.outcome || null;
+    const loopDecision = (model.loop && model.loop.decision) || {};
+    const reviewDue = (loopDecision && loopDecision.review_due)
+      || (model.task && (model.task.review_due || model.task.review_due_at)) || '—';
+    const refs = model.refs || log.data_refs || [];
+    const ver = verdictText(score.verdict) || '—';
+    const cannot = model.cannot || r.cannot_attribute || [];
+    const findingHtml = finding.length
+      ? finding.map(function (f) {
+          const name = deskPick(f, ['factor', 'name', 'label']) || '—';
+          const conf = deskPick(f, ['confidence', 'score']);
+          const ev = f.evidence || [];
+          return '<div class="finding"><b>' + deskEsc(name) + '</b>' + (conf != null ? '<span class="conf">置信 ' + deskEsc(conf) + '</span>' : '') +
+            (ev && ev.length ? '<div class="evidence">' + deskEsc(Array.isArray(ev) ? ev.join('；') : ev) + '</div>' : '') + '</div>';
+        }).join('')
+      : '<div class="muted">报告未列因素。</div>';
+    const recHtml = (recs || []).length ? recs.map(function (x) {
+      const roi = x.roi || {};
+      const irrev = String(x.irreversibility || '').toLowerCase();
+      return '<div class="finding"><b>' + deskEsc(x.action || x.name || '—') + '</b> ' + (irrev.indexOf('irreversible') >= 0 ? '<span class="badge-status bad">不可逆</span>' : '<span class="badge-status ok">可逆</span>') +
+        '<div class="wrow"><span class="k">成本 / 避免损失</span><span class="v">' + deskEsc(deskVal(deskPick(roi, ['cost', 'action_cost']), '元')) + ' / ' + deskEsc(deskVal(deskPick(roi, ['avoided', 'avoided_loss']), '元')) + '</span></div></div>';
+    }).join('') : '<div class="muted">报告未列建议。</div>';
+    const refHtml = (refs || []).map(function (x) {
+      const p = (x && x.path) ? x.path : x;
+      const h = (x && x.sha256) ? String(x.sha256) : '';
+      return deskEsc(String(p) + (h ? ' · ' + String(h).slice(0, 16) : ''));
+    }).join('<br/>') || '—';
+    const signHtml = sig
+      ? '<div class="dec-sign"><span>确认人：<b>' + deskEsc(sig.signer || sig.signed_by || '—') + '</b></span><span>签字时间：<b>' + deskEsc(sig.signed_at || '—') + '</b></span><span>报告指纹：<span class="hash">' + deskEsc(deskSha(sig.report_sha256 || sig.sha256)) + '</span></span></div>'
+      : '<div class="dec-sign"><span>待签字：在事务所工作台交付卡确认（60 秒内可完成）</span><span>报告指纹：<span class="hash">' + deskEsc(deskSha((refs && refs[0] && refs[0].sha256) || '')) + '</span></span></div>';
+    host.innerHTML = '<div class="dec-card">' +
+      '<div class="dec-head"><div><h2>' + deskEsc(spec ? (spec.title || spec.scene_id) : (model.title || '决策卡')) + '</h2>' +
+      '<div class="id">决策卡 ' + deskEsc(log.id || '—') + ' · 任务 ' + deskEsc((model.task && model.task.task_id) || '—') + (model.isDemo ? ' · <span class="badge-status bad">演示数据</span>' : '') + '</div></div>' +
+      '<div style="text-align:right"><div style="font-size:30px;font-weight:800">' + deskEsc(score.total != null ? score.total : '—') + '</div><div class="id">' + deskEsc(ver) + '</div></div></div>' +
+      '<div class="dec-sec"><h4>一、结论</h4><div class="body">' + findingHtml + '</div></div>' +
+      '<div class="dec-sec"><h4>二、建议与可逆性</h4><div class="body">' + recHtml + '</div></div>' +
+      '<div class="dec-sec"><h4>三、证据与追溯</h4><div class="body"><div class="evidence">' + refHtml + '</div>' +
+      '<div class="wrow"><span class="k">报告生成时间</span><span class="v">' + deskEsc(r.generated_at || '—') + '</span></div>' +
+      '<div class="wrow"><span class="k">pack</span><span class="v">' + deskEsc((model.pack && (model.pack.pack_id || model.pack.id)) || '—') + ' ' + deskEsc((model.pack && model.pack.version) || '') + '</span></div>' +
+      '<div class="wrow"><span class="k">排除不了</span><span class="v">' + deskEsc((cannot || []).length) + ' 条</span></div></div></div>' +
+      '<div class="dec-sec"><h4>四、签字</h4><div class="body">' + signHtml + '</div></div>' +
+      '<div class="dec-sec"><h4>五、回看</h4><div class="body">' +
+      '<div class="wrow"><span class="k">下一步</span><span class="v">' + deskEsc(log.next_step || log.verification_plan || '—') + '</span></div>' +
+      '<div class="wrow"><span class="k">预期结果</span><span class="v">' + deskEsc(log.expected_result || '—') + '</span></div>' +
+      '<div class="wrow"><span class="k">回看时间</span><span class="v">' + deskEsc(reviewDue) + '</span></div>' +
+      '<div class="wrow"><span class="k">回看状态</span><span class="v"><span class="badge-status ' + (outcome ? 'ok' : 'warn') + '">' + (outcome ? '已回填' : '待回看') + '</span></span></div>' +
+      (outcome ? '<div class="wrow"><span class="k">实际结果</span><span class="v">' + deskEsc(outcome.observed_outcome || '—') + '</span></div>' +
+        '<div class="wrow"><span class="k">增量</span><span class="v">' + deskEsc(outcome.increment_value != null ? outcome.increment_value : '—') + '</span></div>' +
+        '<div class="wrow"><span class="k">实际动作</span><span class="v">' + deskEsc(outcome.actual_action || '—') + '</span></div>' +
+        '<div class="wrow"><span class="k">回看窗口</span><span class="v">' + deskEsc(outcome.outcome_window || '—') + '</span></div>' : '') +
+      '<div class="wrow"><span class="k">当前状态</span><span class="v">' + deskEsc(deskStateText(model.state)) + '</span></div></div></div>' +
+      '</div>';
+  }
+  function sceneAttribution() {
+    const spec = DESK.scene;
+    if (!spec) { toast('请先选择场景'); return; }
+    setView('office');
+    if (typeof openIntake === 'function') openIntake();
+    const metric = spec.metric || {};
+    const setV = function (id, v) { const el = $(id); if (el) el.value = v; };
+    setV('iMetric', metric.name || metric.id || spec.title || '');
+    UI.sceneIntake = spec.scene_id;
+    const pv = $('intakePreview');
+    if (pv) pv.textContent = '场景：' + spec.scene_id + ' · 指标 ' + (metric.name || metric.id || '—') + '\n发起归因会写入 task.scene_id；运行装配后决策台自动读取报告。';
+    toast('已带入场景：' + spec.scene_id);
+  }
+  function printDecision() { try { window.print(); } catch (e) { toast('当前环境不支持直接打印，请用浏览器打印'); } }
+  document.addEventListener('click', function (e) {
+    const card = e.target && e.target.closest ? e.target.closest('[data-scene]') : null;
+    if (card) { openScene(card.getAttribute('data-scene')); }
+  });
 
   /* 启动真数据适配（失败时静默保持静态演示） */
   bindRealData();

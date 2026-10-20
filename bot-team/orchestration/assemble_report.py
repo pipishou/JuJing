@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core import events, gates, pack as pack_mod, provenance, report_contract  # noqa: E402
+from core import events, fsutil, gates, pack as pack_mod, provenance, report_contract  # noqa: E402
 
 SIX = report_contract.SIX_DIMS
 DEFAULT_DATA_REFS = ["demo/material_refill_T.json", "demo/material_refill_T30.json"]
@@ -71,7 +71,7 @@ def atomic_write_json(path, doc):
             fh.write("\n")
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp_path, path)
+        fsutil.replace_with_retry(tmp_path, path)
         tmp_path = None
     finally:
         if tmp_path is not None and tmp_path.exists():
@@ -281,7 +281,8 @@ def main():
     else:
         scorecard = demo_scorecard(attribution)
     try:
-        scored = report_contract.compute(scorecard)
+        # B16：硬护栏阈值只从行业包读，assemble 已加载的 pack_doc 直接传入（尊重 --pack-path）
+        scored = report_contract.compute(scorecard, pack=pack_doc)
     except ValueError as exc:
         return fail(f"scorecard 无法换算：{exc}")
     scorecard["total"] = scored["total"]
@@ -316,6 +317,28 @@ def main():
     )
     report_id = pick_report_id(args.out)
 
+    # 7b) B17：decision_log_entry 的 DEC 扩展字段（设计文档 §3.3）
+    #     有值才写、不写 null 占位；attribution_method 值域受 validate_structure 约束。
+    #     actual_action/override_reason/observed_outcome/increment_value 属 T+7 回填字段，
+    #     只有 workflow 结果里已带 outcome（重跑/后填）时才落，否则由 /api/tasks/<id>/outcome 回填。
+    review_days = th.get("t30_window_days", 30) // 4 or 7
+    first_roi = (rec[0].get("roi") if rec and isinstance(rec[0], dict) else {}) or {}
+    doc_outcome = doc.get("outcome") if isinstance(doc.get("outcome"), dict) else {}
+    advice_doc = advice if isinstance(advice, dict) else {}
+    raw_method = str((doc.get("attribution") or {}).get("method") or "").strip()
+    dec_extension = {
+        "attribution_method": raw_method if raw_method in report_contract.ATTRIBUTION_METHODS else "exclusion",
+        "outcome_window": f"{review_days}d",
+    }
+    if not report_contract.is_empty(first_roi.get("cost")):
+        dec_extension["action_cost"] = first_roi.get("cost")
+    for _key in ("actual_action", "override_reason", "observed_outcome", "increment_value"):
+        _value = doc_outcome.get(_key)
+        if report_contract.is_empty(_value):
+            _value = advice_doc.get(_key) or doc.get(_key)
+        if not report_contract.is_empty(_value):
+            dec_extension[_key] = _value
+
     report = {
         "schema": "manufacturing-ops-report/0.1",
         "generated_at": run_day.isoformat(),
@@ -337,7 +360,7 @@ def main():
         "recommendation": rec,
         "security_gate_requested": gate_needed,
         "security_gate": gate,
-        "decision_log_entry": {
+        "decision_log_entry": report_contract.extend_decision_log({
             "id": report_id,
             "date": run_day.isoformat(),
             "actor": "manufacturing-ops-team-dsh",
@@ -352,7 +375,7 @@ def main():
             "irreversibility": "irreversible" if gate_needed else "reversible",
             "security_gate": gate,
             "roi_source": f"pack:{pack_doc.get('pack_id')}",
-        },
+        }, dec_extension),
         "role_coverage": {
             "host": "s5",
             "consulting-analyst": "s1",

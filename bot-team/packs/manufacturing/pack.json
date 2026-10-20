@@ -1,6 +1,6 @@
 {
   "pack_id": "manufacturing",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "industry": "制造业",
   "thresholds": {
     "refill_baseline_pct": 5.40,
@@ -15,7 +15,8 @@
   },
   "irreversible_actions": [
     "conditional_mold_change",
-    "line_stop"
+    "line_stop",
+    "mold_change"
   ],
   "irreversible_keywords": [
     "停线",
@@ -31,5 +32,137 @@
     "history",
     "human_ai_consistency"
   ],
-  "crew_id": "c-refill-attribution"
+  "crew_id": "c-refill-attribution",
+  "scorecard_hard_guardrails": [
+    {
+      "id": "human_ai_conflict",
+      "dim": "human_ai_consistency",
+      "op": "==",
+      "value": 0,
+      "action": "force_manual_review",
+      "note": "信息员反馈与 AI 归因矛盾"
+    },
+    {
+      "id": "too_many_hypotheses",
+      "dim": "exclusivity",
+      "op": "<=",
+      "value": 10,
+      "action": "force_manual_review",
+      "note": "≥3 个竞争假设（排他性展示分 ≤10）"
+    },
+    {
+      "id": "data_gap",
+      "dim": "data_completeness",
+      "op": "<=",
+      "value": 15,
+      "action": "force_manual_review",
+      "note": "≥3 个关键字段缺失（完整性展示分 ≤15）"
+    }
+  ],
+  "factors_version": 1,
+  "factors": [
+    "production_line",
+    "refill_rate",
+    "output_volume",
+    "mold_status",
+    "maintenance_records",
+    "shift_team",
+    "material_batch",
+    "ambient_env",
+    "mold_change_records",
+    "downtime_records",
+    "reporter"
+  ],
+  "metrics": [
+    {
+      "id": "refill_rate",
+      "name": "补料率",
+      "unit": "%",
+      "grain": "daily",
+      "direction": "higher_worse",
+      "field": "refill_rate",
+      "control_line_methods": [
+        "mean_2sigma",
+        "target",
+        "cusum"
+      ]
+    },
+    {
+      "id": "downtime_minutes",
+      "name": "停机时长",
+      "unit": "分钟",
+      "grain": "daily",
+      "direction": "higher_worse",
+      "field": "downtime_records",
+      "control_line_methods": [
+        "mean_2sigma",
+        "target",
+        "cusum"
+      ]
+    },
+    {
+      "id": "output_per_capita",
+      "name": "人均产量",
+      "unit": "件/人",
+      "grain": "monthly",
+      "direction": "higher_better",
+      "field": "output_volume",
+      "control_line_methods": [
+        "mean_2sigma",
+        "target",
+        "cusum"
+      ]
+    },
+    {
+      "id": "scrap_rate",
+      "name": "废品率",
+      "unit": "%",
+      "grain": "daily",
+      "direction": "higher_worse",
+      "field": "scrap_rate",
+      "control_line_methods": [
+        "mean_2sigma",
+        "target",
+        "cusum"
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "id": "maintenance",
+      "label": "保养排程优化",
+      "cost_anchor_key": "maintenance",
+      "reversible": true
+    },
+    {
+      "id": "mold_change",
+      "label": "换模",
+      "cost_anchor_key": "mold_change",
+      "reversible": false
+    },
+    {
+      "id": "conditional_mold_change",
+      "label": "条件换模",
+      "cost_anchor_key": "mold_change",
+      "reversible": false
+    },
+    {
+      "id": "line_stop",
+      "label": "停线检修",
+      "cost_anchor_key": "overtime_clean",
+      "reversible": false
+    },
+    {
+      "id": "data_rerun",
+      "label": "补数据后重跑归因",
+      "cost_anchor_key": "maintenance",
+      "reversible": true
+    }
+  ],
+  "scene_guardrails": {
+    "max_per_month": 3,
+    "hard_rules": [
+      "irreversible_requires_security_gate"
+    ]
+  }
 }

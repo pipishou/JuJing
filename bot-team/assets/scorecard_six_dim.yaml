@@ -36,10 +36,13 @@ confidence_formula: >-
   任一维 missing 时该维计 0 分并在 evidence 中声明
 
 # ---- v1.4：与《AI智能经营模型 v1.3》§4 评分卡对齐（2026-10-18）----
+# ---- B16（2026-10-20）：100 分制收口 —— 60-79 强制人工复核；硬护栏阈值由 pack.json 声明 ----
 total_score: 100
 score_per_dimension_max: 16.67
 scoring_note: >-
   LLM 输出 0-5 分/维，换算 16.67×得分/5；系统建议输出前必须换算成 100 分制并检查硬护栏。
+  B16 起同时接受 0-100 百分制输入（> 5 的数值按百分制解释，自动 ÷20 归一到 0-5）。
+  硬护栏阈值不在本文件写死，唯一事实源为 packs/<pack_id>/pack.json 的 scorecard_hard_guardrails。
 guardrails:
   - id: human_ai_conflict
     condition: human_ai_consistency == 0
@@ -60,7 +63,7 @@ thresholds:
   - min_score: 60
     max_score: 79
     label: 建议人工复核
-    action: output_with_flag
+    action: force_manual_review
   - min_score: 40
     max_score: 59
     label: 需人工判断

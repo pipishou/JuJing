@@ -7,7 +7,26 @@
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
+
+
+def replace_with_retry(tmp, path, attempts=10, delay=0.05):
+    """os.replace 在 Windows 上会因目标文件被并发读句柄占用而报 WinError 5。
+
+    server 轮询 status.json 与本工具写 status.json 撞上时，目标文件不带
+    FILE_SHARE_DELETE，替换被系统拒绝；重试即可稳定落盘。
+    """
+    last = None
+    for attempt in range(attempts):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError as exc:
+            last = exc
+            if attempt < attempts - 1:
+                time.sleep(delay)
+    raise last
 
 
 def atomic_write_text(path, text):
@@ -21,7 +40,7 @@ def atomic_write_text(path, text):
             fh.write(text)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp_path, path)
+        replace_with_retry(tmp_path, path)
         tmp_path = None
     finally:
         if tmp_path is not None and tmp_path.exists():

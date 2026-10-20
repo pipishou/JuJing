@@ -67,6 +67,13 @@
     gate: null,
     runner: 'fixture',
     lastUpload: null,
+    // B15：场景台（SceneSpec v1，来自 /api/scenes；前端只认 schema，不写场景常量）
+    scenes: [],
+    sceneMeta: null,
+    sceneId: null,
+    scene: null,
+    sceneError: null,
+    sceneParam: null,
     hooks: {},
     timer: null,
     taskTimer: null,
@@ -239,14 +246,21 @@
     var report = (detail && detail.report) || null;
     var status = (detail && detail.status) || {};
     var signature = (detail && detail.signature) || null;
+    var signatureStale = Boolean(detail && detail.signature_stale);
     var task = (detail && detail.task) || {};
     if (!report) {
       return {
         report: null, status: status, signature: signature, task: task,
+        signatureStale: signatureStale,
         title: taskTitle(task), score: scoreInfo(null, null), roi: null,
         finding: [], cannot: [], recommendation: [], log: null, pack: null,
         refs: [], isDemo: Boolean(task.is_demo), state: status.state || task.state || 'created',
-        step: status.step || '', gate: null, irreversible: [], dataReady: Boolean(task.data_ready || (task.data_files && task.data_files.length))
+        step: status.step || '', gate: null, irreversible: [],
+        dataReady: Boolean(task.data_ready || (task.data_files && task.data_files.length)),
+        scene: (detail && detail.scene) || null,
+        loop: (detail && detail.loop) || null,
+        outcome: (detail && detail.outcome) || null,
+        outcomePending: detail ? detail.outcome_pending !== false : true
       };
     }
     var recommendation = report.recommendation || [];
@@ -278,7 +292,12 @@
       step: status.step || '',
       gate: gate,
       irreversible: irreversible,
-      dataReady: Boolean(task.data_ready || (task.data_files && task.data_files.length))
+      signatureStale: signatureStale,
+      dataReady: Boolean(task.data_ready || (task.data_files && task.data_files.length)),
+      scene: (detail && detail.scene) || null,
+      loop: (detail && detail.loop) || null,
+      outcome: (detail && detail.outcome) || null,
+      outcomePending: detail ? detail.outcome_pending !== false : true
     };
   }
 
@@ -628,6 +647,8 @@
       }).then(function () {
         return refreshAll();
       }).then(function () {
+        return loadScenes();
+      }).then(function () {
         startPolling();
         return state;
       });
@@ -645,9 +666,121 @@
     });
   }
 
+  // ---------------------------------------------------------------- scenes --
+  // B15 场景台数据层（设计文档 §4.5）。只做接入与归一化，渲染在 index.html hooks。
+  // GET /api/scenes -> {ok, scenes:[SceneSpec...], pack_id, generated_at, spec_version, contract_errors}
+  // POST /api/scenes/derive {prompt?|metric_id?|data_ref?} -> 合法 SceneSpec / {ok:false,cannot_derive}
+  function sceneListPayload(payload) {
+    var body = payload || {};
+    var scenes = Array.isArray(body.scenes) ? body.scenes.slice() : (Array.isArray(body) ? body.slice() : []);
+    var errors = [];
+    (body.contract_errors || body.warnings || []).forEach(function (item) {
+      if (!item) return;
+      errors.push(typeof item === 'string' ? item : (item.reason || item.error || item.code || JSON.stringify(item)));
+    });
+    return {
+      scenes: scenes,
+      errors: errors,
+      meta: {
+        pack_id: body.pack_id || '',
+        generated_at: body.generated_at || '',
+        spec_version: body.spec_version || 'scene.v1',
+        contract_errors: errors
+      }
+    };
+  }
+
+  function loadScenes() {
+    return requestJSON('/api/scenes').then(function (payload) {
+      var parsed = sceneListPayload(payload);
+      state.scenes = parsed.scenes;
+      state.sceneMeta = parsed.meta;
+      state.sceneError = parsed.errors.length ? parsed.errors.join('；') : null;
+      var wanted = state.sceneParam || state.sceneId;
+      var match = null;
+      if (wanted) match = state.scenes.filter(function (s) { return s && s.scene_id === wanted; })[0] || null;
+      if (!match && state.scenes.length) match = state.scenes[0];
+      state.sceneId = match ? match.scene_id : null;
+      state.scene = match;
+      if (state.hooks.onScenes) state.hooks.onScenes(state.scenes, state.sceneMeta, state.sceneError);
+      if (match && state.hooks.onScene) state.hooks.onScene(match, state.sceneMeta);
+      return state.scenes;
+    }).catch(function (error) {
+      state.scenes = [];
+      state.scene = null;
+      state.sceneError = error && error.message ? error.message : String(error);
+      state.sceneMeta = { pack_id: '', generated_at: '', spec_version: 'scene.v1', contract_errors: [state.sceneError] };
+      if (state.hooks.onScenes) state.hooks.onScenes([], state.sceneMeta, state.sceneError);
+      return [];
+    });
+  }
+
+  function selectScene(sceneId) {
+    var id = String(sceneId || '');
+    var match = state.scenes.filter(function (s) { return s && s.scene_id === id; })[0] || null;
+    state.sceneParam = id || null;
+    state.sceneId = match ? match.scene_id : null;
+    state.scene = match;
+    try {
+      var url = match ? ('?scene=' + encodeURIComponent(match.scene_id)) : location.pathname;
+      history.replaceState(null, '', url);
+    } catch (err) { /* file:// 忽略 */ }
+    if (match && state.hooks.onScene) state.hooks.onScene(match, state.sceneMeta);
+    return match;
+  }
+
+  function deriveScene(options) {
+    var opts = options || {};
+    // 双模式（Lead 契约 m01016）：显式 spec → 校验模式；否则生成模式（prompt/metric_id/data_ref）
+    if (opts.spec && typeof opts.spec === 'object') {
+      return postJSON('/api/scenes/derive', { spec: opts.spec }).then(function (result) {
+        var payload = result || {};
+        if (payload.ok === false) {
+          var reasons = payload.cannot_derive || payload.reasons || payload.error || 'SceneSpec 未通过校验';
+          var error = new Error(Array.isArray(reasons) ? reasons.join('；') : String(reasons));
+          error.payload = payload;
+          throw error;
+        }
+        return payload;
+      });
+    }
+    var body = {};
+    ['prompt', 'metric_id', 'data_ref'].forEach(function (key) {
+      if (opts[key] != null && String(opts[key]).trim() !== '') body[key] = String(opts[key]).trim();
+    });
+    if (!Object.keys(body).length) throw new Error('派生场景需至少提供 prompt / metric_id / data_ref 之一（或传 spec 走校验模式）');
+    return postJSON('/api/scenes/derive', body).then(function (result) {
+      var payload = result || {};
+      if (payload.ok === false) {
+        var reasons = payload.cannot_derive || payload.reasons || payload.error || '无法派生合法 SceneSpec';
+        throw new Error(Array.isArray(reasons) ? reasons.join('；') : String(reasons));
+      }
+      var spec = payload.scene || payload.spec || null;
+      if (!spec || !spec.scene_id) throw new Error('派生结果缺少合法 SceneSpec（scene_id）');
+      var replaced = false;
+      state.scenes = state.scenes.map(function (item) {
+        if (item && item.scene_id === spec.scene_id) { replaced = true; return spec; }
+        return item;
+      });
+      if (!replaced) state.scenes = state.scenes.concat([spec]);
+      if (state.hooks.onScenes) state.hooks.onScenes(state.scenes, state.sceneMeta, state.sceneError);
+      selectScene(spec.scene_id);
+      return spec;
+    });
+  }
+
+  function sceneForTask(detail) {
+    var instance = detail && detail.scene;
+    if (!instance || typeof instance !== 'object') return null;
+    var id = instance.scene_id || (instance.spec && instance.spec.scene_id) || '';
+    var spec = id ? state.scenes.filter(function (s) { return s && s.scene_id === id; })[0] : null;
+    return { scene_id: id, spec: spec || null, instance: instance };
+  }
+
   function init(hooks) {
     state.hooks = hooks || {};
     state.taskParam = queryParam('task');
+    state.sceneParam = queryParam('scene');
     return connect().catch(function (error) {
       state.live = false;
       state.error = error;
@@ -801,6 +934,14 @@
     refresh: refreshAll,
     refreshTask: refreshTask,
     loadTeam: loadTeam,
+    loadScenes: loadScenes,
+    listScenes: loadScenes,
+    selectScene: selectScene,
+    deriveScene: deriveScene,
+    sceneForTask: sceneForTask,
+    scenes: function () { return state.scenes.slice(); },
+    scene: function () { return state.scene; },
+    sceneMeta: function () { return state.sceneMeta; },
     selectTask: selectTask,
     create: create,
     uploadData: uploadData,
