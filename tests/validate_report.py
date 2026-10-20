@@ -5,7 +5,8 @@
 判据（任一 FAIL → 非零退出）：
   1. finding：0–2 条，每条 factor/confidence/evidence 齐，evidence 非空
   2. cannot_attribute：非空
-  3. scorecard：六维键齐；--require-real 时必须是数值 0-5（拒绝叙述/占位）
+  3. scorecard：六维键齐；--require-real 时必须是数值 0-5（旧口径）或 0-100（B16 百分制），
+     且 total 0-100 / verdict ∈ {output,force_manual_review,reference_only,no_output}
   4. recommendation：非空，每条 action/roi(cost,avoided,anchor)/irreversibility 齐
   5. decision_log_entry：id/actor/context/advice/expected_result/verification_plan 齐
   6. 若 any irreversibility=irreversible → security_gate 必须非空
@@ -66,10 +67,20 @@ def main():
             v = sc.get(k)
             if isinstance(v, dict):
                 v = v.get("score")
-            ok = isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= float(v) <= 5
-            check(f"real scorecard {k} numeric 0-5", ok, repr(v))
+            # B16：旧 0-5 口径与 100 分制新口径都接受（代码按 ≤5 / >5 自动识别）
+            ok = (isinstance(v, (int, float)) and not isinstance(v, bool)
+                  and 0 <= float(v) <= 100)
+            check(f"real scorecard {k} numeric 0-5/0-100", ok, repr(v))
         check("real is_demo=false", r.get("is_demo") is False)
         check("real task_id", bool(r.get("task_id")))
+        # B16：100 分制总分 + 档位必须落地且域内
+        total = sc.get("total")
+        check("real scorecard.total numeric 0-100",
+              isinstance(total, (int, float)) and not isinstance(total, bool) and 0 <= float(total) <= 100,
+              repr(total))
+        check("real scorecard.verdict",
+              sc.get("verdict") in ("output", "force_manual_review", "reference_only", "no_output"),
+              repr(sc.get("verdict")))
         # M1.5 §3 B4 硬化：data_refs 可能在顶层与 decision_log_entry 两处，两处都要查 demo/
         top_refs = r.get("data_refs")
         dl_refs = (r.get("decision_log_entry") or {}).get("data_refs")

@@ -62,6 +62,21 @@ def read_json(path):
         return json.load(fh)
 
 
+def extract_json_object(text):
+    """从子步骤输出里抠出第一个 JSON 对象（子步骤 stdout 常带日志行前缀）。"""
+    text = text or ""
+    for i, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(text[i:])
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return None
+
+
 def run_step(outdir, phase, role, cmd):
     """执行子步骤；失败返回 (False, output)。stdout 逐行作为 tool 事件写入 run.log。"""
     proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True,
@@ -250,8 +265,17 @@ def main():
             if t30_file:
                 ccmd += ["--t30", str(t30_file)]
             ok, out = run_step(outdir, "s2", "data-fetcher", ccmd)
+            contract = extract_json_object(out)
+            if isinstance(contract, dict):
+                # 合同结论落盘：呈现层据此判定降级态（降级≠失败，只是不出建议）
+                fsutil.atomic_write_json(Path(outdir) / "data_contract.json", contract)
+                if contract.get("degraded"):
+                    reasons = contract.get("degradation_reasons") or []
+                    log_line(outdir, "s2", "data-fetcher",
+                             f"数据降级（不是失败）：{contract.get('degradation_level')}｜"
+                             f"{'；'.join(str(r) for r in reasons[:3])}")
             if not ok:
-                raise RuntimeError("数据合同未通过（check_data_contract --strict）：\n" + out[-1500:])
+                raise RuntimeError("数据合同未通过（check_data_contract --strict，值级/重复日期等真违规）：\n" + out[-1500:])
 
         # ---- 5) 组装报告（assemble 内部负责可信门 + 原子写 + 100 分制 + pack 兜底） ----
         context = args.context or intake.get("context") or f"{args.line or intake.get('line') or 'B'}线补料率异常（真实任务）"

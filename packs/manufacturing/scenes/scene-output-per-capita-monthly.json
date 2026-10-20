@@ -1,0 +1,74 @@
+{
+  "spec_version": "scene.v1",
+  "scene_id": "scene-output-per-capita-monthly",
+  "pack_id": "manufacturing",
+  "version": 1,
+  "origin": "preset",
+  "title": "人均产量月度复盘",
+  "question": "B 线人均产量月度下滑，是班组/换型/环境因素中的哪一类？",
+  "metric": {
+    "id": "output_per_capita",
+    "name": "人均产量",
+    "unit": "件/人",
+    "grain": "monthly",
+    "direction": "higher_better",
+    "current_value": null,
+    "control_line": {
+      "method": "mean_2sigma",
+      "params": {
+        "window_days": "pack.thresholds.t30_window_days"
+      }
+    }
+  },
+  "entity_scope": {
+    "field": "production_line",
+    "values": [
+      "B"
+    ]
+  },
+  "factors_ref": {
+    "pack_field": "factors",
+    "version": 1
+  },
+  "actions": [
+    {
+      "id": "data_rerun",
+      "label": "补数据后重跑归因",
+      "cost_anchor_key": "maintenance",
+      "reversible": true
+    },
+    {
+      "id": "maintenance",
+      "label": "保养排程优化",
+      "cost_anchor_key": "maintenance",
+      "reversible": true
+    }
+  ],
+  "guardrails": {
+    "max_per_month": "pack.scene_guardrails.max_per_month",
+    "hard_rules": [
+      "irreversible_requires_security_gate"
+    ]
+  },
+  "data_requirements": [
+    {
+      "field": "output_volume",
+      "required": true,
+      "quality": "monthly"
+    },
+    {
+      "field": "shift_team",
+      "required": true,
+      "quality": "monthly"
+    }
+  ],
+  "scorecard": {
+    "scale": 100,
+    "dims_ref": "pack.scorecard_six_dim",
+    "hard_guardrails_ref": "pack.scorecard_hard_guardrails"
+  },
+  "output_contract_ref": "delivery-card.schema",
+  "generated_by": "preset:manufacturing",
+  "generated_at": "2026-10-20T00:00:00+08:00",
+  "evidence_refs": []
+}

@@ -54,7 +54,7 @@
 ```powershell
 cd <bot-team 仓库根>
 python -B server/app.py            # 默认 127.0.0.1:8787；--port/--host/--root/--owner/--allow-signers 可配
-# 浏览器打开 http://127.0.0.1:8787/   （?task=<task_id> 可深链到某任务）
+# 浏览器打开 http://127.0.0.1:8787/   （302 → /ui/index.html；?task=<task_id> 可深链到某任务）
 ```
 
 **测试证据（2026-10-20 本机）**

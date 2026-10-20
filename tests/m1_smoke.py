@@ -205,6 +205,32 @@ def case_a4(tmp):
     check("A4 run_task 与 score_scorecard 独立调用一致",
           ind.get("total") == r["scorecard"].get("total") and ind.get("verdict") == r["scorecard"].get("verdict"),
           (ind.get("total"), r["scorecard"].get("total")))
+    # B16：100 分制新口径 —— 每维给 100（百分制）也必须精确 100.0 / output
+    pct = {k: 100 for k in SIX}
+    rc, log = run([ROOT / "tools" / "score_scorecard.py", "--scores",
+                   json.dumps(pct, ensure_ascii=False)])
+    obj = json.loads(log[log.index("{"):]) if "{" in log else {}
+    check("A4 百分制输入全 100 → total=100.0/output",
+          obj.get("total") == 100.0 and obj.get("verdict") == "output",
+          (obj.get("total"), obj.get("verdict")))
+    # B16：60-79 档位 = force_manual_review（不得直接输出）
+    mid = {k: 70 for k in SIX}
+    rc, log = run([ROOT / "tools" / "score_scorecard.py", "--scores",
+                   json.dumps(mid, ensure_ascii=False)])
+    obj = json.loads(log[log.index("{"):]) if "{" in log else {}
+    check("A4 60-79 档位 force_manual_review",
+          obj.get("total", 0) >= 60 and obj.get("total", 0) < 80
+          and obj.get("verdict") == "force_manual_review",
+          (obj.get("total"), obj.get("verdict")))
+    # B16：硬护栏阈值来自 pack.json（人机一致性 0 → human_ai_conflict）
+    guarded = dict(pct, human_ai_consistency=0)
+    rc, log = run([ROOT / "tools" / "score_scorecard.py", "--scores",
+                   json.dumps(guarded, ensure_ascii=False)])
+    obj = json.loads(log[log.index("{"):]) if "{" in log else {}
+    check("A4 人机一致性=0 → 硬护栏 force_manual_review",
+          "human_ai_conflict" in (obj.get("guardrails") or [])
+          and obj.get("verdict") == "force_manual_review",
+          (obj.get("guardrails"), obj.get("verdict")))
 
 
 def case_a5(tmp):
