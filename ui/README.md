@@ -1,13 +1,20 @@
-# UI 概念原型 · AI 员工事务所（v0.2）
+# UI · AI 员工事务所（v0.11.2）
 
-单文件、离线可开、无外部依赖：`index.html`。**假数据**，用于 G0「第一眼」评审与视觉方向定稿。
+- `index.html`：**舞台原型**，单文件、离线可开、假数据，用于 G0「第一眼」评审与视觉方向定稿。
+- `workbench.html`：**真实工作台**，接本地 `tools/task_server.py`——建任务→上传 CSV/Excel＋字段映射＋workflow-result→运行收口→看报告→签字。
 
 ## 打开方式
 
 ```powershell
-start D:\项目\bot\bot-team-dsh\ui\index.html
+# 舞台原型（离线直接开）
+start D:\项目\JuJing\bot-team\ui\index.html
 # 可选：?beat=3 直接停在第四拍（截图/评审用）
-start "D:\项目\bot\bot-team-dsh\ui\index.html?beat=3"
+start "D:\项目\JuJing\bot-team\ui\index.html?beat=3"
+
+# 真实工作台（需要服务端）
+cd D:\项目\JuJing\bot-team
+python tools\task_server.py --port 8765
+start http://127.0.0.1:8765/workbench
 ```
 
 ## v0.7.1 签字内容哈希（2026-10-18）
