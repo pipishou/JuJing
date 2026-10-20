@@ -20,7 +20,7 @@
     GET  /api/tasks/<id>/events?since=<n>     事件增量 [{seq,ts,phase,role,agent,kind,line}]
     GET  /api/tasks/<id>/events?since=<n>&stream=1
                                               SSE（id: <seq> / data: <json> / 15s ": ping"，断线续传）
-    POST /api/tasks/<id>/data                 body {files:[{name,content[,encoding]}]} 追加数据文件
+    POST /api/tasks/<id>/data                 multipart/JSON 上传表格转 T/T30，或 {files:[...]} 追加数据文件
     POST /api/tasks/<id>/run                  body {runner:"fixture"|"external"|"dsh"}，立即 202
     POST /api/tasks/<id>/gate                 body {action:"confirm"|"reject",confirmer,comment}
     POST /api/tasks/<id>/sign                 body {signer} -> tools/sign_delivery.py -> {sha256,signer}
@@ -35,6 +35,11 @@
 - 数据上传（POST /api/tasks[/<id>/data]）：单文件 ≤8MB、总 ≤24MB，落 runs/<id>/data/，
   文件名走 core.paths.safe_relative（缺失时用 server 内置同语义兜底），校验 meta.field_contract /
   meta.schema_version / records 非空。
+- 表格转 T/T30（B9，POST /api/tasks/<id>/data 的 table 模式）：multipart 或 JSON 上传
+  table（.csv/.xlsx/.xls，≤8MB）+ 可选 field_map（YAML，≤64KB）+ line + 四个 ISO 日期；
+  server 不 import pandas，子进程调用 tools/ingest_task_data.py（超时 120s），成功后把
+  material_refill_T.json / material_refill_T30.json 记入 task.json 的 data_files/data_refs
+  （sha256+size 走 core.provenance）。失败统一 4xx/500 单行可读原因，不吐 traceback。
 
 设计约束：
 - 只绑定 127.0.0.1；--host/--port/--root 可配。
@@ -60,6 +65,8 @@ import threading
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
+from email.parser import BytesParser
+from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -79,6 +86,11 @@ DEMO_RESULT = "demo-result-2026-10-19.json"
 MAX_UPLOAD_FILE = 8 * 1024 * 1024          # 单文件 8MB
 MAX_UPLOAD_TOTAL = 24 * 1024 * 1024        # 总量 24MB
 MAX_BODY_BYTES = 36 * 1024 * 1024          # 24MB 数据 base64 膨胀 4/3 + JSON 余量
+MAX_TABLE_BYTES = 8 * 1024 * 1024          # 上传表格（csv/xlsx/xls）单文件 8MB
+MAX_FIELD_MAP_BYTES = 64 * 1024            # 字段映射 YAML 文本 64KB
+ALLOWED_TABLE_SUFFIXES = (".csv", ".xlsx", ".xls")
+INGEST_TIMEOUT_SECONDS = 120               # 表格转 T/T30 子进程超时
+INGEST_FILES = ("material_refill_T.json", "material_refill_T30.json")
 EXTERNAL_WAIT_SECONDS = 600                # runner=external 最长等待
 SSE_POLL_SECONDS = 0.5
 SSE_PING_SECONDS = 15.0
@@ -248,6 +260,235 @@ def safe_relative(cfg, name):
         except Exception as exc:  # noqa: BLE001 - 统一转 400
             raise ApiError(400, f"数据文件名非法: {name!r}（{exc}）")
     return _fallback_safe_relative(name)
+
+
+def safe_task_id(cfg, raw):
+    """任务号安全校验：优先 core.paths.safe_task_id（spec §2.4），缺失时用 TASK_ID_RE。"""
+    text = "" if raw is None else str(raw).strip()
+    module = core_paths_module(cfg)
+    if module is not None:
+        try:
+            return str(module.safe_task_id(text))
+        except Exception as exc:  # noqa: BLE001 - 统一转 400
+            raise ApiError(400, f"非法 task_id: {text!r}（{exc}）")
+    if not TASK_ID_RE.match(text):
+        raise ApiError(400, f"非法 task_id: {text!r}")
+    return text
+
+
+def _iso_date(value, field):
+    """校验 ISO 日期（YYYY-MM-DD；也接受 ISO 时间戳的前 10 位日期部分）。"""
+    text = "" if value is None else str(value).strip()
+    if not text:
+        raise ApiError(400, f"{field} 必填（ISO 日期，例如 2026-10-05）")
+    candidate = text[:10] if len(text) >= 10 else text
+    try:
+        parsed = datetime.strptime(candidate, "%Y-%m-%d")
+    except ValueError:
+        raise ApiError(400, f"{field} 不是合法 ISO 日期: {text!r}（示例 2026-10-05）")
+    return parsed.strftime("%Y-%m-%d")
+
+
+def _first_line(text, limit=300):
+    for raw in str(text or "").replace("\r", "\n").split("\n"):
+        line = raw.strip()
+        if line:
+            return line[:limit]
+    return ""
+
+
+def _first_json_object(text):
+    """从子进程输出中提取第一个完整 JSON 对象（忽略前缀日志行）。"""
+    src = str(text or "")
+    decoder = json.JSONDecoder()
+    for idx, ch in enumerate(src):
+        if ch != "{":
+            continue
+        try:
+            obj, _end = decoder.raw_decode(src[idx:])
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return None
+
+
+def _basename(raw, label):
+    """取文件名 basename（浏览器/JSON 可能带路径，禁止借路径穿越）。"""
+    text = str(raw or "").replace("\\", "/").strip()
+    name = text.rsplit("/", 1)[-1].strip()
+    if not name:
+        raise ApiError(400, f"{label} 缺少文件名")
+    return name
+
+
+def _upload_payload(item, label):
+    """解析上传项 → (原始文件名, 文件字节)。
+
+    支持三种形态：multipart 解析结果 {name, content(bytes)}、
+    JSON {name/filename, content: str, encoding: base64|text}、纯 base64 字符串。
+    """
+    if isinstance(item, dict):
+        raw_name = ""
+        for key in ("name", "filename", "path", "file", "table_name"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                raw_name = value.strip()
+                break
+        content = item.get("content")
+        if isinstance(content, (bytes, bytearray)):
+            data = bytes(content)
+        elif isinstance(content, str):
+            encoding = str(item.get("encoding") or ("base64" if item.get("base64") else "text")).strip().lower()
+            if encoding in ("base64", "b64"):
+                try:
+                    data = base64.b64decode(content, validate=True)
+                except (ValueError, TypeError):
+                    raise ApiError(400, f"{label} base64 解码失败")
+            elif encoding in ("text", "utf-8", "utf8", "raw"):
+                data = content.encode("utf-8")
+            else:
+                raise ApiError(400, f"{label} encoding 只支持 base64/text，收到 {encoding!r}")
+        else:
+            raise ApiError(400, f"{label} content 必须是文件字节或字符串")
+        return raw_name, data
+    if isinstance(item, str) and item.strip():
+        try:
+            return "", base64.b64decode(item.strip(), validate=True)
+        except (ValueError, TypeError):
+            raise ApiError(400, f"{label} 字符串必须是 base64；或改用 JSON 对象 {{name,content,encoding}}")
+    raise ApiError(400, f"{label} 缺失或类型不对")
+
+
+def _table_upload(cfg, body):
+    """解析并校验 table 上传项 → (safe_relative 文件名, 字节)。"""
+    name, data = _upload_payload(body.get("table"), "table")
+    if not name:
+        fallback = body.get("table_name") or body.get("filename") or ""
+        if isinstance(fallback, str) and fallback.strip():
+            name = _basename(fallback, "table")
+    if not name:
+        raise ApiError(400, "table 需要文件名（.csv/.xlsx/.xls）：multipart 的 filename 或 JSON 的 name/table_name")
+    name = _basename(name, "table")
+    suffix = Path(name).suffix.lower()
+    if suffix not in ALLOWED_TABLE_SUFFIXES:
+        raise ApiError(400, f"table 只支持 {'/'.join(ALLOWED_TABLE_SUFFIXES)}，收到 {name!r}")
+    if not data:
+        raise ApiError(400, f"table 文件为空: {name!r}")
+    if len(data) > MAX_TABLE_BYTES:
+        raise ApiError(400, f"table 超过 {MAX_TABLE_BYTES // (1024 * 1024)}MB 限制（实际 {len(data)} bytes）")
+    return safe_relative(cfg, name), data
+
+
+def _field_map_upload(cfg, body):
+    """解析并校验 field_map（YAML 文本或文件）→ (safe_relative 文件名, 字节) 或 (None, None)。"""
+    item = body.get("field_map")
+    if item in (None, ""):
+        return None, None
+    if isinstance(item, str):
+        data = item.encode("utf-8")
+        name = "field-map.yaml"
+    else:
+        name, data = _upload_payload(item, "field_map")
+        if name:
+            suffix = Path(_basename(name, "field_map")).suffix.lower()
+            if suffix not in (".yaml", ".yml"):
+                raise ApiError(400, f"field_map 只支持 .yaml/.yml，收到 {name!r}")
+        # 固定落盘名，避免多次上传堆叠
+        name = "field-map.yaml"
+    if not data or not data.strip():
+        raise ApiError(400, "field_map 为空")
+    if len(data) > MAX_FIELD_MAP_BYTES:
+        raise ApiError(400, f"field_map 超过 {MAX_FIELD_MAP_BYTES // 1024}KB 限制（实际 {len(data)} bytes）")
+    return safe_relative(cfg, name), data
+
+
+_UPLOAD_TABLE_KEYS = ("table", "csv", "file", "input_csv", "data_csv")
+_UPLOAD_FIELD_MAP_KEYS = ("field_map", "field-map", "fieldmap", "mapping", "mappings")
+
+
+def _window_dates(value, label):
+    """解析窗口参数（JSON 文本 / 对象 / `a~b` 文本）→ (start, end)；缺失返回 ("", "")。"""
+    if value in (None, ""):
+        return "", ""
+    if isinstance(value, dict):
+        start = value.get("start") or value.get("from") or value.get("t_start")
+        end = value.get("end") or value.get("to") or value.get("t_end")
+        return str(start or "").strip(), str(end or "").strip()
+    text = str(value).strip()
+    if text.startswith("{"):
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            raise ApiError(400, f"{label} 不是合法 JSON 对象: {text[:80]!r}")
+        if not isinstance(parsed, dict):
+            raise ApiError(400, f"{label} 必须是对象（start/end）: {text[:80]!r}")
+        return _window_dates(parsed, label)
+    if "~" in text:
+        start, end = text.split("~", 1)
+        return start.strip(), end.strip()
+    raise ApiError(400, f"{label} 格式无法识别：传 JSON 对象 {{start,end}} 或 `start~end`")
+
+
+def _normalize_upload_body(body):
+    """把上游 workbench/UI 的多种上传字段名归一成 M1.5 契约。
+
+    兼容：table ← csv/file/input_csv/data_csv；field_map ← field-map/mapping；
+    t_start/t_end ← start/end 或 window{start,end}；base_start/base_end ← baseline_window{...}。
+    只做别名映射（canonical 字段优先）；没有表格字段的 body 原样返回（走旧 files 路径）。
+    """
+    if not isinstance(body, dict):
+        return body
+    out = dict(body)
+
+    def _first(keys):
+        for key in keys:
+            value = out.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
+    table = _first(_UPLOAD_TABLE_KEYS)
+    if table is None:
+        return out
+    out["table"] = table
+    field_map = _first(_UPLOAD_FIELD_MAP_KEYS)
+    if field_map is not None:
+        out["field_map"] = field_map
+    if out.get("line") in (None, ""):
+        for key in ("production_line", "产线"):
+            if out.get(key) not in (None, ""):
+                out["line"] = out[key]
+                break
+    t_start, t_end = _window_dates(out.get("window"), "window")
+    if out.get("t_start") in (None, ""):
+        out["t_start"] = t_start or out.get("start")
+    if out.get("t_end") in (None, ""):
+        out["t_end"] = t_end or out.get("end")
+    base_start, base_end = _window_dates(
+        _first(("baseline_window", "base_window", "baseline")), "baseline_window")
+    if out.get("base_start") in (None, ""):
+        out["base_start"] = base_start
+    if out.get("base_end") in (None, ""):
+        out["base_end"] = base_end
+    return out
+
+
+def _write_under(cfg, base_dir, rel_name, data):
+    """在 base_dir 下安全落盘（防穿越 + 原子写），返回绝对 Path。"""
+    base = Path(base_dir).resolve()
+    base.mkdir(parents=True, exist_ok=True)
+    rel = safe_relative(cfg, rel_name)
+    target = (base / rel).resolve()
+    try:
+        target.relative_to(base)
+    except ValueError:
+        raise ApiError(400, f"上传文件路径越界: {rel_name!r}")
+    if target.exists() and target.is_dir():
+        raise ApiError(400, f"上传文件路径是目录: {rel_name!r}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    write_bytes_atomic(target, data)
+    return target
 
 
 def child_env():
@@ -473,8 +714,9 @@ def _core_allocate(cfg):
 
 def allocate_task_id(cfg, explicit=None):
     if explicit:
-        if not TASK_ID_RE.match(explicit):
-            raise ApiError(400, f"非法 task_id: {explicit!r}")
+        # 显式任务号必须符合 core.paths.safe_task_id 契约（T-YYYYMMDD-xxx），
+        # 不做宽松兜底：避免「T-2026」之类半成品 ID 或路径穿越写进 runs/。
+        explicit = safe_task_id(cfg, explicit)
         if (cfg.runs / explicit).exists():
             raise ApiError(409, f"task_id 已存在: {explicit}")
         return explicit
@@ -708,16 +950,174 @@ def create_task(cfg, body):
     return response
 
 
+def _json_record_count(path):
+    doc = read_json(path)
+    records = doc.get("records") if isinstance(doc, dict) else None
+    return len(records) if isinstance(records, list) else 0
+
+
+def ingest_table(cfg, task_id, body):
+    """表格模式：上传 .csv/.xlsx/.xls → ingest_task_data.py 子进程转 T/T30 → 记账。
+
+    不 import pandas（venv 无 pandas）：转换全部交给 tools/ingest_task_data.py。
+    """
+    task_id = safe_task_id(cfg, task_id)
+    tdir = task_dir(cfg, task_id)
+    status = read_status(tdir)
+    if str(status.get("state") or "") == "running":
+        raise ApiError(409, "任务正在运行，暂不能替换取数文件（等运行结束再上传）")
+    rel_table, table_bytes = _table_upload(cfg, body)
+    dates = {
+        "t_start": _iso_date(body.get("t_start"), "t_start"),
+        "t_end": _iso_date(body.get("t_end"), "t_end"),
+        "base_start": _iso_date(body.get("base_start"), "base_start"),
+        "base_end": _iso_date(body.get("base_end"), "base_end"),
+    }
+    if dates["t_start"] > dates["t_end"]:
+        raise ApiError(400, f"T 窗口起点晚于终点：{dates['t_start']} > {dates['t_end']}")
+    if dates["base_start"] > dates["base_end"]:
+        raise ApiError(400, f"T30 基线窗口起点晚于终点：{dates['base_start']} > {dates['base_end']}")
+    task_doc = read_json(Path(tdir) / "task.json") or {}
+    if not isinstance(task_doc, dict):
+        task_doc = {}
+    intake_doc = task_doc.get("intake")
+    intake_doc = intake_doc if isinstance(intake_doc, dict) else {}
+    # 上传时未显式给 line 时沿用任务自身产线（先 task.json 顶层，再 intake）：
+    # 表格里可能同时含多条产线，不指定产线会混入其他产线造成重复日期。
+    line = body.get("line")
+    if line is None or str(line).strip() == "":
+        line = task_doc.get("line") or intake_doc.get("line") or ""
+    line = str(line).strip()
+    if not line:
+        raise ApiError(400, "line 必填：上传时传 line，或在创建任务时指定产线")
+    if len(line) > 64 or any(ord(ch) < 0x20 for ch in line):
+        raise ApiError(400, "line 非法（不允许控制字符，最长 64 字符）")
+    data_dir = Path(tdir) / "data"
+    table_path = _write_under(cfg, data_dir, rel_table, table_bytes)
+    rel_field_map, field_map_bytes = _field_map_upload(cfg, body)
+    field_map_path = None
+    if rel_field_map:
+        field_map_path = _write_under(cfg, data_dir, rel_field_map, field_map_bytes)
+    ingest_tool = Path(cfg.root) / "tools" / "ingest_task_data.py"
+    if not ingest_tool.is_file():
+        raise ApiError(500, f"缺少取数工具: {ingest_tool}")
+    cmd = [find_python(cfg), "-B", str(ingest_tool),
+           "--input", str(table_path), "--line", line,
+           "--t-start", dates["t_start"], "--t-end", dates["t_end"],
+           "--base-start", dates["base_start"], "--base-end", dates["base_end"],
+           "--outdir", str(data_dir)]
+    if field_map_path:
+        cmd += ["--field-map", str(field_map_path)]
+    try:
+        proc = subprocess.run(
+            cmd, cwd=str(cfg.root), capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            timeout=INGEST_TIMEOUT_SECONDS, env=child_env(),
+        )
+    except subprocess.TimeoutExpired:
+        raise ApiError(500, f"表格转 T/T30 超时（{INGEST_TIMEOUT_SECONDS}s）：ingest_task_data.py 未在限时内完成")
+    except OSError as exc:
+        raise ApiError(500, f"表格转 T/T30 子进程启动失败：{exc}")
+    doc = _first_json_object(proc.stdout or "") or _first_json_object(proc.stderr or "")
+    if proc.returncode != 0:
+        message = ""
+        if isinstance(doc, dict):
+            message = str(doc.get("error") or doc.get("message") or "").strip()
+        message = message or _first_line(proc.stderr) or _first_line(proc.stdout) or "ingest_task_data 返回非 0"
+        # 数据级错误（缺列/窗口空/文件损坏）→ 400；工具/环境错误 → 500
+        internal = not isinstance(doc, dict) or doc.get("ok") is not False
+        if isinstance(doc, dict) and str(doc.get("missing") or "") == "pandas":
+            internal = True
+        raise ApiError(500 if internal else 400, f"表格转 T/T30 失败：{_first_line(message, 400)}")
+    if not isinstance(doc, dict) or doc.get("ok") is not True:
+        raise ApiError(500, f"ingest_task_data 输出无法解析：{_first_line(proc.stdout) or '空输出'}")
+    missing = [name for name in INGEST_FILES if not (data_dir / name).is_file()]
+    if missing:
+        raise ApiError(500, "ingest_task_data 未产出预期文件：" + ", ".join(missing))
+    t_paths = [data_dir / name for name in INGEST_FILES]
+    try:
+        t_records = int(doc.get("t_records"))
+        t30_records = int(doc.get("t30_records"))
+    except (TypeError, ValueError):
+        t_records = _json_record_count(t_paths[0])
+        t30_records = _json_record_count(t_paths[1])
+    provenance = import_core(cfg, "provenance")
+    try:
+        refs = provenance.refs_record([str(path) for path in t_paths], str(cfg.root))
+    except Exception as exc:  # noqa: BLE001 - 文档/审计记录失败不掩盖主流程
+        raise ApiError(500, f"计算数据文件 sha256 失败（core.provenance）：{exc}")
+    new_paths = {str(ref.get("path")) for ref in refs}
+    with cfg.task_lock(task_id):
+        task = read_json(Path(tdir) / "task.json") or {}
+        if not isinstance(task, dict):
+            task = {}
+        data_files = [str(entry) for entry in (task.get("data_files") or []) if isinstance(entry, str)]
+        for ref in refs:
+            rel = str(ref.get("path"))
+            if rel not in data_files:
+                data_files.append(rel)
+        manifest = [entry for entry in (task.get("data_manifest") or []) if isinstance(entry, dict)]
+        manifest = [entry for entry in manifest if entry.get("path") not in new_paths]
+        for ref in refs:
+            manifest.append({
+                "name": Path(str(ref.get("path"))).name,
+                "path": str(ref.get("path")),
+                "sha256": ref.get("sha256"),
+                "size": ref.get("size"),
+            })
+        old_refs = [entry for entry in (task.get("data_refs") or []) if isinstance(entry, dict)]
+        merged_refs = [entry for entry in old_refs if entry.get("path") not in new_paths] + list(refs)
+        root = Path(cfg.root).resolve()
+        task["data_files"] = data_files
+        task["data_manifest"] = manifest
+        task["data_refs"] = merged_refs
+        task["table_upload"] = {
+            "name": rel_table,
+            "path": table_path.resolve().relative_to(root).as_posix(),
+            "sha256": sha256_bytes(table_bytes),
+            "size": len(table_bytes),
+            "line": line,
+            **dates,
+        }
+        if field_map_path:
+            task["field_map"] = field_map_path.resolve().relative_to(root).as_posix()
+        task["updated_at"] = now_iso()
+        write_json_atomic(Path(tdir) / "task.json", task)
+        status_task = read_status(tdir).get("task")
+        status_task = dict(status_task) if isinstance(status_task, dict) else {}
+        status_task.update({"data_ready": True, "data_files": data_files,
+                            "data_refs": merged_refs, "data_manifest": manifest})
+        write_status(tdir, task=status_task, data_ready=True)
+        status = read_status(tdir)
+    return 200, {
+        "ok": True,
+        "task_id": task_id,
+        "t_records": t_records,
+        "t30_records": t30_records,
+        "files": refs,
+        "data_files": data_files,
+        "data_refs": merged_refs,
+        "data_ready": True,
+        "table": task.get("table_upload"),
+        "field_map": task.get("field_map"),
+        "status": status,
+        "identity": cfg.identity(),
+    }
+
+
 def post_upload_data(cfg, task_id, body):
-    """POST /api/tasks/<id>/data：追加数据文件（与 POST /api/tasks 的 data_files 同校验）。"""
+    """POST /api/tasks/<id>/data：表格转 T/T30（table 模式）或追加 JSON 数据文件（兼容）。"""
     tdir = task_dir(cfg, task_id)
     if not isinstance(body, dict):
-        raise ApiError(400, "body 必须是 JSON 对象")
+        raise ApiError(400, "body 必须是 JSON 对象或 multipart/form-data 表单")
+    body = _normalize_upload_body(body)
+    if body.get("table") not in (None, ""):
+        return ingest_table(cfg, task_id, body)
     raw = body.get("files")
     if raw is None:
         raw = body.get("data_files")
     if not isinstance(raw, list) or not raw:
-        raise ApiError(400, "body.files 必须是非空数组（{name,content[,encoding]}）")
+        raise ApiError(400, "body.files 必须是非空数组（{name,content[,encoding]}）；上传表格请用 multipart 的 table 字段")
     uploads, _kept = _upload_items(cfg, {"data_files": raw}, "data_files")
     if not uploads:
         raise ApiError(400, "body.files 内没有可落盘的上传项")
@@ -1594,7 +1994,13 @@ class BotHandler(BaseHTTPRequestHandler):
                         raise ApiError(405, "method not allowed")
                     self._handle_sse(cfg, path, query)
                     return
-                body = self._read_body() if method == "POST" else {}
+                ctype = str(self.headers.get("Content-Type") or "")
+                is_multipart = ("multipart/form-data" in ctype.lower()
+                                and path.endswith("/data"))
+                if method == "POST" and is_multipart:
+                    body = self._read_multipart(ctype)
+                else:
+                    body = self._read_body() if method == "POST" else {}
                 status, payload = route_api(cfg, method, path, query, body)
                 self._send_json(status, payload)
             else:
@@ -1653,6 +2059,46 @@ class BotHandler(BaseHTTPRequestHandler):
             pass
         finally:
             log(f"sse closed {task_id}: last_seq={last}")
+
+    def _read_multipart(self, ctype):
+        """解析 multipart/form-data（纯 stdlib email 解析器，不装 python-multipart）。
+
+        文件字段 → {"name": filename, "content": bytes}；文本字段 → str（UTF-8）。
+        """
+        raw_length = self.headers.get("Content-Length")
+        try:
+            length = int(raw_length or 0)
+        except (TypeError, ValueError):
+            raise ApiError(400, "非法 Content-Length")
+        if length > MAX_BODY_BYTES:
+            raise ApiError(413, f"body 过大（上限 {MAX_BODY_BYTES} bytes）")
+        raw = self.rfile.read(length) if length > 0 else b""
+        if not raw:
+            raise ApiError(400, "空 multipart body")
+        head = (b"Content-Type: " + ctype.encode("latin-1", "replace")
+                + b"\r\nMIME-Version: 1.0\r\n\r\n")
+        try:
+            message = BytesParser(policy=email_policy).parsebytes(head + raw)
+        except Exception as exc:  # noqa: BLE001
+            raise ApiError(400, f"multipart 解析失败: {exc}")
+        if not message.is_multipart():
+            raise ApiError(400, "multipart 解析失败（请求不是 multipart 消息）")
+        fields = {}
+        for part in message.iter_parts():
+            name = part.get_param("name", header="content-disposition")
+            if not name:
+                continue
+            payload = part.get_payload(decode=True) or b""
+            filename = part.get_filename()
+            if filename:
+                fields[str(name).strip()] = {"name": filename, "content": payload}
+            else:
+                charset = part.get_content_charset() or "utf-8"
+                try:
+                    fields[str(name).strip()] = payload.decode(charset)
+                except (UnicodeDecodeError, LookupError):
+                    raise ApiError(400, f"multipart 文本字段 {name} 解码失败（{charset}）")
+        return fields
 
     def _read_body(self):
         raw_length = self.headers.get("Content-Length")

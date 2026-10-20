@@ -36,7 +36,7 @@
 | GET | `/api/team` | `core.team.load_team(root)`：`{ok, team_id, employees, crews, shelf, roster, pack, warnings}`；core 缺失/读失败 → 500 `{ok:false,error}` |
 | GET | `/api/tasks` | 扫描 `runs/*/task.json`，返回任务摘要数组（含 state/step/signed/runner 等） |
 | POST | `/api/tasks` | intake JSON（可含 `data_files`）；分配 task_id（201），写 `runs/<id>/task.json` + `status.json`（state=created），数据落 `runs/<id>/data/` |
-| POST | `/api/tasks/<id>/data` | 追加数据文件（同校验），返回 `{ok,files:[{name,sha256,size,path}],data_files,data_ready}` |
+| POST | `/api/tasks/<id>/data` | 表格模式：multipart/JSON 上传表格 → 转 T/T30（见下节）；兼容模式：追加已合规数据文件（同校验），返回 `{ok,files:[{name,sha256,size,path}],data_files,data_ready}` |
 | GET | `/api/tasks/<id>` | `{task, report, status, loop, signature, gate, task_id, identity}`，缺失文件为 null |
 | GET | `/api/tasks/<id>/events?since=n[&stream=1]` | JSON 增量事件数组 / SSE（`text/event-stream`，`id: <seq>` + `data: <json>`，15s `: ping`，`since` 续传，非法 since → 400） |
 | POST | `/api/tasks/<id>/run` | body `{runner}`：`fixture`(默认)/`external`/`dsh`；立即 202，后台线程调用 `tools/run_task.py`；已在跑 409 |
@@ -57,6 +57,87 @@
 - 文件名经 `core.paths.safe_relative` 净化：绝对路径、盘符、`..`、控制字符 → 400。
 - 每个文件必须能 `json.loads` 且通过 T/T30 schema 校验（`meta.field_contract`、`meta.schema_version`、
   `records` 非空），否则 400；通过后写 `runs/<id>/data/<name>`，sha256 记入 `task.data_manifest`。
+
+### 上传表格 → 转 T/T30（`table` 模式，B9）
+
+`POST /api/tasks/<id>/data` 有两种 body：
+
+1. **表格模式**（multipart/form-data 或 JSON）：上传业务台账（`.csv/.xlsx/.xls`，≤8MB），服务端
+   子进程调用 `tools/ingest_task_data.py` 转成 `material_refill_T.json` / `material_refill_T30.json`。
+   **服务不 import pandas**——venv 无需安装任何第三方包（Excel 读取用 venv 自带的 openpyxl/xlrd）。
+   字段：`table`（文件，必需）、`field_map`（可选 YAML 文本或文件，≤64KB）、`line`（可选产线号，
+   不传则沿用任务创建时的 `line`；两者都没有时返回 400，避免多产线台账混入导致重复日期）、
+   `t_start`/`t_end`/`base_start`/`base_end`（必需 ISO 日期 `YYYY-MM-DD`，窗口起点 ≤ 终点）。
+2. **数据文件模式**（JSON `{files:[...]}` / `{data_files:[...]}`）：M1 兼容路径，追加已合规的
+   T/T30 JSON（见上一节），行为不变。
+
+multipart 示例（Windows `curl.exe`）：
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8787/api/tasks/T-20261020-001/data" `
+  -F "table=@D:\data\日台账.csv" `
+  -F "field_map=@templates\field-map.example.yaml" `
+  -F "line=B" `
+  -F "t_start=2026-10-05" -F "t_end=2026-10-11" `
+  -F "base_start=2026-09-05" -F "base_end=2026-10-04"
+```
+
+JSON 示例（二进制 xlsx/xls 用 base64；纯文本 CSV 也可 `encoding:"text"`）：
+
+```powershell
+$body = @{
+  table = @{
+    name = "日台账.xlsx"
+    content = [Convert]::ToBase64String([IO.File]::ReadAllBytes("D:\data\日台账.xlsx"))
+    encoding = "base64"
+  }
+  line = "B"
+  t_start = "2026-10-05"; t_end = "2026-10-11"
+  base_start = "2026-09-05"; base_end = "2026-10-04"
+} | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Uri "http://127.0.0.1:8787/api/tasks/T-20261020-001/data" -Method Post `
+  -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($body))
+```
+
+成功返回（`files` 即 `core.provenance.refs_record` 的 sha256+size 清单）：
+
+```json
+{"ok": true, "task_id": "T-20261020-001", "t_records": 7, "t30_records": 30,
+ "files": [{"path": "runs/T-20261020-001/data/material_refill_T.json", "sha256": "…", "size": 3201},
+           {"path": "runs/T-20261020-001/data/material_refill_T30.json", "sha256": "…", "size": 11994}],
+ "data_files": ["runs/T-20261020-001/data/material_refill_T.json",
+                "runs/T-20261020-001/data/material_refill_T30.json"],
+ "data_refs": [{"path": "runs/T-20261020-001/data/material_refill_T.json", "sha256": "…", "size": 3201}, …],
+ "data_ready": true, "field_map": "runs/T-20261020-001/data/field-map.yaml",
+ "table": {"name": "日台账.csv", "line": "B", "t_start": "2026-10-05", "t_end": "2026-10-11", …}}
+```
+
+- 转换结果记入 `task.json` 的 `data_files` / `data_manifest` / `data_refs`（sha256+size），并写
+  `status.task.data_ready=true`；之后 `POST /run` 可直接消费这些数据（无需再走 CSV 入口）。
+- 失败统一 `{"ok":false,"error":"..."}` + 单行可读原因（缺必需列、窗口内无数据、文件损坏/编码无法
+  识别、字段映射 YAML 非法、超时等），**不吐 traceback**；数据级错误 400，工具/环境错误 500。
+- 限额：表格 ≤8MB、字段映射 ≤64KB、子进程超时 120s；同一任务重复上传会覆盖同名转换结果并更新 sha256
+  （`/data` 在任务 `state=running` 时返回 409，避免运行中替换数据）。
+
+字段映射 YAML 样例（见 `templates/field-map.example.yaml`，可只映射实际用到的列）：
+
+```yaml
+version: "1.0"
+source_columns:          # canonical 字段 ← 台账里的列名
+  date: 日期
+  production_line: 产线
+  refill_rate: 补料率
+  output_volume: 产量
+  mold_status: 模具状态
+  maintenance_records: 保养记录
+  shift_team: 班次
+  material_batch: 物料批次
+  ambient_env: 环境
+  mold_change_records: 换模记录
+  downtime_records: 停机记录
+  reporter: 填报人
+notes: 台账列名可自由命名，只要在 source_columns 里声明映射即可。
+```
 
 ### runner 的诚实边界（A12）
 
@@ -106,6 +187,11 @@ Get-NetTCPConnection -LocalPort 8787 -State Listen | Select-Object -ExpandProper
 & "D:\work\产品类\个人产品\bot-2\venv\Scripts\python.exe" -B server/app.py --port 8787  # 后台
 Invoke-RestMethod http://127.0.0.1:8787/api/health
 Invoke-RestMethod http://127.0.0.1:8787/api/team
+# 上传台账 → T/T30（先 POST /api/tasks 建任务拿 task_id）
+curl.exe -X POST "http://127.0.0.1:8787/api/tasks/T-20261020-001/data" `
+  -F "table=@D:\data\日台账.csv" -F "line=B" `
+  -F "t_start=2026-10-05" -F "t_end=2026-10-11" `
+  -F "base_start=2026-09-05" -F "base_end=2026-10-04"
 & "D:\work\产品类\个人产品\bot-2\venv\Scripts\python.exe" -B tests/validate_structure.py
 ```
 

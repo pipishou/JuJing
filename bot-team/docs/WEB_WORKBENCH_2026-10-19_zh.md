@@ -1,5 +1,7 @@
-# Web 工作台（v0.11.2）
+# Web 工作台（v0.11.2 · legacy 参考）
 
+> legacy 说明（v0.12.0）：v0.12.0 起 CSV/Excel 上传与复核签字已并入主工作台（`server/app.py` + `ui/index.html`）；`tools/task_server.py` + `ui/workbench.html` 保留为 legacy 参考，不再作为主入口。迁移对照见文末「迁移到主工作台」。
+>
 > 目标：把「真实 CSV/Excel → 数据合同 → 归因报告 → 人工签字 → 交付卡」做成**工作电脑上双击可用**的本地界面，不再只靠命令行。
 > 边界：工作台只做 s5（数据收口/报告门/签字），s1–s4 的归因结果仍由 DSH workflow 产出 `workflow-result.json`；不把 Agent 逻辑搬进浏览器。
 
@@ -7,10 +9,12 @@
 
 本机 Python 3.9.7 的 Flask 因 jinja2 版本不兼容无法导入，FastAPI 未安装。工作台只用 **Python 标准库 `http.server` + 原生 JS**，不新增依赖，迁移到工作电脑不会卡在装包。
 
-## 启动
+## 启动（legacy，端口 8765）
+
+> v0.12.0 起日常使用请走主工作台：`python -B server/app.py` → `http://127.0.0.1:8787/`（见 `README.md` 与 `ui/README.md`）。本节仅作 legacy 复现。
 
 ```powershell
-cd D:\项目\JuJing\bot-team
+cd <bot-team 仓库根>
 python tools\task_server.py --port 8765
 # 打开 http://127.0.0.1:8765/workbench
 # 舞台原型：http://127.0.0.1:8765/  （uvicorn 不需要）
@@ -78,3 +82,19 @@ python tests/web_api_smoke.py
 - 不做多用户/权限/并发编辑；单机单用户。
 - 不做文件在线预览（CSV 大文件不下发浏览器）。
 - 签字是「业务负责人确认」的本地留痕，不是法律电子签名。
+
+## 迁移到主工作台（v0.12.0）
+
+| 项 | legacy（v0.11.2） | 主工作台（v0.12.0） |
+|---|---|---|
+| 服务入口 | `tools/task_server.py` | `server/app.py`（`core/` 可信门 + M1.5 API） |
+| 端口 | 8765 | **8787**（`--port` 可配；只绑 `127.0.0.1`） |
+| 页面 | `/workbench`（`ui/workbench.html`） | `/`（`ui/index.html` + `ui/api-adapter.js`） |
+| 上传 CSV/Excel | 文件上载表单（multipart） | **接单抽屉**（`POST /api/tasks` 或 `/api/tasks/<id>/data`；单文件 ≤8MB、总 ≤24MB） |
+| 审批门 | 无 | `POST /api/tasks/<id>/gate`：`gate.json` history append-only + 审计事件（`run.log` kind=status/phase=gate） |
+| 签字/收口 | `/sign` | `/sign` + `/finalize`（无 gate 事实源 / 被 reject / 伪造 gate.json 一律 409） |
+| 多任务 | 有 | 有（任务栏 + `?task=` 深链） |
+| 事件流 | `GET /api/tasks/<id>/log` | `GET /events?since=n`（`&stream=1` SSE，断线按 `since` 续传） |
+| runner | 同步 `run_task` | `fixture` / `external` / `dsh`（返回 501，M2 实现） |
+
+迁移步骤：停 8765 服务 → `cd <bot-team 仓库根>` 执行 `python -B server/app.py` → 浏览器打开 `http://127.0.0.1:8787/` → 用接单抽屉重传 T/T30；`runs/<id>/` 历史任务仍会被主工作台扫描到，签字按新审批门流程重走。

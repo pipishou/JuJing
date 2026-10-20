@@ -215,7 +215,7 @@
   .form{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;margin:10px 0}
   .form label{font-size:11px;color:#6b7280;display:flex;flex-direction:column;gap:4px}
   .form input{border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12px;background:#fffdf8;color:#1f2430}
-  #intakePreview{background:#f8f2e8;border-radius:10px;padding:10px;font-size:10.5px;line-height:1.5;max-height:180px;overflow:auto;white-space:pre-wrap;color:#4b5563}
+  #intakePreview,#tablePreview{background:#f8f2e8;border-radius:10px;padding:10px;font-size:10.5px;line-height:1.5;max-height:180px;overflow:auto;white-space:pre-wrap;color:#4b5563}
   .toast{position:fixed;right:22px;bottom:22px;background:#0f172a;color:#e8fbff;padding:10px 14px;border-radius:11px;font-size:12px;opacity:0;transform:translateY(8px);transition:.25s;z-index:60;pointer-events:none}
   .toast.show{opacity:1;transform:none}
   .note{font-size:10px;color:#9ca3af;padding:0 15px 12px;line-height:1.6}
@@ -521,7 +521,7 @@
 
 <div class="modal" id="intake"><div class="box">
   <h3>接单 · 建任务并接入真实数据</h3>
-  <p>填任务信息 + 选择 T / T-30 两个 JSON（浏览器内读取文本后提交，不上传第三方）。提交后显示 task_id、data_ready 与 runner；演示 runner 会明确标注「演示数据」。</p>
+  <p>填任务信息后二选一：① 选择现成的 T / T-30 两个 JSON；② 上传工厂台账 CSV/Excel（可选字段映射 YAML），由服务端转出 T / T30。也可以先建任务，再在下方上传表格。提交后显示 task_id、data_ready 与 runner；演示 runner 会明确标注「演示数据」。</p>
   <div class="form">
     <label>工厂/客户<input id="iPlant" placeholder="塑胶厂（脱敏）" /></label>
     <label>产线<input id="iLine" placeholder="B" /></label>
@@ -541,6 +541,22 @@
       <option value="dsh">DSH 自动执行（M2 占位）</option>
     </select></label>
   </div>
+  <h4 style="margin:16px 0 4px;font-size:12.5px;color:#1f2430">上传表格 → 自动转 T / T30</h4>
+  <p style="margin:0 0 8px">也可以直接传工厂台账：CSV / Excel（≤8MB）+ 可选字段映射 YAML + 产线/两个窗口，服务端转换出 T / T30 两个数据文件并写入任务。</p>
+  <div class="form">
+    <label style="grid-column:1/-1">表格文件（.csv / .xlsx / .xls）<input id="iTable" type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="previewTableFile()" /></label>
+    <label>字段映射（可选 YAML）<input id="iFieldMap" type="file" accept=".yaml,.yml,text/yaml" /></label>
+    <label>产线<input id="iUpLine" placeholder="B" /></label>
+    <label>T 窗口 start<input id="iUpStart" type="date" /></label>
+    <label>T 窗口 end<input id="iUpEnd" type="date" /></label>
+    <label>基线 start<input id="iUpBStart" type="date" /></label>
+    <label>基线 end<input id="iUpBEnd" type="date" /></label>
+  </div>
+  <div class="meta-row" style="margin-top:8px">
+    <button class="btn" id="uploadTableBtn" onclick="uploadTableData()">上传表格 · 转 T / T30</button>
+    <span class="m">选择表格后上传；成功显示 T/T30 条数与两文件 sha256 前 8 位，随后可点「▶ 运行本任务」。</span>
+  </div>
+  <pre id="tablePreview">未选择表格。上传成功后这里显示 T=xx 条 / T30=yy 条 与文件指纹。</pre>
   <pre id="intakePreview">填写后点「建任务并接入数据」；预检显示两个 JSON 的 meta/records 概况。</pre>
   <div class="foot"><button class="btn" onclick="closeIntake()">取消</button><button class="btn primary" id="intakeSubmit" onclick="generateTask()">建任务并接入数据</button></div>
 </div></div>
@@ -1266,6 +1282,12 @@
     const start = $('iStart'), end = $('iEnd');
     if (start && !start.value) start.value = '2026-10-05';
     if (end && !end.value) end.value = '2026-10-11';
+    const upStart = $('iUpStart'), upEnd = $('iUpEnd');
+    const bStart = $('iUpBStart'), bEnd = $('iUpBEnd');
+    if (upStart && !upStart.value) upStart.value = '2026-10-05';
+    if (upEnd && !upEnd.value) upEnd.value = '2026-10-11';
+    if (bStart && !bStart.value) bStart.value = '2026-09-05';
+    if (bEnd && !bEnd.value) bEnd.value = '2026-10-04';
   }
   function closeIntake() { $('intake').classList.remove('show'); }
   function readFileText(file) {
@@ -1311,6 +1333,84 @@
       preview.textContent = '预检失败：' + (e && e.message ? e.message : e);
     }
   }
+  /* ------- 表格上传（B10：主工作台内直接 Excel/CSV → T / T30，不再另开 workbench） */
+  function tableFileInput() {
+    const file = $('iTable') && $('iTable').files && $('iTable').files[0];
+    const map = $('iFieldMap') && $('iFieldMap').files && $('iFieldMap').files[0];
+    return { file: file || null, map: map || null };
+  }
+  function tableUploadInputs() {
+    return {
+      line: intakeField('iUpLine') || intakeField('iLine'),
+      t_start: intakeField('iUpStart') || intakeField('iStart'),
+      t_end: intakeField('iUpEnd') || intakeField('iEnd'),
+      base_start: intakeField('iUpBStart') || intakeField('iBStart'),
+      base_end: intakeField('iUpBEnd') || intakeField('iBEnd')
+    };
+  }
+  function shortSha(value) { return String(value || '').slice(0, 8); }
+  function formatTableResult(res) {
+    const body = res || {};
+    const files = (body.files || []).map(f => {
+      const name = String(f.path || f.name || '').split(/[\\/]/).pop() || '数据文件';
+      const size = f.size ? '（' + (f.size / 1024).toFixed(1) + ' KB）' : '';
+      return '  · ' + name + '  sha256 ' + shortSha(f.sha256) + '…' + size;
+    });
+    return 'T=' + (body.t_records != null ? body.t_records : '?') + ' 条 / T30=' + (body.t30_records != null ? body.t30_records : '?') + ' 条'
+      + '\n文件指纹（sha256 前 8 位）：' + (files.length ? '\n' + files.join('\n') : '服务端未返回 files')
+      + '\n\n下一步：点「▶ 运行本任务」跑归因；报告 data_refs 会引用同两文件。';
+  }
+  function previewTableFile() {
+    const preview = $('tablePreview'); if (!preview) return;
+    const picked = tableFileInput();
+    if (!picked.file) { preview.textContent = '未选择表格。上传成功后这里显示 T=xx 条 / T30=yy 条 与文件指纹。'; return; }
+    const inputs = tableUploadInputs();
+    const ext = (picked.file.name.split('.').pop() || '').toUpperCase();
+    preview.textContent = '已选择：' + picked.file.name + '（' + (picked.file.size / (1024 * 1024)).toFixed(2) + ' MB · ' + ext + '）'
+      + '\n字段映射：' + (picked.map ? picked.map.name : '未选择（按默认 11 因素列名解析）')
+      + '\n产线：' + (inputs.line || '—（请填）')
+      + '\nT 窗口：' + (inputs.t_start || '—') + ' ~ ' + (inputs.t_end || '—')
+      + '\n基线窗口：' + (inputs.base_start || '—') + ' ~ ' + (inputs.base_end || '—')
+      + '\n\n点「上传表格 · 转 T / T30」提交；服务端只落 runs/<task_id>/data/，不上传第三方。';
+  }
+  async function uploadTableData() {
+    const adapter = window.APIAdapter;
+    const preview = $('tablePreview');
+    const btn = $('uploadTableBtn');
+    const picked = tableFileInput();
+    if (!adapter || !adapter.isLive()) { toast('请先启动本地服务（server/app.py）再上传表格'); return null; }
+    if (!picked.file) { toast('请选择 CSV / Excel 表格文件'); return null; }
+    if (picked.file.size > 8 * 1024 * 1024) { toast('表格超过 8MB 上限，请拆分后再传'); return null; }
+    const inputs = tableUploadInputs();
+    if (!inputs.line) { toast('请填产线'); return null; }
+    if (!(inputs.t_start && inputs.t_end && inputs.base_start && inputs.base_end)) { toast('请填 T 窗口与基线窗口的起止日期'); return null; }
+    const taskId = adapter.currentTaskId();
+    if (!taskId) { toast('请先「建任务并接入数据」，或在上方任务栏选中一个任务'); return null; }
+    if (btn) btn.disabled = true;
+    if (preview) preview.textContent = '上传并转换中……（' + picked.file.name + ' → T · T30）';
+    try {
+      const res = await adapter.uploadTable(taskId, {
+        file: picked.file,
+        fieldMapFile: picked.map,
+        line: inputs.line,
+        t_start: inputs.t_start,
+        t_end: inputs.t_end,
+        base_start: inputs.base_start,
+        base_end: inputs.base_end
+      });
+      if (preview) preview.textContent = formatTableResult(res);
+      toast('已转换：T=' + (res.t_records != null ? res.t_records : '?') + ' 条 / T30=' + (res.t30_records != null ? res.t30_records : '?') + ' 条 · ' + taskId);
+      const runBtn = $('runBtn'); if (runBtn) runBtn.style.display = '';
+      return res;
+    } catch (e) {
+      const msg = (e && e.message) ? e.message : String(e);
+      if (preview) preview.textContent = '上传失败：' + msg;
+      toast('上传失败：' + msg);
+      return null;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
   function intakeField(id) { const el = $(id); return el ? String(el.value || '').trim() : ''; }
   async function generateTask() {
     const preview = $('intakePreview');
@@ -1349,6 +1449,16 @@
         toast('已建任务 ' + (view.task_id || '') + ' · runner=' + view.runner + (view.data_ready ? ' · 数据就绪' : ' · 待补数据'));
         if (runner === 'fixture') toast('演示 runner：报告将标记「演示数据」，不可签字');
         const runBtn = $('runBtn'); if (runBtn) runBtn.style.display = '';
+        /* 若选了表格，建任务后立刻上传转换（CSV/Excel → T/T30），一步走完 */
+        if (tableFileInput().file) {
+          const upload = await uploadTableData();
+          if (preview) {
+            preview.textContent = upload
+              ? ('已建任务 + 已接入表格数据\n' + JSON.stringify({ task_id: view.task_id, runner: view.runner, t_records: upload.t_records, t30_records: upload.t30_records, files: upload.files }, null, 2))
+              : ('已建任务 ' + view.task_id + '，但表格上传失败；可在下方修正参数后点「上传表格 · 转 T / T30」重试。');
+          }
+          return;
+        }
       } catch (e) {
         if (preview) preview.textContent = '建任务失败：' + (e && e.message ? e.message : e);
         toast('建任务失败：' + (e && e.message ? e.message : e));

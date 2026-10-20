@@ -265,8 +265,12 @@ def main():
             "--records-dir", str(records), "--records-task-id", task_id,
             "--events-dir", str(outdir),
         ]
+        # data_refs 与 real 解耦：demo/fixture 任务若来自真实上传，也应记录真实文件引用
+        # （B10 反馈 tools/run_task.py:269：--data-refs 原在 if real 内，demo 报告回落到 demo/*）
+        if data_files:
+            cmd += ["--data-refs", ",".join(str(p) for p in data_files)]
         if real:
-            cmd += ["--real", "--data-refs", ",".join(str(p) for p in data_files)]
+            cmd += ["--real"]
         if expected:
             cmd += ["--expected", expected]
         if goal:

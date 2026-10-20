@@ -1,18 +1,24 @@
-# UI · AI 员工事务所（v0.11.2）
+# UI · AI 员工事务所（v0.12.0）
 
-- `index.html`：**舞台原型**，单文件、离线可开、假数据，用于 G0「第一眼」评审与视觉方向定稿。
-- `workbench.html`：**真实工作台**，接本地 `tools/task_server.py`——建任务→上传 CSV/Excel＋字段映射＋workflow-result→运行收口→看报告→签字。
+> 口径（v0.12.0）：合并上游 v0.11.2（本地 Web 工作台）＋ M1/M1.5 可信门与服务化。
+> legacy 说明（v0.12.0）：CSV/Excel 上传与复核签字已并入主工作台（`server/app.py` + `ui/index.html`）；`workbench.html` 保留为 legacy 参考，不再作为主入口。
+
+- `index.html`：**舞台原型 + 主工作台**——单文件、离线可开（假数据，G0「第一眼」评审）；经 `server/app.py`（8787）打开时由 `api-adapter.js` 接真数据，成为 M1.5 主工作台。
+- `workbench.html`：**legacy 真实工作台**，接本地 `tools/task_server.py`（8765）——建任务→上传 CSV/Excel＋字段映射＋workflow-result→运行收口→看报告→签字。
 
 ## 打开方式
 
 ```powershell
-# 舞台原型（离线直接开）
-start D:\项目\JuJing\bot-team\ui\index.html
-# 可选：?beat=3 直接停在第四拍（截图/评审用）
-start "D:\项目\JuJing\bot-team\ui\index.html?beat=3"
+# 主工作台（v0.12.0 推荐；默认 127.0.0.1:8787）
+cd <bot-team 仓库根>
+python -B server/app.py
+start http://127.0.0.1:8787/
 
-# 真实工作台（需要服务端）
-cd D:\项目\JuJing\bot-team
+# 舞台原型（离线直接开；也可 ?beat=3 直接停在第四拍）
+start ui\index.html
+start "ui\index.html?beat=3"
+
+# legacy 真实工作台（需要旧服务端）
 python tools\task_server.py --port 8765
 start http://127.0.0.1:8765/workbench
 ```
@@ -72,10 +78,10 @@ start http://127.0.0.1:8765/workbench
   签字按钮改为 `POST /api/tasks/<id>/sign`，签字栏显示工具返回的报告 SHA256 前 16 位。
 - **失败**（`file://` 打开或本地服务未启动）→ 自动保持原有静态演示，动画照常、控制台无未捕获异常。
 
-启动本地服务（见 `server/README.md`）：
+启动本地服务（见 `server/README.md`；在仓库根执行，venv 或系统 python 均可）：
 
 ```powershell
-& "D:\work\产品类\个人产品\bot-2\venv\Scripts\python.exe" -B server/app.py
+python -B server/app.py
 # 浏览器打开 http://127.0.0.1:8787/
 ```
 
@@ -107,3 +113,10 @@ start http://127.0.0.1:8765/workbench
 页面 200 含 `taskbar/stageFeed/gateModal/事件流`；建单（demo T/T30）→ `POST /run {"runner":"fixture"}` →
 state `assembled/awaiting_sign`、`/api/tasks/<id>/events` SSE 164 条、`/gate` confirm 成功、
 `/sign` 返回 sha256 == `runs/<id>/report.json` 文件哈希、demo finalize 409（设计如此）。
+
+## v0.12.0 收口（2026-10-20）
+
+- 版本口径：合并上游 v0.11.2（本地 Web 工作台）＋ M1/M1.5 可信门与服务化；`index.html` 为主工作台页面（8787），`workbench.html` 转 legacy。
+- 回归证据：`tests/test_core_m15.py` 188 项 PASS、`tests/test_m15_acceptance.py` A7–A12 PASS、`tests/m1_smoke.py` A1–A5 PASS、`tests/validate_structure.py` PASS。
+- 已知限制：`runner=dsh` 仍返回 501（M2 实现）；审批门/签字是本机留痕，不是法律电子签名。
+
