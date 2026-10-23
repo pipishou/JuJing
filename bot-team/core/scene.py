@@ -548,6 +548,143 @@ def _now_iso():
 
 
 # --------------------------------------------------------------------------- #
+# 场景实例：spec + 当期/基线数据 -> runs/<task_id>/scene.json 的内容（B18 / R2）
+#
+# 口径（与 discover 的检测口径**刻意不同**，别混用）：
+#   - 控制线 μ/σ 只用基线窗口（T-30）估计：控制线的定义是「用稳定历史估限，再看新点」；
+#     把异常当期并进 μ/σ 会撑大 σ、拉宽限，把异常稀释掉（core.scene.discover 的合并口径
+#     是**检测**启发式，实例的 μ±2σ 是**限**，两者不是同一件事）。
+#   - current_value = 当期窗口最后一个数值点；trend = 基线点 + 当期点（按时间序）。
+#   - factors 三态（T vs T-30）：missing / changed / unchanged。
+# --------------------------------------------------------------------------- #
+def _numeric_values(records, field):
+    return [v for v in _series(records, field) if v is not None]
+
+
+def _field_values(records, field):
+    """字段原始值（数值保留数值；dict/list 转 JSON 串；其余转字符串），用于变化判定。"""
+    out = []
+    for row in records:
+        if not isinstance(row, dict) or field not in row:
+            continue
+        value = row.get(field)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+            elif value is None:
+                value = ""
+            else:
+                value = str(value)
+        out.append(value)
+    return out
+
+
+def _factor_state(baseline_records, current_records, field):
+    """T vs T-30 三态：missing（两边都没有）/ changed / unchanged。"""
+    base = _field_values(baseline_records, field)
+    cur = _field_values(current_records, field)
+    if not base and not cur:
+        return {"state": "missing", "evidence": []}
+    if not base or not cur:
+        return {"state": "changed",
+                "evidence": [f"基线{'有' if base else '无'}该字段，当期{'有' if cur else '无'}"]}
+    base_num = [v for v in base if isinstance(v, (int, float))]
+    cur_num = [v for v in cur if isinstance(v, (int, float))]
+    if base_num and cur_num:
+        b_mean = statistics.fmean(base_num)
+        c_mean = statistics.fmean(cur_num)
+        tol = max(abs(b_mean), 1.0) * 0.01
+        state = "unchanged" if abs(c_mean - b_mean) <= tol else "changed"
+        return {"state": state, "evidence": [f"基线均值 {round(b_mean, 4)} → 当期均值 {round(c_mean, 4)}"]}
+    if sorted(set(map(str, base))) == sorted(set(map(str, cur))):
+        return {"state": "unchanged", "evidence": []}
+    return {"state": "changed",
+            "evidence": [f"基线取值 {sorted(set(map(str, base)))[:3]} → 当期 {sorted(set(map(str, cur)))[:3]}"]}
+
+
+def build_instance(spec, pack, baseline_records, current_records, metric_id=None):
+    """由 spec + 当期/基线数据产出场景实例（runs/<task_id>/scene.json 的内容）。
+
+    spec：SceneSpec（preset 种子或 discovered 草稿）；pack：行业包；
+    baseline_records / current_records：两窗的 records 列表；metric_id：覆盖 spec 里的指标 id。
+    """
+    spec = spec if isinstance(spec, dict) else {}
+    pack = pack if isinstance(pack, dict) else {}
+    baseline_records = baseline_records if isinstance(baseline_records, list) else []
+    current_records = current_records if isinstance(current_records, list) else []
+    spec_metric = spec.get("metric") if isinstance(spec.get("metric"), dict) else {}
+    mid = str(metric_id or spec_metric.get("id") or "").strip()
+    meta = _metric_table(pack).get(mid, {}) if mid else {}
+    field = str(meta.get("field") or spec_metric.get("field") or mid)
+    base_vals = _numeric_values(baseline_records, field)
+    cur_vals = _numeric_values(current_records, field)
+    stat_source = base_vals if len(base_vals) >= 2 else cur_vals
+    mean = sigma = None
+    if stat_source:
+        mean = statistics.fmean(stat_source)
+        sigma = statistics.pstdev(stat_source) if len(stat_source) >= 2 else 0.0
+    control_line = {
+        "method": "mean_2sigma",
+        "mean": round(mean, 4) if mean is not None else None,
+        "sigma": round(sigma, 4) if sigma is not None else None,
+        "upper": round(mean + 2 * sigma, 4) if mean is not None else None,
+        "lower": round(mean - 2 * sigma, 4) if mean is not None else None,
+        "window_days": len(stat_source),
+    }
+    current_value = round(cur_vals[-1], 4) if cur_vals else None
+    cur_field_values = _series(current_records, field)
+    null_rate = (round((len(cur_field_values) - len(cur_vals)) / len(cur_field_values), 4)
+                 if cur_field_values else 0.0)
+    available_fields = sorted({
+        str(key) for row in current_records
+        if isinstance(row, dict) for key in row.keys()
+    })
+    trend = []
+    for row in list(baseline_records) + list(current_records):
+        if not isinstance(row, dict):
+            continue
+        value = row.get(field)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        trend.append({"date": row.get("date"), "value": float(value)})
+    factors = []
+    for name in _factor_ids(pack):
+        info = _factor_state(baseline_records, current_records, name)
+        entry = {"factor": name, "state": info["state"]}
+        if info["evidence"]:
+            entry["evidence"] = info["evidence"]
+        factors.append(entry)
+    entity_scope = spec.get("entity_scope") if isinstance(spec.get("entity_scope"), dict) else \
+        _entity_scope(list(baseline_records) + list(current_records))
+    metric = {
+        "id": mid or spec_metric.get("id"),
+        "name": spec_metric.get("name") or meta.get("name"),
+        "unit": spec_metric.get("unit") or meta.get("unit"),
+        "grain": spec_metric.get("grain") or meta.get("grain"),
+        "direction": spec_metric.get("direction") or meta.get("direction"),
+        "current_value": current_value,
+    }
+    return {
+        "spec_version": SPEC_VERSION,
+        "scene_id": spec.get("scene_id"),
+        "pack_id": spec.get("pack_id") or pack.get("pack_id"),
+        "version": spec.get("version"),
+        "origin": spec.get("origin"),
+        "title": spec.get("title"),
+        "metric": metric,
+        "current_value": current_value,
+        "null_rate": null_rate,
+        "available_fields": available_fields,
+        "control_line": control_line,
+        "trend": trend,
+        "factors": factors,
+        "entity_scope": entity_scope,
+        "generated_at": _now_iso(),
+        "generated_by": "core.scene.build_instance",
+    }
+
+
+# --------------------------------------------------------------------------- #
 # 任务运行落盘：runs/<task_id>/scene.json + sha256（server 契约，B18）
 # --------------------------------------------------------------------------- #
 def write_task_scene(task_dir, spec, name="scene.json"):
