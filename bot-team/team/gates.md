@@ -34,6 +34,7 @@
 ```
 python tests/validate_structure.py
 python tests/validate_report.py runs/demo-report.json
+python tests/test_scene_acceptance.py --regression
 ```
 
-两条都非零退出 ⇒ 不得声称交付完成。
+三条都非零退出 ⇒ 不得声称交付完成。

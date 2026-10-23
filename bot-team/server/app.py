@@ -1327,6 +1327,163 @@ def get_outcome(cfg, task_id):
     }
 
 
+# --------------------------------------------------------------------------- #
+# R4：GET /api/decisions —— 跨任务决策日志时间线（P3 决策日志页）
+#   事实源：runs/*/report.json（机器真值）+ runs/*/outcome.json（T+7 回填）。
+#   不新建事实源：合并视图复用 decision_log_view()，回填读盘复用 read_outcome()。
+#   筛选维度（设计文档 §3.2 P3）：场景 / 实体 / 结论 / 档位 / 是否覆盖（人工改判），
+#   另加「是否已回填」——P3 的主字段是「实际结果（T+7 回填状态）」，
+#   没有这一维就筛不出「待回看」的卡片。
+# --------------------------------------------------------------------------- #
+DECISION_DEFAULT_LIMIT = 100
+DECISION_MAX_LIMIT = 500
+
+
+def _decision_entry(cfg, tdir):
+    """时间线一条：报告决策 + T+7 回填（只读，不改写任何落盘文件）。"""
+    report = read_json(tdir / "report.json")
+    if not isinstance(report, dict):
+        return None
+    dle = report.get("decision_log_entry")
+    if not isinstance(dle, dict) or not str(dle.get("id") or "").strip():
+        return None
+    task = read_json(tdir / "task.json")
+    task = task if isinstance(task, dict) else {}
+    raw_outcome = read_outcome(tdir)
+    outcome = raw_outcome if isinstance(raw_outcome, dict) else {}
+    merged = decision_log_view(report, outcome)
+    scorecard = report.get("scorecard") if isinstance(report.get("scorecard"), dict) else {}
+    findings = report.get("finding") if isinstance(report.get("finding"), list) else []
+    parts = []
+    for row in findings[:2]:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("factor") or row.get("name") or "").strip()
+        if not name:
+            continue
+        conf = row.get("confidence")
+        parts.append(name + (f"（置信度 {conf}）" if conf not in (None, "") else ""))
+    rec = report.get("recommendation") if isinstance(report.get("recommendation"), list) else []
+    actions = [str(x.get("action") or "").strip()
+               for x in rec if isinstance(x, dict) and str(x.get("action") or "").strip()]
+    scope = task.get("entity_scope")
+    if isinstance(scope, dict):
+        entity = str(scope.get("name") or scope.get("id") or "")
+    elif scope not in (None, ""):
+        entity = str(scope)
+    else:
+        entity = str(task.get("line") or "")
+    scene_id = str(task.get("scene_id") or "")
+    if not scene_id:
+        ref = task.get("scene_ref")
+        if isinstance(ref, dict):
+            scene_id = str(ref.get("scene_id") or "")
+    signature = signature_doc(tdir) or {}
+    # 回填字段只取 outcome.json 里的实际值（不写 null 占位）；outcome_window 缺时
+    # 退回报告里规划的窗口，好让「待回看」的卡也能显示回看期。
+    outcome_fields = {}
+    for key in ("observed_outcome", "actual_action", "override_reason",
+                "action_cost", "increment_value", "outcome_window"):
+        value = outcome.get(key)
+        if value in (None, "", [], {}):
+            continue
+        outcome_fields[key] = value
+    if "outcome_window" not in outcome_fields and merged.get("outcome_window"):
+        outcome_fields["outcome_window"] = merged["outcome_window"]
+    return {
+        "task_id": str(task.get("task_id") or report.get("task_id") or Path(tdir).name),
+        "decision_id": str(dle.get("id") or ""),
+        "decided_at": str(dle.get("date") or report.get("generated_at") or ""),
+        "signed_at": str(signature.get("signed_at") or ""),
+        "actor": str(dle.get("actor") or ""),
+        "scene_id": scene_id,
+        "entity": entity,
+        "goal": str(report.get("goal") or ""),
+        "context": str(dle.get("context") or ""),
+        "expected_result": str(dle.get("expected_result") or ""),
+        "conclusion": " / ".join(parts),
+        "finding_count": len(findings),
+        "cannot_attribute_count": len(report.get("cannot_attribute") or []),
+        "actions": actions[:3],
+        "verdict": str(scorecard.get("verdict") or ""),
+        "verdict_label": str(scorecard.get("label") or ""),
+        "score_total": scorecard.get("total"),
+        "signed": bool(signature.get("report_sha256")),
+        "signer": str(signature.get("signer") or ""),
+        "report_sha256": str(signature.get("report_sha256") or sha256_file(tdir / "report.json")),
+        "is_demo": bool(report.get("is_demo")),
+        "outcome_pending": raw_outcome is None,
+        # 人话状态标记：设计文档 §3.5 U4「未回填卡片标记『待回看』」——机判口径。
+        "outcome_status": "待回看" if raw_outcome is None else "已回填",
+        "overridden": bool(str(outcome_fields.get("override_reason") or "").strip()),
+        "outcome": outcome_fields,
+        "data_ref_count": len(dle.get("data_refs") or []),
+    }
+
+
+def decisions_view(cfg, query):
+    """GET /api/decisions：跨任务决策时间线 + 筛选 + 候选值（facets）。"""
+    items = []
+    if cfg.runs.is_dir():
+        for child in cfg.runs.iterdir():
+            if not child.is_dir():
+                continue
+            entry = _decision_entry(cfg, child)
+            if entry:
+                items.append(entry)
+    items.sort(key=lambda row: (str(row.get("decided_at") or ""),
+                                str(row.get("signed_at") or ""),
+                                str(row.get("task_id") or "")), reverse=True)
+    scenes, entities, verdicts = [], [], []
+    for row in items:
+        for bucket, value in ((scenes, row.get("scene_id")),
+                              (entities, row.get("entity")),
+                              (verdicts, row.get("verdict"))):
+            value = str(value or "")
+            if value and value not in bucket:
+                bucket.append(value)
+    scene = _str_param(query, "scene")
+    entity = _str_param(query, "entity")
+    verdict = _str_param(query, "verdict")
+    conclusion = _str_param(query, "conclusion").lower()
+    overridden = _str_param(query, "overridden")
+    filled = _str_param(query, "filled")
+
+    def keep(row):
+        if scene and str(row.get("scene_id") or "") != scene:
+            return False
+        if entity and entity.lower() not in str(row.get("entity") or "").lower():
+            return False
+        if verdict and str(row.get("verdict") or "") != verdict:
+            return False
+        if conclusion and conclusion not in str(row.get("conclusion") or "").lower():
+            return False
+        if overridden in ("0", "1") and bool(row.get("overridden")) != (overridden == "1"):
+            return False
+        if filled == "1" and row.get("outcome_pending"):
+            return False
+        if filled == "0" and not row.get("outcome_pending"):
+            return False
+        return True
+
+    filtered = [row for row in items if keep(row)]
+    limit = _int_param(query, "limit", DECISION_DEFAULT_LIMIT)
+    limit = max(1, min(limit, DECISION_MAX_LIMIT))
+    return {
+        "ok": True,
+        "count": len(filtered[:limit]),
+        "total": len(items),
+        "matched": len(filtered),
+        "generated_at": now_iso(),
+        "decisions": filtered[:limit],
+        "facets": {
+            "scenes": sorted(scenes),
+            "entities": sorted(entities),
+            "verdicts": sorted(verdicts),
+        },
+    }
+
+
 def get_task(cfg, task_id):
     tdir = task_dir(cfg, task_id)
     gate = read_json(tdir / GATE_FILE)
@@ -1870,6 +2027,111 @@ def _derive_validate(cfg, spec):
     return {"ok": True, "channel": "validate", "valid": True, "scene": spec, "spec_version": SCENE_SPEC_VERSION}
 
 
+def _scene_data_ref_rel(cfg, data_ref):
+    """把 data_ref 归一为仓库相对路径（可多段），逐段过 core.paths.safe_relative 白名单。
+
+    返回 (rel, error_reason)；error_reason 非 None 时调用方不得继续读文件。
+    """
+    raw = str(data_ref or "").strip()
+    if not raw:
+        return None, "discovered 通道需要 data_ref（数据文件的仓库相对路径），当前未提供"
+    if ("\\" in raw or raw.startswith("/") or raw.startswith("~")
+            or "://" in raw or re.match(r"^[A-Za-z]:", raw)):
+        return None, f"data_ref 非法或越界：{raw}"
+    parts = [part for part in raw.split("/") if part]
+    if not parts:
+        return None, f"data_ref 非法或越界：{raw}"
+    for part in parts:
+        if part in (".", ".."):
+            return None, f"data_ref 非法或越界：{raw}"
+        try:
+            safe_relative(cfg, part)
+        except ApiError:
+            return None, f"data_ref 非法或越界：{raw}"
+    return "/".join(parts), None
+
+
+def _scene_read_data_file(path):
+    """读一个数据文件 -> (meta, records)；文件缺失/JSON 非法/records 非数组 -> (None, None)。"""
+    try:
+        doc = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None, None
+    if not isinstance(doc, dict):
+        return None, None
+    records = doc.get("records")
+    if not isinstance(records, list) or not records:
+        return None, None
+    meta = doc.get("meta") if isinstance(doc.get("meta"), dict) else {}
+    return meta, records
+
+
+def _scene_baseline_sibling(rel_path):
+    """基线兄弟文件：同目录同名前缀 + "_T30.json"（material_refill_T.json → material_refill_T30.json）。
+
+    不存在返回 None（当期窗口有没有基线由数据说话，见 _scene_data_records 注释）。
+    """
+    rel = str(rel_path or "")
+    name = rel.rsplit("/", 1)[-1]
+    stem = name[:-5] if name.lower().endswith(".json") else name
+    base = stem[:-2] if stem.endswith("_T") else stem
+    sibling = base + "_T30.json"
+    if sibling == name:
+        return None
+    return (rel.rsplit("/", 1)[0] + "/" + sibling) if "/" in rel else sibling
+
+
+def _scene_data_records(cfg, data_ref):
+    """按 data_ref 读当期 + 基线数据，返回 (manifest, records, error_reason)。
+
+    - data_ref 是仓库相对路径，逐段过 core.paths.safe_relative 白名单；
+    - 基线兄弟文件 = 同目录同名前缀 + "_T30.json"；
+    - **基线 records 前置、当期 records 后置**：core.scene.discover 取末两条当 latest/previous，
+      所以当期必须排在最后，基线只参与 μ/σ 计算；
+    - 口径不可省：只拼当期 T（7 条）→ μ=6.0186 σ=0.7346，μ+2σ=7.4878 > latest 7.2 → 判不出异常；
+      拼上 T30 基线（n=37）→ μ=5.2014 σ=0.5307，μ+2σ=6.2628 < 7.2 → 命中 over_2sigma。
+    """
+    rel, error = _scene_data_ref_rel(cfg, data_ref)
+    if error:
+        return None, None, error
+    root = Path(cfg.root).resolve()
+    current_path = (root / rel).resolve()
+    try:
+        current_path.relative_to(root)
+    except ValueError:
+        return None, None, f"data_ref 非法或越界：{rel}"
+    if not current_path.is_file():
+        return None, None, f"data_ref 指向的文件不存在：{rel}"
+    current_meta, current_records = _scene_read_data_file(current_path)
+    if current_records is None:
+        return None, None, f"data_ref 文件不是合法数据文件：{rel}"
+    records = list(current_records)
+    sources = [rel]
+    baseline_rel = _scene_baseline_sibling(rel)
+    if baseline_rel:
+        baseline_path = (root / baseline_rel).resolve()
+        try:
+            baseline_path.relative_to(root)
+        except ValueError:
+            baseline_path = None
+        if baseline_path is not None and baseline_path.is_file():
+            baseline_meta, baseline_records = _scene_read_data_file(baseline_path)
+            if baseline_records:
+                records = list(baseline_records) + records
+                sources.insert(0, baseline_rel)
+    fields = set()
+    contract = (current_meta or {}).get("field_contract")
+    if isinstance(contract, list):
+        fields.update(str(item) for item in contract)
+    manifest = {
+        "fields": sorted(fields),
+        "sources": sources,
+        "current": rel,
+        "baseline": sources[0] if len(sources) > 1 else None,
+    }
+    return manifest, records, None
+
+
 def derive_scene(cfg, body):
     """双模式派生（Lead 契约 m01016 + 文档 §4.5.2）：
     - body 含 spec → 校验模式（core.scene.validate）；
@@ -1910,6 +2172,15 @@ def derive_scene(cfg, body):
             "spec_version": SCENE_SPEC_VERSION,
             "source": "packs/<pack>/scenes/*.json 或 core.scene.load_seeds",
         }
+    if not (data_ref and data_ref.strip()):
+        return {
+            "ok": False,
+            "channel": "discovered",
+            "cannot_derive": [
+                f"指标 {metric_id or '(未指定)'} 没有匹配的 preset 种子；"
+                "discovered 通道需要 data_ref（数据文件的仓库相对路径）"
+            ],
+        }
     try:
         module = import_core(cfg, "scene")
     except ApiError:
@@ -1917,31 +2188,18 @@ def derive_scene(cfg, body):
     discover = getattr(module, "discover", None) if module is not None else None
     if not callable(discover):
         raise ApiError(501, "discovered 通道需 core.scene.discover（core-builder 尚未落盘；§4.5.2）")
-    raw = None
-    last_error = None
-    attempts = (
-        lambda: discover(str(cfg.root), metric_id=metric_id, data_ref=data_ref),
-        lambda: discover(str(cfg.root)),
-        lambda: discover(),
-    )
-    for attempt in attempts:
-        try:
-            raw = attempt()
-            last_error = None
-            break
-        except TypeError as exc:  # 签名不符 → 试下一种
-            last_error = exc
-        except Exception as exc:  # noqa: BLE001
-            return {
-                "ok": False,
-                "channel": "discovered",
-                "cannot_derive": [f"core.scene.discover 执行失败：{exc}"],
-            }
-    if raw is None:
+    manifest, records, error = _scene_data_records(cfg, data_ref)
+    if error:
+        return {"ok": False, "channel": "discovered", "cannot_derive": [error]}
+    pack = _pack_doc(cfg)
+    try:
+        # core.scene.discover(data_manifest, records, pack) —— 签名是硬契约，不做试探调用
+        raw = discover(manifest, records, pack)
+    except Exception as exc:  # noqa: BLE001
         return {
             "ok": False,
             "channel": "discovered",
-            "cannot_derive": [f"core.scene.discover 签名不符（契约 §4.5.2）：{last_error}"],
+            "cannot_derive": [f"core.scene.discover 执行失败：{exc}"],
         }
     candidates = []
     if isinstance(raw, dict):
@@ -1961,7 +2219,6 @@ def derive_scene(cfg, body):
             "channel": "discovered",
             "cannot_derive": ["core.scene.discover 未返回可用 SceneSpec（可能当前数据无 μ±2σ 异常）"],
         }
-    pack = _pack_doc(cfg)
     valid, rejected = [], []
     for spec in candidates:
         problems = _validate_scene_spec(spec, pack)
@@ -1979,11 +2236,23 @@ def derive_scene(cfg, body):
     return {
         "ok": True,
         "channel": "discovered",
-        "scene": valid[0],
+        "scene": _pick_discovered_scene(valid, metric_id),
         "candidates": valid,
         "rejected": rejected,
         "spec_version": SCENE_SPEC_VERSION,
     }
+
+
+def _pick_discovered_scene(valid, metric_id):
+    """生成模式：调用方点名 metric_id 时优先返回该指标的草稿。"""
+    key = str(metric_id or "").strip()
+    if not key:
+        return valid[0]
+    for spec in valid:
+        metric = spec.get("metric") if isinstance(spec.get("metric"), dict) else {}
+        if str(metric.get("id") or "") == key:
+            return spec
+    return valid[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -2244,6 +2513,125 @@ def _read_status_state(tdir):
     return str(doc.get("state") or "") if isinstance(doc, dict) else ""
 
 
+def _scene_data_files_from_task(task):
+    """从 task.json.data_manifest 找当期(*_T.json) / 基线(*_T30.json)数据文件（相对 cfg.root）。"""
+    current = baseline = None
+    for entry in (task.get("data_manifest") or []):
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "")
+        path = str(entry.get("path") or "")
+        if not path:
+            continue
+        if name.endswith("_T30.json") or path.endswith("_T30.json"):
+            baseline = path
+        elif name.endswith("_T.json") or path.endswith("_T.json"):
+            current = path
+    return current, baseline
+
+
+def _scene_task_records(cfg, task):
+    """读当期/基线数据文件 -> (baseline_records, current_records, current_path, baseline_path)。"""
+    current_rel, baseline_rel = _scene_data_files_from_task(task)
+    root = Path(cfg.root).resolve()
+
+    def _read(rel):
+        if not rel:
+            return None, []
+        path = Path(rel)
+        if not path.is_absolute():
+            path = root / rel
+        try:
+            path.resolve().relative_to(root)
+        except ValueError:
+            return None, []
+        meta, records = _scene_read_data_file(path)
+        return str(path), (records or [])
+
+    current_path, current_records = _read(current_rel)
+    baseline_path, baseline_records = _read(baseline_rel)
+    return baseline_records, current_records, current_path, baseline_path
+
+
+def _write_scene_instance(cfg, tdir, task):
+    """run 收口后写 runs/<id>/scene.json（场景实例：μ±2σ 控制线 + 趋势 + 因素三态）。
+
+    spec 来源优先级：task.json.scene_id → preset 种子 → discovered 草稿 → 跳过。
+    写方只放 server（tools/run_task.py 不写，避免双写撞 os.replace WinError 5）。
+    任何失败都不阻断 run：原因写进 task.json.scene_note。
+    """
+    task_id = Path(tdir).name
+    note = ""
+    spec = None
+    pack = _pack_doc(cfg)
+    baseline_records, current_records, current_path, baseline_path = _scene_task_records(cfg, task)
+    try:
+        if not current_records:
+            note = "缺少当期数据文件（task.json.data_manifest 里没有 *_T.json），跳过场景实例落盘"
+        else:
+            scene_id = str(task.get("scene_id") or "").strip()
+            if scene_id:
+                spec = _find_preset(cfg, scene_id)
+                if spec is None:
+                    note = f"task.json.scene_id={scene_id} 未命中 preset 种子，尝试 discovered"
+            if spec is None and not note:
+                spec = _find_preset(cfg, task.get("metric") or task.get("metric_id"))
+            if spec is None:
+                module = import_core(cfg, "scene")
+                discover = getattr(module, "discover", None)
+                if not callable(discover):
+                    note = "core.scene.discover 不可用，跳过场景实例落盘"
+                else:
+                    manifest = {"fields": sorted({
+                        str(key) for row in (baseline_records + current_records)
+                        if isinstance(row, dict) for key in row.keys()
+                    })}
+                    drafts = discover(manifest, list(baseline_records) + list(current_records), pack) or []
+                    drafts = [item for item in drafts if isinstance(item, dict)]
+                    spec = drafts[0] if drafts else None
+                    if spec is None:
+                        note = "discovered 未产出场景草稿（数据无 μ±2σ 异常），跳过场景实例落盘"
+            if spec is not None:
+                module = import_core(cfg, "scene")
+                builder = getattr(module, "build_instance", None)
+                if not callable(builder):
+                    note = "core.scene.build_instance 不可用，跳过场景实例落盘"
+                else:
+                    instance = builder(spec, pack, baseline_records, current_records,
+                                       metric_id=(spec.get("metric") or {}).get("id"))
+                    instance["source"] = {
+                        "current_path": current_path,
+                        "baseline_path": baseline_path,
+                    }
+                    written = module.write_task_scene(tdir, instance)
+                    with cfg.task_lock(task_id):
+                        task_doc = read_json(Path(tdir) / "task.json") or {}
+                        if not isinstance(task_doc, dict):
+                            task_doc = {}
+                        task_doc["scene_ref"] = {
+                            "path": written.get("path"),
+                            "sha256": written.get("sha256"),
+                            "size": written.get("size"),
+                            "scene_id": instance.get("scene_id"),
+                        }
+                        task_doc["scene_id"] = instance.get("scene_id")
+                        task_doc.pop("scene_note", None)
+                        write_json_atomic(Path(tdir) / "task.json", task_doc)
+                    log(f"scene instance written {task_id}: {instance.get('scene_id')}")
+                    return True
+    except Exception as exc:  # noqa: BLE001 - 场景落盘失败不阻断 run
+        note = f"场景实例落盘失败：{exc}"
+        log(f"scene instance failed {task_id}: {exc}")
+    if note:
+        with cfg.task_lock(task_id):
+            task_doc = read_json(Path(tdir) / "task.json") or {}
+            if not isinstance(task_doc, dict):
+                task_doc = {}
+            task_doc["scene_note"] = note
+            write_json_atomic(Path(tdir) / "task.json", task_doc)
+    return False
+
+
 def run_task_thread(cfg, tdir, task, runner="external", extra_args=None, include_signer=True):
     """后台执行 tools/run_task.py。
 
@@ -2321,6 +2709,9 @@ def run_task_thread(cfg, tdir, task, runner="external", extra_args=None, include
                 write_status(tdir, runner=runner)
             if isinstance(report, dict) and "is_demo" in report:
                 write_status(tdir, is_demo=report.get("is_demo"))
+        if code == 0:
+            # 场景实例落盘（server 是唯一写方；失败不阻断 run）
+            _write_scene_instance(cfg, tdir, task)
         log(f"run done {task_id}: exit={code} state={_read_status_state(tdir)}")
     except ApiError as exc:
         _fail_task(cfg, tdir, exc.message)
@@ -2659,6 +3050,13 @@ def _int_param(query, name, default):
         return default
 
 
+def _str_param(query, name, default=""):
+    raw = (query.get(name) or [None])[0]
+    if raw is None:
+        return default
+    return str(raw).strip()
+
+
 def _since_param(query):
     """?since=n 严格校验：非整数/负数 → 400（SSE 与 JSON 增量同一口径）。"""
     raw = (query.get("since") or [None])[0]
@@ -2704,6 +3102,11 @@ def route_api(cfg, method, path, query, body):
         if method == "POST":
             return 201, create_task(cfg, body)
         raise ApiError(405, "method not allowed")
+    if path == "/api/decisions":
+        # R4：跨任务决策日志时间线（只读，不落盘）
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return 200, decisions_view(cfg, query)
 
     match = TASK_ROUTE_RE.match(path)
     if not match:

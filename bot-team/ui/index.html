@@ -349,6 +349,11 @@
   .dec-sign{border:1px dashed #94a3b8;border-radius:10px;padding:12px 14px;display:flex;gap:20px;flex-wrap:wrap;font-size:11.5px;color:#475569}
   .dec-sign b{color:#0f172a}
   .hash{font-family:Consolas,"Courier New",monospace;font-size:10px;color:#64748b}
+  .desk-form input,.desk-form select,.desk-form textarea{border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:11.5px;background:#fffdf8;color:#1f2430;font-family:inherit;width:100%;box-sizing:border-box}
+  .desk-form .row{display:flex;gap:10px;align-items:center;padding:5px 0;border-bottom:1px dashed #eee7da}
+  .desk-form .row .k{color:#6b7280;flex:0 0 168px}
+  .desk-form .row .v{flex:1;min-width:0}
+  .desk-form .row .v .dbtn{width:auto}
   @media (max-width:1100px){.wb-grid{grid-template-columns:1fr}.desk-main{padding:16px 14px 32px}.desk-top{padding:10px 14px;flex-wrap:wrap}.desk-nav{margin-left:0}}
   @media print{
     body{background:#fff}
@@ -370,7 +375,8 @@
       <div><h1>AI 员工事务所</h1><p>经营决策台 · 一屏一场景</p></div>
     </div>
     <nav class="desk-nav">
-      <button class="dbtn on" onclick="showP('p0')">场景驾驶舱</button>
+      <button class="dbtn on" data-p="p0" onclick="showP('p0')">场景驾驶舱</button>
+      <button class="dbtn" data-p="p3" onclick="showP('p3')">决策日志</button>
       <button class="dbtn" onclick="setView('office')">事务所工作台</button>
     </nav>
     <div class="desk-actions">
@@ -385,7 +391,19 @@
           <h2>今天先看什么</h2>
           <p>场景来自 pack 的 SceneSpec 种子（0 处场景常量，换行业只换 pack）。点击场景进入 P1 场景工作台：趋势、因素、六步排除、评分卡、建议一屏答完；一单交付后出 P2 决策卡。</p>
         </div>
-        <button class="dbtn" onclick="setView('office')">去事务所接单 / 看舞台</button>
+        <div class="desk-actions">
+          <button class="dbtn" onclick="toggleDerive()">派生场景</button>
+          <button class="dbtn" onclick="setView('office')">去事务所接单 / 看舞台</button>
+        </div>
+      </div>
+      <div class="wcard" id="derivePanel" hidden>
+        <h4>派生场景（生成模式）</h4>
+        <div class="wbody desk-form">
+          <div class="row"><span class="k">指标 id</span><span class="v"><input id="deriveMetric" list="deriveMetricList" placeholder="取自当前 pack 指标" autocomplete="off" /><datalist id="deriveMetricList"></datalist></span></div>
+          <div class="row"><span class="k">数据文件（仓库相对路径）</span><span class="v"><input id="deriveDataRef" list="deriveDataList" placeholder="如 runs/&lt;task_id&gt;/data/xxx_T.json" autocomplete="off" /><datalist id="deriveDataList"></datalist></span></div>
+          <div class="row"><span class="k">说明</span><span class="v" id="deriveNote">只给指标 id：走 preset 种子；给了数据文件：走统计发现通道（服务端按 μ±2σ 判异常后派生，不落盘）。</span></div>
+          <div class="row"><span class="k"></span><span class="v"><button class="dbtn primary" onclick="deskDeriveScene()">派生</button></span></div>
+        </div>
       </div>
       <div class="scene-grid" id="sceneGrid"></div>
       <div class="desk-empty" id="sceneEmpty">正在连接本地服务……</div>
@@ -435,9 +453,38 @@
         <div class="desk-actions">
           <button class="dbtn" onclick="printDecision()">打印 / 导出 PDF</button>
           <button class="dbtn" onclick="setView('office')">去交付卡签字</button>
+          <button class="dbtn" onclick="showP('p3')">决策日志 →</button>
         </div>
       </div>
       <div id="decisionCard"></div>
+    </section>
+
+    <section class="pane" id="d-p3" hidden>
+      <div class="pane-h">
+        <div>
+          <button class="dbtn" onclick="showP('p0')">← 场景驾驶舱</button>
+          <h2>决策日志</h2>
+          <p>跨任务时间线：每条决策的结论、档位与 T+7 实际结果。未回填的卡标「待回看」。</p>
+        </div>
+        <div class="desk-actions">
+          <button class="dbtn" onclick="deskLoadDecisions(true)">刷新日志</button>
+        </div>
+      </div>
+      <div class="wcard desk-form">
+        <h4>筛选</h4>
+        <div class="wbody">
+          <div class="row"><span class="k">场景</span><span class="v"><select id="d3Scene" onchange="deskLoadDecisions(true)"></select></span></div>
+          <div class="row"><span class="k">实体</span><span class="v"><select id="d3Entity" onchange="deskLoadDecisions(true)"></select></span></div>
+          <div class="row"><span class="k">结论档位</span><span class="v"><select id="d3Verdict" onchange="deskLoadDecisions(true)"></select></span></div>
+          <div class="row"><span class="k">结论关键词</span><span class="v"><input id="d3Conclusion" placeholder="按结论/因素过滤" autocomplete="off" onchange="deskLoadDecisions(true)" /></span></div>
+          <div class="row"><span class="k">是否覆盖（人工改判）</span><span class="v"><select id="d3Overridden" onchange="deskLoadDecisions(true)">
+            <option value="">全部</option><option value="1">已覆盖</option><option value="0">未覆盖</option></select></span></div>
+          <div class="row"><span class="k">T+7 回填</span><span class="v"><select id="d3Filled" onchange="deskLoadDecisions(true)">
+            <option value="">全部</option><option value="1">已回填</option><option value="0">待回看</option></select></span></div>
+          <div class="row"><span class="k"></span><span class="v"><button class="dbtn" onclick="deskResetDecisionFilters()">重置筛选</button></span></div>
+        </div>
+      </div>
+      <div class="wcard"><h4>时间线</h4><div class="wbody" id="d3List"></div></div>
     </section>
   </main>
 </div>
@@ -1943,7 +1990,12 @@
         if (summary) renderKpis(UI.tasks, summary);
         renderTaskbar(UI.tasks, adapter.currentTaskId(), summary || UI.summary);
         if (document.body.classList.contains('mode-desk')) {
-          try { renderP0(); if (DESK.p === 'p1') renderP1(); if (DESK.p === 'p2') renderP2(); } catch (err) { /* 场景渲染异常不影响工作台 */ }
+          try {
+            renderP0();
+            if (DESK.p === 'p1') renderP1();
+            if (DESK.p === 'p2') renderP2();
+            if (DESK.p === 'p3') { renderP3(); deskLoadDecisions(true); }
+          } catch (err) { /* 场景渲染异常不影响工作台 */ }
         }
       },
       onBeats(beats, source) {
@@ -1984,6 +2036,14 @@
         if (scene) { DESK.scene = scene; renderP1(); }
       },
       onGate(gate, model) { if (model) { UI.model = model; renderGate(model); } },
+      onDecisions(rows, facets, meta) {
+        // R4：P3 数据层回调（唯一渲染入口，避免两条路径打架）。
+        DESK3.rows = rows || [];
+        DESK3.facets = facets || DESK3.facets;
+        DESK3.meta = meta || DESK3.meta;
+        DESK3.loaded = true;
+        if (DESK.p === 'p3') { deskRenderDecisionFacets(); deskRenderDecisions(); }
+      },
       onSignature(sig, model) { if (sig) applySignedState(sig.signer || '', sig.report_sha256, sig.signed_at); },
       onSign(result) { applySignedState(result.signer || '', result.sha256, result.signed_at); },
       onError(error) {
@@ -2042,12 +2102,23 @@
   function openG0() { $('g0').classList.add('show'); }
   function closeG0() { $('g0').classList.remove('show'); }
 
-  /* ================= B15 场景化决策台：P0 / P1 / P2（SceneSpec 驱动，换行业只换 pack） ================= */
-  const DESK = { scenes: [], meta: null, scene: null, p: 'p0' };
+  /* ================= B15 场景化决策台：P0 / P1 / P2 / P3（SceneSpec 驱动，换行业只换 pack） ================= */
+  const DESK = { scenes: [], meta: null, scene: null, p: 'p0', outcomeDraft: {} };
+  // R4：P3 决策日志（跨任务时间线，筛选状态留前端；数据源 GET /api/decisions）
+  const DESK3 = { rows: [], facets: { scenes: [], entities: [], verdicts: [] }, meta: null, filters: { scene: '', entity: '', verdict: '', conclusion: '', overridden: '', filled: '' }, loaded: false };
   const ORIGIN_CN = { preset: '预设种子', user_prompt: 'AI 生成', discovered: '统计发现' };
   const DESK_LABEL = { s1: '① 快照', s2: '② 因素', s3: '③ 排除', s4: '④ 建议', s5: '⑤ 收口' };
 
   function deskEsc(v) { return esc(v == null ? '' : String(v)); }
+  // T+7 回填值按契约允许是 dict（observed_outcome / action_cost / increment_value），
+  // 直接 String(obj) 会渲染成 [object Object]；P2 与 P3 必须走同一个取值器（跨页自洽）。
+  function deskOutcomeText(v) {
+    if (v == null || v === '') return '—';
+    if (typeof v === 'object') {
+      try { return JSON.stringify(v); } catch (e) { return String(v); }
+    }
+    return String(v);
+  }
   function deskNum(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
   function deskPick(obj, keys) {
     if (!obj) return null;
@@ -2110,8 +2181,8 @@
   }
   function deskShowP(which) {
     DESK.p = which;
-    ['p0', 'p1', 'p2'].forEach(function (p) { const el = $('d-' + p); if (el) el.hidden = (p !== which); });
-    document.querySelectorAll('.desk-nav .dbtn').forEach(function (b, i) { b.classList.toggle('on', i === 0 && which === 'p0'); });
+    ['p0', 'p1', 'p2', 'p3'].forEach(function (p) { const el = $('d-' + p); if (el) el.hidden = (p !== which); });
+    document.querySelectorAll('.desk-nav .dbtn[data-p]').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-p') === which); });
     try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); }
   }
   function setView(view, sceneId) {
@@ -2135,12 +2206,60 @@
     try { if (adapter.refresh) adapter.refresh(); } catch (e) { /* ignore */ }
     try { if (adapter.refreshTask) adapter.refreshTask(); } catch (e) { /* ignore */ }
   }
+  function showP(which) {
+    if (which === 'p1') renderP1();
+    if (which === 'p2') renderP2();
+    if (which === 'p3') { renderP3(); deskLoadDecisions(true); }
+    deskShowP(which);
+  }
+  function toggleDerive() {
+    const panel = $('derivePanel');
+    if (!panel) return;
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) { deskDeriveOptions(); const el = $('deriveMetric'); if (el) el.focus(); }
+  }
+  function deskDeriveOptions() {
+    const metrics = [];
+    (DESK.scenes || []).forEach(function (s) {
+      const m = s && s.metric ? s.metric : null;
+      const id = m && m.id ? String(m.id) : '';
+      if (id && metrics.indexOf(id) < 0) metrics.push(id);
+    });
+    const ml = $('deriveMetricList');
+    if (ml) ml.innerHTML = metrics.map(function (id) { return '<option value="' + deskEsc(id) + '"></option>'; }).join('');
+    const adapter = window.APIAdapter;
+    const detail = adapter && adapter.currentDetail ? adapter.currentDetail() : null;
+    const task = (detail && detail.task) || (UI.model && UI.model.task) || null;
+    const files = [];
+    ((task && task.data_manifest) || []).forEach(function (entry) {
+      if (entry && entry.path && files.indexOf(String(entry.path)) < 0) files.push(String(entry.path));
+    });
+    const dl = $('deriveDataList');
+    if (dl) dl.innerHTML = files.map(function (p) { return '<option value="' + deskEsc(p) + '"></option>'; }).join('');
+  }
+  async function deskDeriveScene() {
+    const adapter = window.APIAdapter;
+    if (!adapter || !adapter.isLive || !adapter.isLive()) { toast('需本地服务：python -B server/app.py --port 8787'); return; }
+    const metricEl = $('deriveMetric'), dataEl = $('deriveDataRef');
+    const metricId = metricEl ? String(metricEl.value || '').trim() : '';
+    const dataRef = dataEl ? String(dataEl.value || '').trim() : '';
+    if (!metricId && !dataRef) { toast('至少给指标 id 或数据文件路径'); return; }
+    try {
+      const spec = await adapter.deriveScene({ metric_id: metricId, data_ref: dataRef });
+      toast('已派生场景：' + (spec && spec.scene_id));
+      deskRefresh();
+      if (spec && spec.scene_id) openScene(spec.scene_id);
+    } catch (e) {
+      toast('派生失败：' + (e && e.message ? e.message : e));
+    }
+  }
   function renderP0() {
     const grid = $('sceneGrid'), empty = $('sceneEmpty');
     if (!grid || !empty) return;
     const adapter = window.APIAdapter;
     const live = !!(adapter && adapter.isLive && adapter.isLive());
     const list = DESK.scenes || [];
+    deskDeriveOptions();
     const st = $('deskState');
     if (st) st.textContent = live ? ('场景 ' + list.length + ' 个 · pack ' + ((DESK.meta && DESK.meta.pack_id) || '—') + ' · ' + ((DESK.meta && DESK.meta.spec_version) || 'scene.v1')) : '本地服务未连接 · 静态演示回退';
     if (st) st.classList.toggle('live', live);
@@ -2186,6 +2305,22 @@
     if (!scene) scene = (DESK.scenes || []).filter(function (s) { return s.scene_id === sceneId; })[0] || null;
     if (!scene) { toast('场景不存在：' + sceneId); return; }
     DESK.scene = scene;
+    // P0 场景卡与 P1 必须同一锚点：P0 卡显示「最近决策」（spec.latest），而 P1 读工作台当前任务，
+    // 两者回退顺序相反会导致同一场景多单时数字对不上。点击卡片即把当前任务切到该场景最近一单
+    // （与 P3「打开决策卡」同一机制），切完再渲染 P1。
+    const latestId = (scene.latest && scene.latest.task_id) || '';
+    const curId = (adapter && adapter.currentTaskId) ? adapter.currentTaskId() : '';
+    if (latestId && adapter && adapter.selectTask && latestId !== curId) {
+      Promise.resolve(adapter.selectTask(latestId)).then(function () {
+        renderP1();
+        deskShowP('p1');
+      }, function () {
+        renderP1();
+        deskShowP('p1');
+      });
+      deskShowP('p1');
+      return;
+    }
     renderP1();
     deskShowP('p1');
   }
@@ -2208,6 +2343,10 @@
     trend += '<div class="wrow"><span class="k">当前值</span><span class="v"><b>' + deskEsc(deskVal(cur, metric.unit)) + '</b></span></div>';
     if (mean != null) trend += '<div class="wrow"><span class="k">控制线 μ</span><span class="v">' + deskEsc(deskVal(mean, metric.unit)) + '</span></div>';
     if (sigma != null) trend += '<div class="wrow"><span class="k">σ</span><span class="v">' + deskEsc(deskVal(sigma, metric.unit)) + '</span></div>';
+    const upper = deskPick(cl, ['upper', 'upper_limit', 'ucl']);
+    const lower = deskPick(cl, ['lower', 'lower_limit', 'lcl']);
+    if (upper != null) trend += '<div class="wrow"><span class="k">控制线上限（μ+2σ）</span><span class="v">' + deskEsc(deskVal(upper, metric.unit)) + '</span></div>';
+    if (lower != null) trend += '<div class="wrow"><span class="k">控制线下限（μ-2σ）</span><span class="v">' + deskEsc(deskVal(lower, metric.unit)) + '</span></div>';
     deskSet('p1Trend', trend);
     /* 因素快照 */
     const factors = (model && model.finding) || (inst && deskPick(inst, ['factors', 'finding'])) || [];
@@ -2336,9 +2475,62 @@
     }
     deskSet('p1Degrade', issues.length ? issues.map(function (s) { return '<div class="degraded">' + deskEsc(s) + '</div>'; }).join('') : '<div class="wrow"><span class="k">状态</span><span class="v">数据要求已满足</span></div>');
   }
+  function outcomeFormHtml(model) {
+    const decision = (model.loop && model.loop.decision) || {};
+    const finalized = model.state === 'signed' || decision.status === 'approved';
+    const draft = DESK.outcomeDraft || {};
+    const input = function (id, key, placeholder) {
+      const value = draft[key] == null ? '' : String(draft[key]);
+      return '<input id="' + id + '" data-oc="1" value="' + deskEsc(value) + '" placeholder="' + deskEsc(placeholder || '') + '" oninput="deskOutcomeDraft(\'' + key + '\', this.value)" />';
+    };
+    return '<div class="desk-form" style="margin-top:8px">' +
+      '<div class="row"><span class="k">实测结果（必填）</span><span class="v">' + input('ocObserved', 'observed_outcome', 'T+7 实测值或现象描述') + '</span></div>' +
+      '<div class="row"><span class="k">实际动作</span><span class="v">' + input('ocAction', 'actual_action', '实际做了什么') + '</span></div>' +
+      '<div class="row"><span class="k">改判原因</span><span class="v">' + input('ocOverride', 'override_reason', '与建议不一致时写原因') + '</span></div>' +
+      '<div class="row"><span class="k">动作成本</span><span class="v">' + input('ocCost', 'action_cost', '数值，或 {..}') + '</span></div>' +
+      '<div class="row"><span class="k">增量</span><span class="v">' + input('ocIncrement', 'increment_value', '数值，或 {..}') + '</span></div>' +
+      '<div class="row"><span class="k">回看窗口</span><span class="v">' + input('ocWindow', 'outcome_window', '7d / 14d') + '</span></div>' +
+      '<div class="row"><span class="k"></span><span class="v">' +
+      (finalized ? '<button class="dbtn primary" onclick="deskSubmitOutcome()">提交回填</button>' : '<button class="dbtn" disabled="disabled">提交回填</button>') +
+      '<span class="muted" style="margin-left:8px">' + (finalized ? '回填写入 outcome.json，已签字的 report.json 字节不动。' : '需先在事务所工作台完成签字终审（finalize）才能回填。') + '</span>' +
+      '</span></div></div>';
+  }
+  function deskOutcomeDraft(key, value) {
+    if (!DESK.outcomeDraft) DESK.outcomeDraft = {};
+    DESK.outcomeDraft[key] = value;
+  }
+  async function deskSubmitOutcome() {
+    const adapter = window.APIAdapter;
+    if (!adapter || !adapter.isLive || !adapter.isLive()) { toast('需本地服务'); return; }
+    const read = function (id) { const el = $(id); return el ? String(el.value == null ? '' : el.value).trim() : ''; };
+    const payload = {
+      observed_outcome: read('ocObserved'),
+      actual_action: read('ocAction'),
+      override_reason: read('ocOverride'),
+      action_cost: read('ocCost'),
+      increment_value: read('ocIncrement'),
+      outcome_window: read('ocWindow')
+    };
+    if (!payload.observed_outcome) { toast('实测结果（observed_outcome）必填'); return; }
+    const model = UI.model || null;
+    const taskId = (model && model.task && model.task.task_id) || undefined;
+    try {
+      await adapter.postOutcome(taskId, payload);
+      DESK.outcomeDraft = {};
+      toast('回填已记入 outcome.json（报告字节未变）');
+      // 提交后焦点仍在输入框里 → renderP2 的“正在输入就不重画”保护会挡住刷新，先让焦点离开
+      const focused = document.activeElement;
+      if (focused && focused.blur) focused.blur();
+      renderP2();
+    } catch (e) {
+      toast('回填失败：' + (e && e.message ? e.message : e));
+    }
+  }
   function renderP2() {
     const host = $('decisionCard');
     if (!host) return;
+    const active = document.activeElement;
+    if (active && active.getAttribute && active.getAttribute('data-oc')) return;  // 回填表单正在输入：先不重画
     const model = UI.model || null;
     const spec = DESK.scene || null;
     if (!model || !model.report) {
@@ -2397,12 +2589,134 @@
       '<div class="wrow"><span class="k">预期结果</span><span class="v">' + deskEsc(log.expected_result || '—') + '</span></div>' +
       '<div class="wrow"><span class="k">回看时间</span><span class="v">' + deskEsc(reviewDue) + '</span></div>' +
       '<div class="wrow"><span class="k">回看状态</span><span class="v"><span class="badge-status ' + (outcome ? 'ok' : 'warn') + '">' + (outcome ? '已回填' : '待回看') + '</span></span></div>' +
-      (outcome ? '<div class="wrow"><span class="k">实际结果</span><span class="v">' + deskEsc(outcome.observed_outcome || '—') + '</span></div>' +
-        '<div class="wrow"><span class="k">增量</span><span class="v">' + deskEsc(outcome.increment_value != null ? outcome.increment_value : '—') + '</span></div>' +
+      (outcome ? '<div class="wrow"><span class="k">实际结果</span><span class="v">' + deskEsc(deskOutcomeText(outcome.observed_outcome)) + '</span></div>' +
+        '<div class="wrow"><span class="k">增量</span><span class="v">' + deskEsc(deskOutcomeText(outcome.increment_value)) + '</span></div>' +
         '<div class="wrow"><span class="k">实际动作</span><span class="v">' + deskEsc(outcome.actual_action || '—') + '</span></div>' +
+        '<div class="wrow"><span class="k">改判原因</span><span class="v">' + deskEsc(outcome.override_reason || '—') + '</span></div>' +
+        '<div class="wrow"><span class="k">动作成本</span><span class="v">' + deskEsc(deskOutcomeText(outcome.action_cost)) + '</span></div>' +
         '<div class="wrow"><span class="k">回看窗口</span><span class="v">' + deskEsc(outcome.outcome_window || '—') + '</span></div>' : '') +
+      (outcome ? '' : outcomeFormHtml(model)) +
       '<div class="wrow"><span class="k">当前状态</span><span class="v">' + deskEsc(deskStateText(model.state)) + '</span></div></div></div>' +
       '</div>';
+  }
+  /* ================= R4：P3 决策日志（跨任务时间线） ================= */
+  function deskDecisionFilters() {
+    const f = DESK3.filters;
+    const sc = document.getElementById('d3Scene');
+    const ent = document.getElementById('d3Entity');
+    const ver = document.getElementById('d3Verdict');
+    const con = document.getElementById('d3Conclusion');
+    const ov = document.getElementById('d3Overridden');
+    const fi = document.getElementById('d3Filled');
+    f.scene = sc ? sc.value : '';
+    f.entity = ent ? ent.value : '';
+    f.verdict = ver ? ver.value : '';
+    f.conclusion = con ? con.value.trim() : '';
+    f.overridden = ov ? ov.value : '';
+    f.filled = fi ? fi.value : '';
+    return f;
+  }
+  function deskFillSelect(id, values, current, placeholder) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const opts = ['<option value="">' + deskEsc(placeholder) + '</option>'];
+    (values || []).forEach(function (v) {
+      const text = String(v);
+      opts.push('<option value="' + deskEsc(text) + '"' + (text === current ? ' selected' : '') + '>' + deskEsc(text) + '</option>');
+    });
+    el.innerHTML = opts.join('');
+  }
+  function deskRenderDecisionFacets() {
+    // 用户正在操作筛选控件时不重画选项（否则会打断下拉/焦点）
+    const active = document.activeElement;
+    if (active && active.id && ['d3Scene', 'd3Entity', 'd3Verdict', 'd3Overridden', 'd3Filled', 'd3Conclusion'].indexOf(active.id) >= 0) return;
+    const facets = DESK3.facets || {};
+    deskFillSelect('d3Scene', facets.scenes, DESK3.filters.scene, '全部场景');
+    deskFillSelect('d3Entity', facets.entities, DESK3.filters.entity, '全部实体');
+    deskFillSelect('d3Verdict', facets.verdicts, DESK3.filters.verdict, '全部档位');
+  }
+  function deskOutcomeBadge(row) {
+    if (row.outcome_pending) return '<span class="badge-status warn">待回看</span>';
+    return '<span class="badge-status ok">已回填</span>';
+  }
+  function deskRenderDecisions() {
+    const host = document.getElementById('d3List');
+    if (!host) return;
+    const rows = DESK3.rows || [];
+    if (!rows.length) {
+      host.innerHTML = '<div class="desk-empty">没有符合条件的决策记录。筛选条件可重置；本地服务未连接时本区为空。</div>';
+      return;
+    }
+    host.innerHTML = rows.map(function (row) {
+      const out = row.outcome || {};
+      const inc = deskOutcomeText(out.increment_value);
+      const observedText = deskOutcomeText(out.observed_outcome);
+      const verdict = row.verdict_label || row.verdict || '—';
+      const score = row.score_total != null ? row.score_total : '—';
+      return '<div class="dec-card" style="margin:0 0 12px;padding:16px 18px">' +
+        '<div class="dec-head" style="padding-bottom:9px;margin-bottom:10px">' +
+        '<div><h2 style="font-size:15px">' + deskEsc(row.decision_id || '—') + '</h2>' +
+        '<div class="id">' + deskEsc(row.decided_at || '—') + ' · 任务 ' + deskEsc(row.task_id || '—') +
+        (row.is_demo ? ' · <span class="badge-status bad">演示数据</span>' : '') +
+        ' · ' + deskEsc(row.entity || '—') + (row.scene_id ? ' · ' + deskEsc(row.scene_id) : '') + '</div></div>' +
+        '<div style="text-align:right">' + deskOutcomeBadge(row) + '</div></div>' +
+        '<div class="dec-sec" style="margin:8px 0"><h4>结论</h4><div class="body">' +
+        deskEsc(row.conclusion || '（报告未列因素）') +
+        '<div class="wrow"><span class="k">档位</span><span class="v">' + deskEsc(verdict) + '（' + deskEsc(score) + ' 分）</span></div>' +
+        '<div class="wrow"><span class="k">无法排除</span><span class="v">' + deskEsc(row.cannot_attribute_count != null ? row.cannot_attribute_count : 0) + ' 条</span></div>' +
+        '<div class="wrow"><span class="k">签字</span><span class="v">' + (row.signed ? deskEsc(row.signer || '已签') : '未签') + '</span></div>' +
+        '</div></div>' +
+        '<div class="dec-sec" style="margin:8px 0"><h4>实际结果（T+7）</h4><div class="body">' +
+        '<div class="wrow"><span class="k">实际结果</span><span class="v">' + deskEsc(observedText) + '</span></div>' +
+        '<div class="wrow"><span class="k">增量</span><span class="v">' + deskEsc(inc) + '</span></div>' +
+        '<div class="wrow"><span class="k">实际动作</span><span class="v">' + deskEsc(out.actual_action || '—') + '</span></div>' +
+        '<div class="wrow"><span class="k">改判原因</span><span class="v">' + deskEsc(out.override_reason || '—') + '</span></div>' +
+        '<div class="wrow"><span class="k">动作成本</span><span class="v">' + deskEsc(deskOutcomeText(out.action_cost)) + '</span></div>' +
+        '<div class="wrow"><span class="k">回看窗口</span><span class="v">' + deskEsc(deskOutcomeText(out.outcome_window)) + '</span></div>' +
+        '</div></div>' +
+        '<div class="wrow"><span class="k">操作</span><span class="v"><button class="dbtn" onclick="deskOpenDecision(\'' +
+        deskEsc(row.task_id || '') + '\')">打开决策卡</button></span></div>' +
+        '</div>';
+    }).join('');
+  }
+  function deskLoadDecisions(force) {
+    const adapter = window.APIAdapter;
+    if (!adapter || !adapter.listDecisions) { deskRenderDecisions(); return Promise.resolve([]); }
+    const filters = deskDecisionFilters();
+    return adapter.listDecisions(filters).then(function (rows) {
+      // 渲染统一走 onDecisions 回调（adapter 侧触发）；这里只兜底。
+      if (DESK.p === 'p3') { deskRenderDecisionFacets(); deskRenderDecisions(); }
+      return rows || [];
+    }).catch(function (err) {
+      DESK3.rows = [];
+      DESK3.loaded = true;
+      deskRenderDecisions();
+      toast('决策日志加载失败：' + (err && err.message ? err.message : err));
+      return [];
+    });
+  }
+  function deskResetDecisionFilters() {
+    DESK3.filters = { scene: '', entity: '', verdict: '', conclusion: '', overridden: '', filled: '' };
+    ['d3Scene', 'd3Entity', 'd3Verdict', 'd3Overridden', 'd3Filled'].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    const con = document.getElementById('d3Conclusion');
+    if (con) con.value = '';
+    deskLoadDecisions(true);
+  }
+  function deskOpenDecision(taskId) {
+    const adapter = window.APIAdapter;
+    if (!adapter || !taskId) return;
+    const p = adapter.selectTask(taskId);
+    Promise.resolve(p).then(function () {
+      renderP2();
+      deskShowP('p2');
+    });
+  }
+  function renderP3() {
+    deskRenderDecisionFacets();
+    deskRenderDecisions();
   }
   function sceneAttribution() {
     const spec = DESK.scene;

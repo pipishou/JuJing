@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Scrape traffic API into metrics/wal.jsonl
+      - name: Scrape traffic API into metrics/traffic.jsonl
         env:
           TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN || github.token }}
         run: |
@@ -27,14 +27,14 @@ jobs:
             exit 1
           fi
           curl -sf -H "Authorization: Bearer $TRAFFIC_TOKEN" "$API/traffic/clones" > /tmp/clones.json
-          jq -c --arg ts "$TS" '{ts:$ts,type:"views", count:.count,uniques:.uniques}' /tmp/views.json  >> metrics/wal.jsonl
-          jq -c --arg ts "$TS" '{ts:$ts,type:"clones",count:.count,uniques:.uniques}' /tmp/clones.json >> metrics/wal.jsonl
+          jq -c --arg ts "$TS" '{ts:$ts,type:"views", count:.count,uniques:.uniques}' /tmp/views.json  >> metrics/traffic.jsonl
+          jq -c --arg ts "$TS" '{ts:$ts,type:"clones",count:.count,uniques:.uniques}' /tmp/clones.json >> metrics/traffic.jsonl
 
       - name: Commit metrics
         run: |
           git config user.name "traffic-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add metrics/wal.jsonl
+          git add metrics/traffic.jsonl
           git diff --cached --quiet || git commit -m "metrics: traffic $(date -u +%F)"
           git fetch origin
           git rebase origin/main

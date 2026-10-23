@@ -3,8 +3,7 @@
 """B16/B18/B15/B17 场景化决策台 —— 独立验收测试（Checker 侧，黑盒）。
 
 唯一规格源:
-  D:\\work\\产品类\\个人产品\\bot-2\\JuJing\\docs\\项目文档\\02-产品方案\\
-  经营模型整合与场景化决策卡设计_2026-10-20.md
+  <bot-team>/../docs/项目文档/02-产品方案/经营模型整合与场景化决策卡设计_2026-10-20.md
      §3.3 DEC、§3.5 U1-U5、§4.5.1 SceneSpec v1、§4.5.2 三通道、
      §4.5.3 core/scene.py 校验六规则、§4.5.4 通用渲染纪律、§4.5.5 U6-U8
 
@@ -19,8 +18,9 @@
       ui/index.html 不含 refill/downtime/output 之类场景常量
   U7  POST /api/scenes/derive 双模式（lead 2026-10-19 裁决）：
       校验模式（body 含 spec）非法 spec_version/缺必填 -> 400，其余五类 -> 200
-      {ok:false, cannot_derive:[人话原因]}；生成模式（body 无 spec）合法输入 ->
-      preset 命中 / cannot_derive / user_prompt 501
+      {ok:false, cannot_derive:[人话原因]}；生成模式（body 无 spec）discovered 通道
+      必须 200 + scene_id（cannot_derive 计入失败），不存在的数据文件 -> 200 +
+      cannot_derive（不得 500），user_prompt -> 501
   U8  同 scene_id@version 两次渲染关键字段一致、origin 可见
 
 用法:
@@ -65,12 +65,29 @@ import time
 import traceback
 import urllib.error
 import urllib.request
+import urllib.parse
 import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 FIX = Path(__file__).resolve().parent / "fixtures" / "scene"
-DEFAULT_VENV_PY = Path(r"D:\work\产品类\个人产品\bot-2\venv\Scripts\python.exe")
+
+
+def _default_venv_py() -> Path:
+    """子进程解释器：仓库同级 venv（bot-2/venv）→ 仓内 venv → 当前解释器。
+
+    不写死某台机器的绝对路径；确需指定时用环境变量 BOT_PY（优先）。
+    兜底保留：找不到 venv 就用当前解释器（本仓仍能跑）。
+    """
+    for rel in ("venv/Scripts/python.exe", ".venv/Scripts/python.exe",
+                "venv/bin/python", ".venv/bin/python"):
+        cand = ROOT.parent / rel
+        if cand.is_file():
+            return cand
+    return Path(sys.executable)
+
+
+DEFAULT_VENV_PY = _default_venv_py()
 IGNORE_COPY = shutil.ignore_patterns(
     "runs", "__pycache__", "*.pyc", ".git", ".pytest_cache",
 )
@@ -118,12 +135,14 @@ CASES = ("U1", "U2", "U3", "U4", "U5", "U6", "U7", "U8")
 # 小工具
 # --------------------------------------------------------------------------- #
 def _pick_python() -> str:
-    env = os.environ.get("B16_PY") or os.environ.get("M15_PY")
-    cand = [
-        Path(env) if env else None,
-        DEFAULT_VENV_PY,
-        Path(sys.executable),
-    ]
+    # BOT_PY 优先（与 server.find_python 同口径），再兼容本文件历史键名
+    cand = []
+    for key in ("BOT_PY", "B16_PY", "M15_PY"):
+        val = os.environ.get(key)
+        if val:
+            cand.append(Path(val))
+    cand.append(DEFAULT_VENV_PY)
+    cand.append(Path(sys.executable))
     for c in cand:
         if c and Path(c).is_file():
             return str(c)
@@ -151,6 +170,15 @@ def test_issue(reason: str):
 def check(cond, reason: str):
     if not cond:
         raise CaseFailure("assert", reason)
+
+
+def qs(name: str, value: str) -> str:
+    """查询串拼装：值一律百分号编码（非 ASCII 中文筛选项必须编码）。
+
+    与前端 ui/api-adapter.js 的 encodeURIComponent 同口径；服务端
+    urllib.parse.parse_qs 会做解码，故端到端行为一致。
+    """
+    return f"{urllib.parse.quote(str(name), safe='')}={urllib.parse.quote(str(value), safe='')}"
 
 
 def read_text(p: Path, limit: int = 200000) -> str:
@@ -889,6 +917,31 @@ def case_u4(sb: Sandbox):
         unfilled_marker = ("待回看" in (delivery_text + report_text)) or bool(outcome_pending)
         check(before in (None, {}, []) or unfilled_marker,
               f"未回填时 DEC.outcome 应为空并标「待回看」，实际 outcome={before} 且未见「待回看」")
+        # ---- R4 严格段（回填前）：P3 未回填条目必须标「待回看」且 filled=0 筛得出 ----
+        # 在回填之前取样，才能真正验到「待回看」这条分支（回填后沙箱内已无待回看条目）。
+        sp0, bp0, tp0 = srv.get_json("/api/decisions")
+        check(sp0 == 200, f"回填前 GET /api/decisions 应 200，实际 {sp0}: {tail(tp0)}")
+        check(isinstance(bp0, dict) and isinstance(bp0.get("decisions"), list),
+              f"回填前 GET /api/decisions 形状不对：{tail(tp0)}")
+        rows0 = bp0.get("decisions") or []
+        mine0 = [r for r in rows0 if isinstance(r, dict) and r.get("task_id") == tid]
+        check(len(mine0) == 1,
+              f"回填前 P3 应含本单 1 条（task_id={tid}），实际 {len(mine0)} 条")
+        row0 = mine0[0]
+        check(str(row0.get("outcome_status") or "") == "待回看",
+              f"回填前 P3 本单应标「待回看」，实际 {row0.get('outcome_status')!r}")
+        check(row0.get("outcome_pending") is True,
+              f"回填前 P3 本单 outcome_pending 应为 true，实际 {row0.get('outcome_pending')!r}")
+        sf0, bf0, _ = srv.get_json("/api/decisions?filled=0")
+        check(sf0 == 200, f"回填前 GET /api/decisions?filled=0 应 200，实际 {sf0}")
+        ids0 = [r.get("task_id") for r in (bf0.get("decisions") or [])]
+        check(tid in ids0,
+              f"回填前筛选 filled=0（待回看）应含本单：{ids0}")
+        sf1, bf1, _ = srv.get_json("/api/decisions?filled=1")
+        check(sf1 == 200, f"回填前 GET /api/decisions?filled=1 应 200，实际 {sf1}")
+        ids1 = [r.get("task_id") for r in (bf1.get("decisions") or [])]
+        check(tid not in ids1,
+              f"回填前筛选 filled=1（已回看）不应含本单：{ids1}")
         observed = {
             "refill_rate_avg": 6.42,
             "refill_rate_target": 7.2,
@@ -937,20 +990,132 @@ def case_u4(sb: Sandbox):
         text_all = json.dumps(delivery2, ensure_ascii=False)
         if "1234.5" not in text_all and "1234.50" not in text_all:
             problems.append("delivery 未透出 increment_value=1234.5")
-        # P3 决策日志列表若存在，应能看到该决策的 outcome
-        p3_note = "P3 列表端点未实现"
-        for path in ("/api/decisions", "/api/decisions?limit=50", "/api/delivery-log"):
-            status3, body3, text3 = srv.get_json(path)
-            if status3 == 200:
-                p3_text = json.dumps(body3, ensure_ascii=False)
-                if tid in p3_text or str(dec2.get("decision_id")) in p3_text:
-                    if not ("observed" in p3_text or "increment" in p3_text):
-                        problems.append("P3 决策日志未透出 observed_outcome/increment_value")
-                    p3_note = f"P3 {path} 可见"
-                break
         check(not problems, "；".join(problems[:8]))
+
+        # ---- R4 严格段：P3 决策日志（跨任务时间线）必须实现且与 P2 自洽 ----
+        # 口径（设计文档 §3.5 U4 + §3.2 P3 规格）：
+        #   a) GET /api/decisions 必须 200 且含本单条目；
+        #   b) 回填后 P3 条目透出 observed_outcome / increment_value（与 P2 同值）；
+        #   c) 未回填的条目标「待回看」；本单回填后标「已回填」；
+        #   d) 筛选真实生效（filled=0/1、verdict、conclusion 关键词）；
+        #   e) 跨页自洽：P3 与 P2 的 increment_value / observed_outcome 一致。
+        s3, b3, t3 = srv.get_json("/api/decisions")
+        check(s3 == 200, f"GET /api/decisions 应 200（R4 未实现或路由未挂），实际 {s3}: {tail(t3)}")
+        check(isinstance(b3, dict) and isinstance(b3.get("decisions"), list),
+              f"GET /api/decisions 返回形状不对（缺 decisions 数组）: {tail(t3)}")
+        rows = b3.get("decisions") or []
+        mine = [r for r in rows if isinstance(r, dict) and r.get("task_id") == tid]
+        check(len(mine) == 1,
+              f"P3 时间线应恰好含本单 1 条（task_id={tid}），实际 {len(mine)} 条（共 {len(rows)} 条）")
+        row = mine[0]
+        dec_id = str(dec2.get("decision_id") or "")
+        check(dec_id and row.get("decision_id") == dec_id,
+              f"P3 与 P2 的 decision_id 不一致：P3={row.get('decision_id')!r} P2={dec_id!r}")
+        p3_out = row.get("outcome") if isinstance(row.get("outcome"), dict) else {}
+        check(bool(p3_out.get("observed_outcome")),
+              f"P3 未透出 observed_outcome（实际 {p3_out.get('observed_outcome')!r}）")
+        check(p3_out.get("increment_value") == 1234.5,
+              f"P3 未透出 increment_value=1234.5（实际 {p3_out.get('increment_value')!r}）")
+        check(str(row.get("outcome_status") or "") == "已回填",
+              f"P3 本单回填后应标「已回填」，实际 {row.get('outcome_status')!r}")
+        check(row.get("outcome_pending") is False,
+              f"P3 本单回填后 outcome_pending 应为 false，实际 {row.get('outcome_pending')!r}")
+        # 跨页自洽：P2 的 observed/increment 与 P3 同值
+        p2_inc = outcome.get("increment_value")
+        check(p3_out.get("increment_value") == p2_inc,
+              f"P2/P3 的 increment_value 不一致：P2={p2_inc!r} P3={p3_out.get('increment_value')!r}")
+        p2_observed = outcome.get("observed")
+        check(p3_out.get("observed_outcome") == p2_observed,
+              f"P2/P3 的 observed_outcome 不一致：P2={p2_observed!r} P3={p3_out.get('observed_outcome')!r}")
+        # 筛选真实生效：filled=0 不含本单、filled=1 含本单
+        s_f0, b_f0, _ = srv.get_json("/api/decisions?filled=0")
+        check(s_f0 == 200, f"GET /api/decisions?filled=0 应 200，实际 {s_f0}")
+        ids_f0 = [r.get("task_id") for r in (b_f0.get("decisions") or [])]
+        check(tid not in ids_f0,
+              f"筛选 filled=0（待回看）不应含已回填的本单：{ids_f0}")
+        s_f1, b_f1, _ = srv.get_json("/api/decisions?filled=1")
+        check(s_f1 == 200, f"GET /api/decisions?filled=1 应 200，实际 {s_f1}")
+        ids_f1 = [r.get("task_id") for r in (b_f1.get("decisions") or [])]
+        check(tid in ids_f1,
+              f"筛选 filled=1（已回填）应含本单：{ids_f1}")
+        # 筛选真实生效：verdict 维度
+        # 关键：沙箱内可能只有本单一条，正向断言（筛出来都同档）会空转；
+        # 必须用「不存在的档位 → 0 条」的反向断言才咬得住 no-op 变异。
+        verdict = str(row.get("verdict") or "")
+        check(bool(verdict), f"P3 条目缺 verdict 字段，无法验筛选：{row.get('verdict')!r}")
+        s_v, b_v, _ = srv.get_json(f"/api/decisions?{qs('verdict', verdict)}")
+        check(s_v == 200, f"GET /api/decisions?verdict={verdict} 应 200，实际 {s_v}")
+        vs = [(r.get("task_id"), r.get("verdict")) for r in (b_v.get("decisions") or [])]
+        check(all(v == verdict for _, v in vs),
+              f"筛选 verdict={verdict} 后混入了别的档位：{vs}")
+        check(any(t == tid for t, _ in vs),
+              f"筛选 verdict={verdict} 未命中本单：{vs}")
+        s_vx, b_vx, _ = srv.get_json(f"/api/decisions?{qs('verdict', '__不存在的档位__')}")
+        check(s_vx == 200, f"GET /api/decisions?verdict=<不存在> 应 200，实际 {s_vx}")
+        vxs = [r.get("task_id") for r in (b_vx.get("decisions") or [])]
+        check(not vxs,
+              f"筛选 verdict=<不存在的档位> 仍返回条目（筛选未生效）：{vxs}")
+        # 场景/实体维度同样用反向断言（正向断言在单条沙箱里会空转）
+        for dim, key in (("scene", "scene_id"), ("entity", "entity")):
+            val = str(row.get(key) or "")
+            if not val:
+                continue
+            s_d, b_d, _ = srv.get_json(f"/api/decisions?{qs(dim, val)}")
+            check(s_d == 200, f"GET /api/decisions?{dim}={val} 应 200，实际 {s_d}")
+            check(any(r.get("task_id") == tid for r in (b_d.get("decisions") or [])),
+                  f"筛选 {dim}={val!r} 未命中本单")
+            s_dx, b_dx, _ = srv.get_json(f"/api/decisions?{qs(dim, '__不存在的筛选值__')}")
+            check(s_dx == 200, f"GET /api/decisions?{dim}=<不存在> 应 200，实际 {s_dx}")
+            dxs = [r.get("task_id") for r in (b_dx.get("decisions") or [])]
+            check(not dxs,
+                  f"筛选 {dim}=<不存在的值> 仍返回条目（筛选未生效）：{dxs}")
+        # 筛选真实生效：conclusion 关键词（用本单结论里的因素名）
+        conclusion = str(row.get("conclusion") or "")
+        factor = conclusion.split("（")[0].split(" / ")[0].strip()
+        if factor:
+            s_c, b_c, _ = srv.get_json(f"/api/decisions?{qs('conclusion', factor)}")
+            check(s_c == 200, f"GET /api/decisions?conclusion={factor} 应 200，实际 {s_c}")
+            cs = [r.get("task_id") for r in (b_c.get("decisions") or [])]
+            check(tid in cs, f"筛选 conclusion={factor!r} 未命中本单：{cs}")
+            s_cx, b_cx, _ = srv.get_json(f"/api/decisions?{qs('conclusion', '__不存在的结论词__')}")
+            check(s_cx == 200, f"GET /api/decisions?conclusion=<不存在> 应 200，实际 {s_cx}")
+            cxs = [r.get("task_id") for r in (b_cx.get("decisions") or [])]
+            check(tid not in cxs,
+                  f"筛选 conclusion=<不存在的词> 仍命中本单（筛选未生效）：{cxs}")
+        # 未回填的决策标「待回看」：本单回填前另开一单来验
+        pending_note = ""
+        if any(r.get("outcome_pending") for r in rows if isinstance(r, dict)):
+            pend = [r for r in rows if isinstance(r, dict) and r.get("outcome_pending")][0]
+            check(str(pend.get("outcome_status") or "") == "待回看",
+                  f"未回填条目应标「待回看」，实际 {pend.get('outcome_status')!r}")
+            pending_note = f"待回看 {len(pend.get('outcome_status') or '')} 条已验"
+        else:
+            pending_note = "回填后本单标「已回填」，「待回看」已在回填前取样段严格验证"
+        # 跨页渲染自洽（浏览器实测抓到过真缺陷）：回填值按契约允许是 dict，
+        # P2 若直接 String(obj) 会渲染成 [object Object]，与 P3 的 JSON 不一致。
+        # 口径：P2 与 P3 必须都走同一个取值器 deskOutcomeText（断言只收紧不放宽）。
+        ui_html = read_text(sb.repo / "ui" / "index.html")
+        check("deskOutcomeText(outcome.observed_outcome)" in ui_html,
+              "P2 未用 deskOutcomeText 渲染 observed_outcome（dict 会被渲染成 [object Object]）")
+        check("deskOutcomeText(out.observed_outcome)" in ui_html,
+              "P3 未用 deskOutcomeText 渲染 observed_outcome（与 P2 口径不一致）")
+        check("deskEsc(outcome.observed_outcome" not in ui_html,
+              "P2 仍直接 deskEsc(outcome.observed_outcome)（dict → [object Object]）")
+        # P0↔P1 任务锚点自洽（浏览器实测抓到过真缺陷）：P0 卡显示「最近决策」（spec.latest），
+        # 而 P1 读工作台当前任务；同一场景多单时两端会显示不同数字（实测 4.8% vs 7.2%）。
+        # 裁定：点卡片即把当前任务切到该场景最近一单（与 P3「打开决策卡」同机制）。
+        _oc = ui_html.split("function openScene(", 1)
+        check(len(_oc) == 2, "ui/index.html 缺少 openScene（P0 场景卡点击入口）")
+        _oc_body = _oc[1].split("function renderP1(", 1)[0] if len(_oc) == 2 else ""
+        # 只查关键字会被「if (false && ...)」这种死分支变异逃逸（实测已逃逸过一次），
+        # 故锁死守卫形态本身：必须是活的 if + 真实调用，不接受被短路或被常量门禁。
+        check("if (latestId && adapter && adapter.selectTask && latestId !== curId) {" in _oc_body,
+              "openScene 的「切最近一单」守卫被改（死分支/常量门禁），P0 卡与 P1 会显示不同任务的数字")
+        check("adapter.selectTask(latestId)" in _oc_body,
+              "openScene 未真正调用 adapter.selectTask(latestId)（P0→P1 任务锚点未同步）")
         return (f"回填后 DEC.outcome.observed 非空、actual_action={outcome.get('actual_action')}、"
-                f"increment_value={inc}；{p3_note}")
+                f"increment_value={inc}；P3 /api/decisions 200 且本单自洽（decision_id={dec_id}、"
+                f"observed/increment 与 P2 同值）；筛选 filled/verdict/conclusion 均生效；{pending_note}")
 
 
 def case_u5(sb: Sandbox):
@@ -1101,34 +1266,57 @@ def case_u7(sb: Sandbox):
                 spec = load_json(FIX / name)
                 if spec.get("scene_id") in sids:
                     problems.append(f"{name}: 非法 spec 混入 /api/scenes 列表")
-        # 生成模式（body 无 spec）：合法输入 -> preset 命中 / cannot_derive / user_prompt 501
-        gen_requests = [
-            {"metric_id": "refill_rate", "data_ref": "demo/material_refill_T.json"},
-            {"prompt": "帮我盯一下 B 线补料率"},
-        ]
+        # 生成模式（body 无 spec）：discovered 通道必须真的派生成功（200 + scene_id）。
+        # 收紧依据：R1 修复前 server 用「乱试三种签名」掩盖 core.scene.discover 签名不符，
+        # U7 又把 cannot_derive 记成合法通过 → 绿测说通过、实际 discovered 全坏（公理 5）。
+        # 现在 discovered 必须 200 且带 scene_id；cannot_derive 一律计入 problems。
         gen_notes = []
-        for payload in gen_requests:
-            st, resp, txt = srv.post("/api/scenes/derive", payload)
-            if st in (404, 405):
-                not_ready(f"POST /api/scenes/derive 未实现 HTTP {st}: {tail(txt)}")
-            tag = payload.get("metric_id") or payload.get("prompt")
-            if st >= 500 and st != 501:
-                problems.append(f"生成模式 {tag} 异常 HTTP {st}: {tail(txt, 200)}")
-            elif st == 501:
-                gen_notes.append(f"{tag}->501(user_prompt 未接 LLM，契约允许)")
-            elif st in (200, 201) and not _is_rejection(resp):
-                scene_id = resp.get("scene_id") if isinstance(resp, dict) else None
-                if not scene_id and isinstance(resp, dict):
-                    scene_id = dig(resp, "scene.scene_id") or dig(resp, "spec.scene_id")
-                if not scene_id:
-                    problems.append(
-                        f"生成模式 {tag} 200 但未命中 preset/scene_id: {tail(txt, 200)}")
-                else:
-                    gen_notes.append(f"{tag}->200 {scene_id}")
-            elif st in (400, 422) or _is_rejection(resp):
-                gen_notes.append(f"{tag}->{st} cannot_derive")
+        st_d, resp_d, txt_d = srv.post(
+            "/api/scenes/derive",
+            {"metric_id": "refill_rate", "data_ref": "demo/material_refill_T.json"})
+        if st_d in (404, 405):
+            not_ready(f"POST /api/scenes/derive 未实现 HTTP {st_d}: {tail(txt_d)}")
+        if st_d >= 500:
+            problems.append(f"discovered 通道异常 HTTP {st_d}: {tail(txt_d, 200)}")
+        elif st_d not in (200, 201):
+            problems.append(f"discovered 通道应 200，实际 HTTP {st_d}: {tail(txt_d, 200)}")
+        else:
+            scene_id = resp_d.get("scene_id") if isinstance(resp_d, dict) else None
+            if not scene_id and isinstance(resp_d, dict):
+                scene_id = dig(resp_d, "scene.scene_id") or dig(resp_d, "spec.scene_id")
+            if not scene_id:
+                problems.append(
+                    f"discovered 通道 200 但无 scene_id（cannot_derive 计入失败）: {tail(txt_d, 200)}")
+            elif isinstance(resp_d, dict) and resp_d.get("channel") != "discovered":
+                problems.append(
+                    f"discovered 通道 channel 应为 discovered，实际 {resp_d.get('channel')!r}")
             else:
-                problems.append(f"生成模式 {tag} 未知响应 HTTP {st}: {tail(txt, 200)}")
+                gen_notes.append(f"discovered->200 {scene_id}")
+        # 负例：data_ref 指向不存在的文件 -> 200 + cannot_derive（人话原因），不得 500
+        st_n, resp_n, txt_n = srv.post(
+            "/api/scenes/derive", {"data_ref": "demo/__not_exist__.json"})
+        if st_n in (404, 405):
+            not_ready(f"POST /api/scenes/derive 未实现 HTTP {st_n}: {tail(txt_n)}")
+        if st_n >= 500:
+            problems.append(f"不存在的数据文件不得 500，实际 HTTP {st_n}: {tail(txt_n, 200)}")
+        elif st_n not in (200, 201) or not _is_rejection(resp_n):
+            problems.append(
+                f"不存在的数据文件应 200 + cannot_derive，实际 HTTP {st_n}: {tail(txt_n, 200)}")
+        else:
+            gen_notes.append(f"不存在文件->{st_n} cannot_derive")
+        # user_prompt 通道：契约允许 501（T0 server 内不调 LLM，由 M2 DSH s0_scene 承接）
+        st_p, resp_p, txt_p = srv.post(
+            "/api/scenes/derive", {"prompt": "帮我盯一下 B 线补料率"})
+        if st_p in (404, 405):
+            not_ready(f"POST /api/scenes/derive 未实现 HTTP {st_p}: {tail(txt_p)}")
+        if st_p >= 500 and st_p != 501:
+            problems.append(f"user_prompt 异常 HTTP {st_p}: {tail(txt_p, 200)}")
+        elif st_p == 501:
+            gen_notes.append("user_prompt->501(user_prompt 未接 LLM，契约允许)")
+        elif st_p in (200, 201) and not _is_rejection(resp_p):
+            gen_notes.append(f"user_prompt->{st_p} 200")
+        else:
+            gen_notes.append(f"user_prompt->{st_p} cannot_derive")
         check(not problems, "；".join(problems[:10]))
         return (f"校验模式 6 类非法全拒 status={statuses}，合法正控通过；"
                 f"生成模式 {gen_notes}")
