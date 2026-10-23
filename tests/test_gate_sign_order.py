@@ -28,14 +28,33 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_VENV_PY = Path(r"D:\work\产品类\个人产品\bot-2\venv\Scripts\python.exe")
 IGNORE_COPY = shutil.ignore_patterns("runs", "__pycache__", "*.pyc", ".git", ".pytest_cache")
 SIGNER = "老板"
 WORKFLOW_RESULT = "demo-result-2026-10-19.json"
 DEMO_FILES = ("material_refill_T.json", "material_refill_T30.json")
 
 
+def _default_venv_py() -> Path:
+    """子进程解释器：仓库同级 venv（bot-2/venv）→ 仓内 venv → 当前解释器。
+
+    不写死某台机器的绝对路径；确需指定时用环境变量 BOT_PY（优先）。
+    """
+    for rel in ("venv/Scripts/python.exe", ".venv/Scripts/python.exe",
+                "venv/bin/python", ".venv/bin/python"):
+        cand = ROOT.parent / rel
+        if cand.is_file():
+            return cand
+    return Path(sys.executable)
+
+
+DEFAULT_VENV_PY = _default_venv_py()
+
+
 def pick_python():
+    for key in ("BOT_PY",):
+        val = os.environ.get(key)
+        if val and Path(val).is_file():
+            return val
     if DEFAULT_VENV_PY.is_file():
         return str(DEFAULT_VENV_PY)
     return sys.executable

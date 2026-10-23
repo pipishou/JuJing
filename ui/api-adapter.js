@@ -6,7 +6,8 @@
  *   3. 多任务：GET /api/tasks 列表 + selectTask(id)；舞台/交付卡/KPI/本场数据全部跟随当前任务。
  *   4. 事件流：GET /api/tasks/<id>/events?stream=1（EventSource，since 续传、断线重连）；
  *      失败回退 /log?after=n 轮询；再失败回退静态 demo（index.html 自带）。
- *   5. 写操作：POST /api/tasks（可带 data_files）、/data、/run(带 runner)、/sign、/gate、/finalize。
+ *   5. 写操作：POST /api/tasks（可带 data_files）、/data、/run(带 runner)、/sign、/gate、/finalize、
+ *      /outcome（T+7 回填）、/api/scenes/derive（场景派生：spec 校验模式 / metric_id+data_ref 生成模式）。
  *
  * 设计约束：本文件不直接改 DOM（渲染留在 index.html 的 hooks），避免与动画互踩；
  *           任何 fetch/EventSource 失败都不得打断页面（file:// 打开时必须还能看静态演示）。
@@ -69,11 +70,19 @@
     lastUpload: null,
     // B15：场景台（SceneSpec v1，来自 /api/scenes；前端只认 schema，不写场景常量）
     scenes: [],
+    // 本次会话里由 POST /api/scenes/derive 派生出来的场景（服务端不落盘，
+    // 所以刷新 /api/scenes 后要保留，否则 P0 会把派生结果冲掉）
+    derivedScenes: [],
     sceneMeta: null,
     sceneId: null,
     scene: null,
     sceneError: null,
     sceneParam: null,
+    // R4：P3 决策日志（跨任务时间线，来自 GET /api/decisions）
+    decisions: [],
+    decisionFacets: { scenes: [], entities: [], verdicts: [] },
+    decisionMeta: { total: 0, matched: 0, generated_at: '' },
+    decisionError: null,
     hooks: {},
     timer: null,
     taskTimer: null,
@@ -690,10 +699,28 @@
     };
   }
 
+  function mergeScenes(base, extra) {
+    var list = (base || []).slice();
+    (extra || []).forEach(function (item) {
+      if (!item || !item.scene_id) return;
+      var hit = false;
+      list.forEach(function (one) { if (one && one.scene_id === item.scene_id) hit = true; });
+      if (!hit) list.push(item);
+    });
+    return list;
+  }
+
+  function rememberDerived(spec) {
+    if (!spec || !spec.scene_id) return;
+    var hit = state.derivedScenes.filter(function (item) { return item && item.scene_id === spec.scene_id; })[0];
+    if (hit) { Object.keys(spec).forEach(function (key) { hit[key] = spec[key]; }); return; }
+    state.derivedScenes = state.derivedScenes.concat([spec]);
+  }
+
   function loadScenes() {
     return requestJSON('/api/scenes').then(function (payload) {
       var parsed = sceneListPayload(payload);
-      state.scenes = parsed.scenes;
+      state.scenes = mergeScenes(parsed.scenes, state.derivedScenes);
       state.sceneMeta = parsed.meta;
       state.sceneError = parsed.errors.length ? parsed.errors.join('；') : null;
       var wanted = state.sceneParam || state.sceneId;
@@ -763,6 +790,7 @@
         return item;
       });
       if (!replaced) state.scenes = state.scenes.concat([spec]);
+      rememberDerived(spec);
       if (state.hooks.onScenes) state.hooks.onScenes(state.scenes, state.sceneMeta, state.sceneError);
       selectScene(spec.scene_id);
       return spec;
@@ -920,6 +948,89 @@
     });
   }
 
+  // T+7 回填：只认 server/app.py 的 OUTCOME_FIELDS 六个字段，多传一律 400。
+  var OUTCOME_FIELDS = ['observed_outcome', 'actual_action', 'override_reason',
+                        'action_cost', 'increment_value', 'outcome_window'];
+
+  function outcomeValue(value) {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== 'string') return value;
+    var text = value.trim();
+    if (!text) return undefined;
+    if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
+    if (text.charAt(0) === '{' || text.charAt(0) === '[') {
+      try {
+        var parsed = JSON.parse(text);
+        if (parsed && typeof parsed === 'object') return parsed;
+      } catch (err) { /* 非法 JSON：原样上送，由服务端给可读错误 */ }
+    }
+    return text;
+  }
+
+  function postOutcome(taskId, payload) {
+    var id = requireTaskId(taskId);
+    var source = payload || {};
+    var body = {};
+    OUTCOME_FIELDS.forEach(function (key) {
+      var value = outcomeValue(source[key]);
+      if (value === undefined) return;
+      if (key === 'outcome_window' && /^\d{1,4}$/.test(String(value))) value = String(value) + 'd';
+      body[key] = value;
+    });
+    if (body.observed_outcome === undefined) throw new Error('observed_outcome 必填（T+7 实测值/描述）');
+    return postJSON('/api/tasks/' + encodeURIComponent(id) + '/outcome', body).then(function (result) {
+      return refreshAll().then(function () { return result; });
+    });
+  }
+
+  // ------------------------------------------------------------ decisions --
+  // R4：P3 决策日志（跨任务时间线）。
+  // GET /api/decisions?scene=&entity=&verdict=&conclusion=&overridden=&filled=&limit=
+  //   -> {ok, count, total, matched, decisions:[...], facets:{scenes,entities,verdicts}}
+  // 只读端点：服务端扫 runs/*/report.json + outcome.json，前端不另建事实源。
+  function decisionListPayload(payload) {
+    var body = payload || {};
+    var rows = Array.isArray(body.decisions) ? body.decisions.slice() : [];
+    var facets = body.facets && typeof body.facets === 'object' ? body.facets : {};
+    return {
+      decisions: rows,
+      facets: {
+        scenes: Array.isArray(facets.scenes) ? facets.scenes.slice() : [],
+        entities: Array.isArray(facets.entities) ? facets.entities.slice() : [],
+        verdicts: Array.isArray(facets.verdicts) ? facets.verdicts.slice() : []
+      },
+      total: typeof body.total === 'number' ? body.total : rows.length,
+      matched: typeof body.matched === 'number' ? body.matched : rows.length,
+      generated_at: body.generated_at || ''
+    };
+  }
+
+  function listDecisions(filters) {
+    var f = filters || {};
+    var query = [];
+    ['scene', 'entity', 'verdict', 'conclusion', 'overridden', 'filled', 'limit'].forEach(function (key) {
+      var value = f[key];
+      if (value === undefined || value === null || value === '') return;
+      query.push(encodeURIComponent(key) + '=' + encodeURIComponent(String(value)));
+    });
+    var path = '/api/decisions' + (query.length ? ('?' + query.join('&')) : '');
+    return requestJSON(path).then(function (payload) {
+      var parsed = decisionListPayload(payload);
+      state.decisions = parsed.decisions;
+      state.decisionFacets = parsed.facets;
+      state.decisionMeta = { total: parsed.total, matched: parsed.matched, generated_at: parsed.generated_at };
+      if (state.hooks.onDecisions) state.hooks.onDecisions(state.decisions, state.decisionFacets, state.decisionMeta);
+      return state.decisions;
+    }).catch(function (error) {
+      state.decisions = [];
+      state.decisionFacets = { scenes: [], entities: [], verdicts: [] };
+      state.decisionMeta = { total: 0, matched: 0, generated_at: '' };
+      state.decisionError = error && error.message ? error.message : String(error);
+      if (state.hooks.onDecisions) state.hooks.onDecisions([], state.decisionFacets, state.decisionMeta);
+      return [];
+    });
+  }
+
   function currentCrewForUi() {
     var task = (state.model && state.model.task) || (state.detail && state.detail.task) || null;
     return currentCrew(task);
@@ -950,6 +1061,10 @@
     sign: sign,
     gate: gate,
     finalize: finalize,
+    postOutcome: postOutcome,
+    listDecisions: listDecisions,
+    decisions: function () { return state.decisions.slice(); },
+    decisionFacets: function () { return state.decisionFacets; },
     isLive: function () { return state.live; },
     currentTaskId: function () { return state.currentTaskId; },
     currentDetail: function () { return state.detail; },
