@@ -19,7 +19,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-CORE = ["refill_rate", "mold_status", "maintenance_records"]
+DEFAULT_CORE = ["refill_rate", "mold_status", "maintenance_records"]
 
 
 def load(p):
@@ -40,9 +40,20 @@ def main():
     ap.add_argument("--t", required=True)
     ap.add_argument("--t30", default="")
     ap.add_argument("--strict", action="store_true")
+    ap.add_argument("--factors-yaml", default=str(ROOT / "assets/factors_table.yaml"),
+                    help="因素表 YAML（factors 列表；core 键可覆盖核心三项默认值）")
     args = ap.parse_args()
 
-    factors = (yaml.safe_load((ROOT / "assets/factors_table.yaml").read_text(encoding="utf-8-sig")) or {}).get("factors") or []
+    fdoc = yaml.safe_load(Path(args.factors_yaml).read_text(encoding="utf-8-sig")) or {}
+    factors = fdoc.get("factors") or []
+    if not factors:
+        print(json.dumps({"ok": False, "error": f"因素表无 factors: {args.factors_yaml}"},
+                         ensure_ascii=False))
+        return 2
+    # 核心三项可被因素表 core: 键覆盖（如巡检场景）；无条件绑定避免 UnboundLocalError
+    core_override = fdoc.get("core")
+    CORE = ([str(c) for c in core_override]
+            if isinstance(core_override, list) and core_override else list(DEFAULT_CORE))
     ids = [f["id"] for f in factors]
     t = load(args.t)
     recs = t.get("records") or []
@@ -75,7 +86,8 @@ def main():
             dates.append(datetime.strptime(str(raw), "%Y-%m-%d").date())
         except Exception:
             value_errors.append(f"record[{i}] date 非法: {raw}")
-        if not str(r.get("production_line", "")).strip():
+        # 键存在但为空才违规：聚合类数据集（如巡检日聚合）无产线概念，缺键不算违规
+        if "production_line" in r and not str(r.get("production_line") or "").strip():
             value_errors.append(f"record[{i}] production_line 为空")
         for key, lo, hi in (("refill_rate", 0.0, 100.0), ("output_volume", 0.0, None)):
             if r.get(key) is None:

@@ -1,0 +1,86 @@
+# 塑胶品质巡检归因因素表（封闭世界 10 因素）
+# 来源：真实数据源 D:\work\文档类\塑胶厂\塑胶数据\塑胶运营数据\巡检数据\output\巡检数据源.xlsx
+#       （sheet「巡检明细」426 行 × 15 列，2026-09-17 ~ 2026-10-19，27 个业务日）
+# 用途：AI 归因专家封闭世界边界 + check_data_contract.py --factors-yaml 因素可得性检查
+# 纪律：表外因素一律不进入 finding，只可进 cannot_attribute（残差）
+# 口径：时间轴为「业务日」（数据源自带业务日列，按 08:00 切日，见源表「字段说明」sheet）；
+#       记录为事件级缺陷台账按业务日聚合后的日级统计。
+
+version: "1.0"
+domain: 塑胶品质巡检异常归因
+axes:
+  - id: date
+    name: 业务日
+    note: 时间轴索引维度（08:00 切日），不参与归因枚举计数，仅作 T vs 基线对齐
+core:  # 核心因素：整列缺失即触发 manual 降级（覆盖检查器默认 refill 三项）
+  - inspection_count
+  - machine_active_count
+  - defect_type_count
+factors:  # 10 类因素（业务日为轴不计入）
+  - id: inspection_count
+    name: 巡检记录数
+    data_source: 品质巡检明细台账（日聚合计数）
+    availability: available
+    prior_weight: 0.00
+    note: 目标指标本身（被解释变量），非候选因素；日记录条数的异常波动即待归因对象
+  - id: return_count
+    name: 退货事件数
+    data_source: 巡检明细「是否退货」字段（值含「退」或为「是」判定；实测值域 {空,否,是}）
+    availability: partial
+    prior_weight: 0.15
+    note: 质量后果的最重级信号；源数据该字段缺失 70.4%，只能做描述性对比，不做 σ 判定
+  - id: return_rate
+    name: 退货记录占比
+    data_source: 由 return_count / inspection_count 派生
+    availability: partial
+    prior_weight: 0.10
+    note: 分母含「是否退货」缺失记录，缺失偏多时比率被稀释；仅描述性
+  - id: machine_active_count
+    name: 涉事机台数
+    data_source: 巡检明细「机台号」去重计数（日聚合）
+    availability: available
+    prior_weight: 0.15
+    note: 异常扩散面指标；单日骤增提示跨机台共性原因（原料/工艺/环境），不增则指向个别机台
+  - id: product_active_count
+    name: 涉事产品型号数
+    data_source: 巡检明细「产品型号」去重计数（日聚合）
+    availability: available
+    prior_weight: 0.10
+    note: 型号聚集提示换型/模具/工艺参数切换因素
+  - id: defect_type_count
+    name: 问题类型数
+    data_source: 巡检明细「问题类型」去重计数（日聚合）
+    availability: partial
+    prior_weight: 0.10
+    note: 源数据该字段缺失 23.5%，去重计数为下界；类型扩散提示系统性原因
+  - id: top_machine_share
+    name: 单机台最大占比
+    data_source: 当日记录中单一机台最大计数 / 当日记录数
+    availability: available
+    prior_weight: 0.15
+    note: 机台聚集度；持续偏高锁定个别机台（模具磨损/设备劣化方向）
+  - id: top_defect_type_share
+    name: 单一类型最大占比
+    data_source: 当日记录中单一问题类型最大计数 / 当日记录数（缺失记录计入分母）
+    availability: partial
+    prior_weight: 0.10
+    note: 缺陷类型聚集度；缺失 23.5% 使其为下界
+  - id: photo_evidence_rate
+    name: 照片留证率
+    data_source: 巡检明细「照片数」>0 的记录占比
+    availability: available
+    prior_weight: 0.05
+    note: 证据链质量指标；偏低影响归因证据可信度，影响 data_completeness 评分
+  - id: inspector_count
+    name: 在岗 IPQC 数
+    data_source: 巡检明细「IPQC人员」去重计数（日聚合）
+    availability: available
+    prior_weight: 0.10
+    note: 口径/覆盖因素——巡检人数变化直接改变日记录数口径（人少→记录少），归因时先校准
+null_rate_threshold: 0.10
+notes: >-
+  本表为巡检场景封闭世界：原始事件级字段的空值（问题类型 23.5%、是否退货 70.4%、
+  机台号 1.4%、缺陷描述 1.6% 等）在聚合前披露于数据文件 meta.null_disclosure，
+  不进入日级聚合记录的空值统计。prior_weight 合计 1.00（inspection_count 为目标
+  指标记 0）。基线窗口实际为 20 个业务日（2026-09-17~10-11，源数据仅 27 个业务日，
+  不足名义 T30+T7=37 天），归因时 history 维评分须如实下压。
