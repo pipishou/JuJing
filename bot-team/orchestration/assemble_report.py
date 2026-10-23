@@ -236,8 +236,10 @@ def main():
     except pack_mod.PackError as exc:
         return fail(str(exc))
     th = pack_doc["thresholds"]
-    baseline = th["refill_baseline_pct"]
-    target = th["refill_target_pct"]
+    # 非「补料率」场景的行业包（如巡检聚合）这两键为 null：real 模式下 context/expected
+    # 必传（257-262 校验），缺省 f-string 不会求值，故这里只取键不求数值。
+    baseline = th.get("refill_baseline_pct")
+    target = th.get("refill_target_pct")
 
     # 2) 读 workflow result
     src = Path(args.src)

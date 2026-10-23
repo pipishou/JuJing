@@ -118,6 +118,8 @@ def main():
     ap.add_argument("--cost-json", default="")
     ap.add_argument("--signer", default="")
     ap.add_argument("--pack-path", default="")
+    ap.add_argument("--contract-factors-yaml", default="",
+                    help="数据合同检查用的因素表 YAML（透传 check_data_contract --factors-yaml）")
     ap.add_argument("--demo", action="store_true", help="组装 demo 报告（is_demo=true，跳过 require-real）")
     ap.add_argument("--allow-signers", default="")
     ap.add_argument("--defer-sign", action="store_true",
@@ -264,6 +266,8 @@ def main():
             ccmd = [PY, str(ROOT / "tools" / "check_data_contract.py"), "--t", str(t_file), "--strict"]
             if t30_file:
                 ccmd += ["--t30", str(t30_file)]
+            if args.contract_factors_yaml:
+                ccmd += ["--factors-yaml", args.contract_factors_yaml]
             ok, out = run_step(outdir, "s2", "data-fetcher", ccmd)
             contract = extract_json_object(out)
             if isinstance(contract, dict):
@@ -324,8 +328,10 @@ def main():
             raise RuntimeError("报告契约校验未通过（validate_report）：\n" + out[-2000:])
 
         # ---- 7) 100 分制交叉核对：score_scorecard 独立调用必须给出同一 total/verdict ----
-        ok, out = run_step(outdir, "gate", "compliance-reviewer",
-                           [PY, str(ROOT / "tools" / "score_scorecard.py"), "--from-report", str(outdir / "report.json")])
+        scmd = [PY, str(ROOT / "tools" / "score_scorecard.py"), "--from-report", str(outdir / "report.json")]
+        if args.pack_path:
+            scmd += ["--pack-path", args.pack_path]
+        ok, out = run_step(outdir, "gate", "compliance-reviewer", scmd)
         if not ok:
             raise RuntimeError("score_scorecard 独立调用失败：\n" + out[-1500:])
         try:

@@ -1,0 +1,127 @@
+{
+  "pack_id": "quality_inspection",
+  "version": "1.0.0",
+  "industry": "塑胶品质巡检",
+  "thresholds": {
+    "refill_baseline_pct": null,
+    "refill_target_pct": null,
+    "cell_null_rate_manual": 0.10,
+    "t30_window_days": 20
+  },
+  "roi_anchors": {
+    "overtime_clean": 1200,
+    "mold_change": 800,
+    "maintenance": 500
+  },
+  "irreversible_actions": [
+    "conditional_mold_change",
+    "line_stop",
+    "mold_change"
+  ],
+  "irreversible_keywords": [
+    "停线",
+    "line_stop",
+    "换模",
+    "conditional_mold_change"
+  ],
+  "six_dims": [
+    "data_completeness",
+    "timeliness",
+    "significance",
+    "exclusivity",
+    "history",
+    "human_ai_consistency"
+  ],
+  "crew_id": "c-quality-inspection",
+  "scorecard_hard_guardrails": [
+    {
+      "id": "human_ai_conflict",
+      "dim": "human_ai_consistency",
+      "op": "==",
+      "value": 0,
+      "action": "force_manual_review",
+      "note": "信息员反馈与 AI 归因矛盾"
+    },
+    {
+      "id": "too_many_hypotheses",
+      "dim": "exclusivity",
+      "op": "<=",
+      "value": 10,
+      "action": "force_manual_review",
+      "note": "≥3 个竞争假设（排他性展示分 ≤10）"
+    },
+    {
+      "id": "data_gap",
+      "dim": "data_completeness",
+      "op": "<=",
+      "value": 15,
+      "action": "force_manual_review",
+      "note": "≥3 个关键字段缺失（完整性展示分 ≤15）"
+    }
+  ],
+  "thresholds_note": "refill 两键与巡检场景无关，置 null 诚实声明（REQUIRED_THRESHOLDS 仅查键存在）；t30_window_days=20 对齐实际基线业务日数（源数据仅 27 个业务日，不足名义 30+7）",
+  "factors_version": 1,
+  "factors": [
+    "inspection_count",
+    "return_count",
+    "return_rate",
+    "machine_active_count",
+    "product_active_count",
+    "defect_type_count",
+    "top_machine_share",
+    "top_defect_type_share",
+    "photo_evidence_rate",
+    "inspector_count"
+  ],
+  "metrics": [
+    {
+      "id": "inspection_count",
+      "name": "巡检记录数",
+      "unit": "条/业务日",
+      "grain": "business_day(08:00 切日)",
+      "direction": "higher_worse",
+      "field": "inspection_count",
+      "control_line_methods": [
+        "mean_2sigma"
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "id": "maintenance",
+      "label": "机台专项点检保养",
+      "cost_anchor_key": "maintenance",
+      "reversible": true
+    },
+    {
+      "id": "mold_change",
+      "label": "换模",
+      "cost_anchor_key": "mold_change",
+      "reversible": false
+    },
+    {
+      "id": "conditional_mold_change",
+      "label": "条件换模",
+      "cost_anchor_key": "mold_change",
+      "reversible": false
+    },
+    {
+      "id": "line_stop",
+      "label": "停线排查",
+      "cost_anchor_key": "overtime_clean",
+      "reversible": false
+    },
+    {
+      "id": "data_rerun",
+      "label": "补数据后重跑归因",
+      "cost_anchor_key": "maintenance",
+      "reversible": true
+    }
+  ],
+  "scene_guardrails": {
+    "max_per_month": 3,
+    "hard_rules": [
+      "irreversible_requires_security_gate"
+    ]
+  }
+}
