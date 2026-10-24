@@ -1484,8 +1484,51 @@ def decisions_view(cfg, query):
     }
 
 
+def reconcile_sign_state(cfg, tdir):
+    """按产物推导签字终态（与 run_task_thread「按产物推导终态」同一兜底血脉）。
+
+    适用：直接跑 CLI 收口（finalize_delivery.py 早于状态同步补丁）绕过 server，
+    签名/决策卡均已落盘但 status.json 停在 awaiting_sign。判据对齐 check_finalize
+    的只读子集：签名指纹与现报告一致 + signer 非空 + task_id 一致 +
+    存在 approved 决策卡（loop/ 优先，其次 run 根）。满足即把状态推导为
+    signed/finalized（写 status.json，带 reconciled 标记）；任何一条不满足都不动。
+    """
+    status = read_status(tdir)
+    if str(status.get("state") or "") == "signed":
+        return status
+    report = read_json(tdir / "report.json")
+    if not isinstance(report, dict):
+        return status
+    sig = signature_doc(tdir)
+    if not isinstance(sig, dict) or not sig.get("report_sha256") or not str(sig.get("signer") or "").strip():
+        return status
+    report_file = tdir / "report.json"
+    try:
+        if sha256_file(report_file) != sig.get("report_sha256"):
+            return status
+    except OSError:
+        return status
+    if sig.get("task_id") and report.get("task_id") and sig.get("task_id") != report.get("task_id"):
+        return status
+    approved = None
+    for dpath in (tdir / "loop" / "decision.json", tdir / "decision.json"):
+        dec = read_json(dpath)
+        if isinstance(dec, dict) and str(dec.get("status") or "") == "approved":
+            if dec.get("task_id") and report.get("task_id") and dec.get("task_id") != report.get("task_id"):
+                continue
+            approved = dec
+            break
+    if approved is None:
+        return status
+    with cfg.task_lock(tdir.name):
+        return write_status(tdir, state="signed", step="finalized",
+                            decision_status=approved.get("status"),
+                            approval=approved.get("approval"), reconciled=True)
+
+
 def get_task(cfg, task_id):
     tdir = task_dir(cfg, task_id)
+    reconcile_sign_state(cfg, tdir)
     gate = read_json(tdir / GATE_FILE)
     scene_doc = read_json(tdir / "scene.json") if (tdir / "scene.json").is_file() else None
     report = read_json(tdir / "report.json")

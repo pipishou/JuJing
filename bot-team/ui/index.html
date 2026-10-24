@@ -499,7 +499,7 @@
       <a href="#" class="on"><span class="ico">◈</span>舞台实况<span class="badge">LIVE</span></a>
       <a href="#shelf"><span class="ico">☰</span>员工货架<span class="badge" id="navShelf">7</span></a>
       <a href="#crew"><span class="ico">⌘</span>班组编排<span class="badge">4</span></a>
-      <a href="#paper"><span class="ico">▤</span>交付卡<span class="badge">待签</span></a>
+      <a href="#paper"><span class="ico">▤</span>交付卡<span class="badge" id="navPaperBadge">待签</span></a>
       <a href="#wall"><span class="ico">▥</span>交付墙</a>
     </nav>
     <div class="card">
@@ -1836,6 +1836,7 @@
     setText('paperTitle', title);
     setText('paperSub', (log.id || 'DL-—') + ' · ' + (report.generated_at || '—') + ' · ' + ((model.task && model.task.line) ? model.task.line + ' 线' : '—'));
     setText('paperPill', sig ? '已签' : (model.isDemo ? 'DEMO' : '待签'));
+    setText('navPaperBadge', sig ? '已签' : (model.isDemo ? 'DEMO' : '待签'));
     setText('paperRt', model.title || '—');
     const meta = $('paperMeta');
     if (meta) meta.innerHTML = '<span>报告编号 ' + esc(log.id) + '</span><span>数据：' + esc((model.refs || []).length ? ((model.refs || []).length + ' 份带 sha256') : '—') + '</span><span>置信：' + esc(verdictText(score.verdict)) + (score.total != null ? ' · ' + score.total + '/100' : '') + '</span>';

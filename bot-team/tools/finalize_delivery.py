@@ -37,6 +37,7 @@ import hashlib
 import json
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -262,6 +263,25 @@ def main():
     dec["signature_sha256"] = actual
     dec["signature_file"] = str(args.signature)
     fsutil.atomic_write_json(dpath, dec)
+
+    # 状态同步（c2 修复）：收口成功即把 status.json 推到 signed/finalized，
+    # 与 server post_finalize 的落点同语义；任务目录＝报告所在目录。
+    # 只在 status.json 已存在时更新（生产任务由 run_task.py 预写；测试临时目录无此文件则跳过）。
+    status_file = Path(args.report).parent / "status.json"
+    if status_file.is_file():
+        try:
+            sdoc = json.loads(status_file.read_text(encoding="utf-8-sig"))
+        except Exception:  # noqa: BLE001 - status.json 损坏不阻断收口，仅重置为最小骨架
+            sdoc = {}
+        if not isinstance(sdoc, dict):
+            sdoc = {}
+        sdoc["state"] = "signed"
+        sdoc["step"] = "finalized"
+        sdoc["decision_status"] = dec.get("status")
+        sdoc["approval"] = dec.get("approval")
+        sdoc["updated_at"] = datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
+        fsutil.atomic_write_json(status_file, sdoc)
+
     print(json.dumps({"ok": True, "decision": dec.get("id"), "status": "approved",
                       "signer": sig.get("signer"), "signature_sha256": actual},
                      ensure_ascii=False, indent=2))
