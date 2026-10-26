@@ -365,9 +365,157 @@
     .dec-card{box-shadow:none;border:none;max-width:none;padding:0}
   }
 </style>
+<style id="redesign">
+  /* ============ 统一主入口 · 设计层（最后加载，只做覆盖，不改旧规则语义） ============ */
+  :root{
+    --canvas:#F4F5F2; --paper:#FFFFFF; --card:#FFFFFF;
+    --ink:#101417; --muted:#4A5257; --faint:#8A9399;
+    --line:#D8DCD6; --line2:#D8DCD6;
+    --teal:#0F6E73; --teal-2:#0F6E73; --teal2:#0F6E73;
+    --amber:#C97A0E; --red:#B3352C; --green:#2F7A4B;
+    --violet:#0F6E73; --blue:#0F6E73;
+    --radius:12px;
+    --serif:"Noto Serif SC","Songti SC",serif;
+    --sans:"PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:"JetBrains Mono","Cascadia Mono",monospace;
+  }
+  html,body{background:var(--canvas)}
+  body{background:var(--canvas);color:var(--ink);font-family:var(--sans);font-size:13.5px;line-height:1.6}
+  h1,h2,h3,h4,.pane-h h2,.desk-brand h1,.rail-brand b{font-family:var(--serif);font-weight:600;letter-spacing:.01em}
+  code,pre,.hash,.task-id,.taskbar .tt2,.dstate,.wi-id,.rail-brand span{font-family:var(--mono)}
+
+  /* ---------- 外壳：左 220px rail + 右主区 ---------- */
+  .shell{display:grid;grid-template-columns:220px minmax(0,1fr)}
+  .rail{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:18px;padding:20px 14px;background:#EFEFEA;border-right:1px solid var(--line);z-index:30}
+  .rail-brand{display:flex;align-items:center;gap:9px;padding:0 4px}
+  .rail-mark{width:30px;height:30px;border-radius:9px;background:var(--teal);display:grid;place-items:center;color:#fff;font-family:var(--mono);font-size:14px;font-weight:700;flex:0 0 auto}
+  .rail-brand b{display:block;font-size:13.5px;letter-spacing:.02em}
+  .rail-brand span{display:block;font-size:9.5px;color:var(--faint);line-height:1.5;letter-spacing:.02em}
+  .rail-nav{display:flex;flex-direction:column;gap:2px}
+  .rail-nav a{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:9px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;font-size:12.5px;transition:.15s}
+  .rail-nav a .idx{font-family:var(--mono);font-size:9.5px;color:var(--faint)}
+  .rail-nav a:hover{background:#E7E8E2;color:var(--ink)}
+  .rail-nav a.on{background:#fff;color:var(--ink);border-left-color:var(--teal);box-shadow:0 1px 2px rgba(16,20,23,.05)}
+  .rail-nav a.on .idx{color:var(--teal)}
+  .rail-foot{margin-top:auto;display:flex;align-items:center;gap:7px;padding:10px 6px 2px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+  .rail-dot{width:7px;height:7px;border-radius:50%;background:var(--amber);flex:0 0 auto}
+  .rail-dot.live{background:var(--green)}
+  .rail-dot.off{background:var(--red)}
+  .workarea{min-width:0;display:flex;flex-direction:column}
+
+  /* ---------- 四视图切换 ---------- */
+  .view{display:none}
+  body:not([data-view="console"]) #deskRoot{display:none}
+  body[data-view="console"] #deskRoot{display:flex}
+  body[data-view="stage"] #view-stage{display:grid;grid-template-columns:1fr}
+  body[data-view="workbench"] #view-workbench{display:block}
+  body[data-view="wall"] #view-wall{display:block}
+  #view-stage .side{display:none}
+  #view-stage,#view-workbench,#view-wall{min-height:100vh}
+
+  /* ---------- 离线横幅 / DEMO 徽标 ---------- */
+  .offline-banner{display:flex;align-items:center;gap:12px;padding:9px 20px;background:#FBEFED;border-bottom:1px solid #E9C4BF;color:#7A211B;font-size:12px}
+  .offline-banner[hidden]{display:none!important}
+  .offline-banner b{font-weight:600}
+  .offline-banner span{font-family:var(--mono);font-size:11px;color:#8C3A32}
+  .demo-flag{font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:#fff;background:var(--red);border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap}
+  .demo-tag{background:#FBEFED;color:var(--red);border:1px solid #E9C4BF}
+
+  /* ---------- 表面 / 分隔 / 字体 ---------- */
+  .card,.panel,.detail,.empty,.deliv,.wcard,.dec-card,.kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 1px 2px rgba(16,20,23,.04)}
+  .card{padding:0}
+  #view-workbench .card{padding:14px}
+  .view:not(#view-workbench) .finding{display:block}
+  #view-workbench .form{display:flex;flex-direction:column;gap:9px}
+  #view-workbench .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .btn,.dbtn{border-radius:10px;box-shadow:none;font-family:inherit}
+  .btn{border:1px solid var(--line);background:#fff;color:var(--ink);padding:8px 13px;font-size:12.5px}
+  .btn:hover{border-color:var(--teal);background:#fff;color:var(--teal);transform:none}
+  .btn.primary{background:var(--teal);border-color:var(--teal);color:#fff}
+  .btn.primary:hover{background:#0B585C;border-color:#0B585C;color:#fff}
+  .dbtn{background:#fff;border:1px solid var(--line);color:var(--muted)}
+  .dbtn:hover{border-color:var(--teal);color:var(--teal)}
+  .dbtn.primary,.dbtn.on{background:var(--teal);border-color:var(--teal);color:#fff}
+  .dbtn.primary:hover,.dbtn.on:hover{background:#0B585C;color:#fff}
+  .pill,.chip{background:#F1F2EC;border:1px solid var(--line);color:var(--muted)}
+  .nav a.on,.side .card,.brand .mark,.desk-brand .mark{background:var(--teal);box-shadow:none}
+  .nav a:hover{background:#E7E8E2}
+  .badge-irrev{background:#FBEFED;color:var(--red)}
+  .taskbar .dotx.sign{background:var(--amber)}
+
+  /* ---------- 工作台视图（亮色样式，内联，不依赖外部 css） ---------- */
+  #view-workbench,#view-wall{padding:22px 26px 46px}
+  .wrap{max-width:1280px;margin:0 auto;padding:0}
+  .view-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+  .view-head h2{margin:0 0 4px;font-size:20px}
+  .view-head p{margin:0;font-size:12px;color:var(--muted);max-width:780px;line-height:1.65}
+  .hero{background:#fff;border:1px solid var(--line);color:var(--ink);box-shadow:none;border-radius:var(--radius)}
+  .hero:after{display:none}
+  .hero h2{color:var(--ink);font-family:var(--serif)}
+  .hero p{color:var(--muted)}
+  .eyebrow{color:var(--teal)}
+  .steps div{background:#F1F2EC;border:1px solid var(--line);color:var(--muted)}
+  .steps b{color:var(--teal)}
+  .panel::-webkit-scrollbar-thumb{background:#D8DCD6}
+
+  /* ---------- 交付墙视图 ---------- */
+  .wall-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+  .wall-col{background:var(--card);border:1px solid var(--line);border-radius:var(--radius)}
+  .wall-col h3{display:flex;align-items:center;justify-content:space-between;margin:0;padding:11px 14px;border-bottom:1px solid var(--line);font-size:13px}
+  .wall-col h3 .cnt{font-family:var(--mono);font-size:11px;color:var(--muted);background:#F1F2EC;border-radius:99px;padding:1px 8px;font-weight:400}
+  .wall-list{display:flex;flex-direction:column;max-height:calc(100vh - 240px);overflow:auto}
+  .wall-item{padding:12px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+  .wall-item:last-child{border-bottom:none}
+  .wall-item:hover{background:#FAFAF6}
+  .wi-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .wi-goal{margin-top:5px;font-size:12.5px;color:var(--ink);line-height:1.5}
+  .wi-meta{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:10.5px;color:var(--faint)}
+  .wi-meta b{color:var(--muted);font-weight:600;font-family:var(--mono)}
+  .wall-empty{padding:28px 14px;text-align:center;font-size:11.5px;color:var(--faint);line-height:1.7}
+
+  /* ---------- 宽度 / 动效 ---------- */
+  .desk-main{max-width:1280px}
+  .main{max-width:1280px;margin:0 auto;width:100%}
+  @keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .view{animation:viewIn .18s ease-out both}
+  .view>*{animation:viewIn .22s ease-out both}
+  .view>*:nth-child(2){animation-delay:60ms}
+  .view>*:nth-child(3){animation-delay:120ms}
+  .view>*:nth-child(4){animation-delay:180ms}
+  .view>*:nth-child(5){animation-delay:240ms}
+  .view>*:nth-child(6){animation-delay:300ms}
+  @media (prefers-reduced-motion:reduce){.view,.view>*{animation:none}}
+  .toast{position:fixed;right:22px;bottom:22px;max-width:420px;background:var(--ink);color:#F4F5F2;padding:10px 14px;border-radius:10px;font-size:12px;opacity:0;transform:translateY(8px);transition:.18s;z-index:90;pointer-events:none}
+  .toast.show{opacity:1;transform:none}
+  .toast.bad{background:var(--red)}
+  @media (max-width:1100px){
+    .shell{grid-template-columns:1fr}
+    .rail{position:static;height:auto;flex-direction:row;align-items:center;gap:12px;padding:10px 14px;border-right:none;border-bottom:1px solid var(--line);overflow-x:auto}
+    .rail-nav{flex-direction:row;overflow-x:auto}
+    .rail-foot{margin-top:0;border-top:none;padding:0;white-space:nowrap}
+    .wall-cols{grid-template-columns:1fr}
+    #view-workbench,#view-wall{padding:14px}
+  }
+</style>
 </head>
-<body class="mode-desk">
-<!-- ================= B15 经营决策台（P0 / P1 / P2，场景驱动，零场景常量） ================= -->
+<body class="mode-desk" data-view="console">
+<div id="offlineBanner" class="offline-banner" hidden><b>后端未连接 · 当前为离线演示数据</b><span>python -B server/app.py --port 8787</span></div>
+<div class="shell">
+  <aside class="rail">
+    <div class="rail-brand">
+      <div class="rail-mark">JJ</div>
+      <div><b>AI 员工事务所</b><span>经营决策台 · 统一入口</span></div>
+    </div>
+    <nav class="rail-nav">
+      <a href="#console" data-view="console" class="on"><span class="idx">01</span>决策台</a>
+      <a href="#workbench" data-view="workbench"><span class="idx">02</span>任务工作台</a>
+      <a href="#stage" data-view="stage"><span class="idx">03</span>执行舞台</a>
+      <a href="#wall" data-view="wall"><span class="idx">04</span>交付墙</a>
+    </nav>
+    <div class="rail-foot"><span class="rail-dot" id="railDot"></span><span id="railState">连接中……</span></div>
+  </aside>
+  <div class="workarea">
+<!-- ================= 视图 01 · B15 经营决策台（P0 / P1 / P2，场景驱动，零场景常量） ================= -->
 <div id="deskRoot">
   <header class="desk-top">
     <div class="desk-brand">
@@ -489,7 +637,7 @@
   </main>
 </div>
 
-<div class="app">
+<div class="app view" id="view-stage">
   <aside class="side">
     <div class="brand">
       <div class="mark"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 20V9l8-5 8 5v11" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 20v-6h6v6" stroke="#fff" stroke-width="1.6"/></svg></div>
@@ -517,7 +665,7 @@
       <div class="top-actions">
         <button class="btn primary" onclick="setView('desk')">◈ 经营决策台</button>
         <button class="btn" onclick="openIntake()">接单 · 新建任务</button>
-        <button class="btn" id="runBtn" onclick="runCurrentTask()" style="display:none">▶ 运行本任务</button>
+        <button class="btn" id="deskRunBtn" onclick="runCurrentTask()" style="display:none">▶ 运行本任务</button>
         <button class="btn" id="gateTopBtn" onclick="openGate('auto')" style="display:none">审批门</button>
         <button class="btn" onclick="copyTraceLink()">复制过程链接</button>
         <button class="btn" onclick="openG0()">预派发确认</button>
@@ -668,11 +816,10 @@
             <div class="line" id="sigHash" style="grid-column:1/-1;font-size:10px;color:#9ca3af">签字哈希：待签字</div>
           </div>
           <div class="sign-btns" style="flex-wrap:wrap">
-            <button class="primary" id="signBtn" onclick="signPaper()">签字确认</button>
+            <button class="primary" id="paperSignBtn" onclick="signPaper()">签字确认</button>
             <button onclick="openGate('auto')" id="gateBtn">审批门</button>
             <button onclick="finalizeCurrentTask()" id="finalizeBtn" style="display:none">放行交付</button>
             <button onclick="rejectPaper()">打回修改</button>
-            <button onclick="pushWecom()">企微推送</button>
             <button onclick="toast('已导出 PDF（原型）')">导出</button>
           </div>
         </section>
@@ -691,7 +838,7 @@
           <button class="tab" data-cat="not_ready">缺件</button>
           <button class="tab" data-cat="retired">退役</button>
         </div>
-        <div class="search"><span>🔎</span><input id="q" placeholder="搜员工 / 技能" oninput="renderShelf()" /></div>
+        <div class="search"><span>搜索</span><input id="q" placeholder="搜员工 / 技能" oninput="renderShelf()" /></div>
       </div>
       <div class="store-banner">
         <div><div class="t">员工货架 · 招聘台</div><div class="s">按"店里的事"分组；状态精确到为什么不能招；每张卡带成果样例</div></div>
@@ -704,7 +851,7 @@
     </section>
 
     <!-- delivery wall -->
-    <section class="card" id="wall" style="margin-top:14px">
+    <section class="card" id="wallLegacy" style="margin-top:14px">
       <div class="card-h"><div><h3>交付墙</h3><div class="sub">每条交付带证据链、决策日志、回看倒计时</div></div><span class="pill">最近 7 天</span></div>
       <div class="wall" id="wallGrid">
         <div class="deliv"><div class="t">补料率归因报告<span class="ok">已交付</span></div><div class="d">finding 2 · 残差 12 · ROI 净省 ¥1,500</div><div class="fu">T+7 回看 · 10-25</div></div>
@@ -716,6 +863,131 @@
     <div class="note" style="margin-top:8px">原型说明：UI 概念验证（假数据、离线可开），用于 G0「第一眼」评审；不是产品实现。v0.2 重点：更电影感的舞台、更像招聘店的货架、老板能签字的交付卡。</div>
   </main>
 </div>
+
+<!-- ================= 视图 02 · 任务工作台（逻辑由 workbench.js 驱动） ================= -->
+<section id="view-workbench" class="view">
+  <div class="wrap">
+    <div class="view-head">
+      <div>
+        <h2>任务工作台</h2>
+        <p>新建任务 → 上传 CSV / 字段映射 → 跑数据合同与报告门 → 人工复核签字。归因结果（s1–s4）仍由工作流产出，本视图只做 s5 收口。</p>
+      </div>
+      <div class="health" id="health"><span class="dot"></span><span id="healthText">连接中</span></div>
+    </div>
+    <div class="layout">
+      <aside class="panel">
+        <div class="panel-head">
+          <h3>新建任务</h3>
+          <span class="hint">本地文件不上云</span>
+        </div>
+        <div class="form">
+          <label>任务 ID（可空，自动生成）<input id="fId" placeholder="T-20261020-B" /></label>
+          <div class="two">
+            <label>产线<input id="fLine" value="B" /></label>
+            <label>数据负责人<input id="fOwner" placeholder="姓名" /></label>
+          </div>
+          <div class="two">
+            <label>T 开始<input id="fTStart" type="date" value="2026-10-05" /></label>
+            <label>T 结束<input id="fTEnd" type="date" value="2026-10-11" /></label>
+          </div>
+          <div class="two">
+            <label>基线开始<input id="fBStart" type="date" value="2026-09-05" /></label>
+            <label>基线结束<input id="fBEnd" type="date" value="2026-10-04" /></label>
+          </div>
+          <label>目标 / 预期<input id="fExpected" value="T+7 补料率 ≤5.40%" /></label>
+          <label>上下文<input id="fContext" value="B线补料率7日 5.1%→7.2%" /></label>
+          <label>签字人<input id="fSigner" placeholder="业务负责人" /></label>
+          <button class="btn primary wide" id="createBtn">创建任务</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="panel-head">
+          <h3>上传文件</h3>
+          <span class="hint" id="uploadHint">先创建任务</span>
+        </div>
+        <div class="form" id="uploadForm">
+          <label class="file">CSV / Excel 数据
+            <input id="fCsv" type="file" accept=".csv,.xlsx,.xls" />
+            <span id="csvName">选择文件</span>
+          </label>
+          <label class="file">字段映射 YAML（可选）
+            <input id="fMap" type="file" accept=".yaml,.yml" />
+            <span id="mapName">选择文件</span>
+          </label>
+          <label class="file">workflow-result.json（s1–s4）
+            <input id="fWf" type="file" accept=".json" />
+            <span id="wfName">选择文件</span>
+          </label>
+          <button class="btn wide" id="uploadBtn" disabled>上传到当前任务</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="panel-head">
+          <h3>任务列表</h3>
+          <button class="mini" id="refreshBtn">刷新</button>
+        </div>
+        <div class="tasks" id="tasks"><div class="muted">还没有任务</div></div>
+      </aside>
+
+      <section class="content">
+        <div class="empty" id="empty">
+          <div class="empty-mark">▤</div>
+          <h3>选择或创建一个任务</h3>
+          <p>工作台会显示数据合同、归因结果、六维评分、决策与签字状态。没有真实数据时，可先用 <code>demo/material_refill_T.json</code> 做受控演练。</p>
+        </div>
+
+        <div id="detail" class="detail" hidden>
+          <div class="detail-head">
+            <div>
+              <div class="eyebrow" id="dTask">TASK</div>
+              <h2 id="dTitle">任务详情</h2>
+              <div class="meta" id="dMeta"></div>
+            </div>
+            <div class="actions">
+              <span class="status" id="dStatus">created</span>
+              <button class="btn primary" id="runBtn">运行收口</button>
+              <button class="btn" id="signBtn">签字确认</button>
+            </div>
+          </div>
+
+          <div class="banner" id="banner" hidden></div>
+          <div class="report" id="report"></div>
+
+          <details class="logbox">
+            <summary>运行日志 / 原始回执</summary>
+            <pre id="log">暂无日志</pre>
+          </details>
+        </div>
+      </section>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 视图 03 · 交付墙（/api/decisions + 任务回看日期） ================= -->
+<section id="view-wall" class="view">
+  <div class="view-head">
+    <div>
+      <h2>交付墙</h2>
+      <p>已签收的交付卡与 T+7 待回填项。卡面直接取决策日志（goal / 评分 / 结论 / 签字人），回看日期取任务列表的 review_due。</p>
+    </div>
+    <button class="btn" onclick="wallRefresh()">刷新</button>
+  </div>
+  <div class="wall-cols">
+    <div class="wall-col">
+      <h3>待回填 T+7<span class="cnt" id="wallPendingCount">0</span></h3>
+      <div class="wall-list" id="wallPending"><div class="wall-empty">正在读取决策日志……</div></div>
+    </div>
+    <div class="wall-col">
+      <h3>已签收<span class="cnt" id="wallSignedCount">0</span></h3>
+      <div class="wall-list" id="wallSigned"><div class="wall-empty">正在读取决策日志……</div></div>
+    </div>
+  </div>
+</section>
+
+  </div><!-- /workarea -->
+</div><!-- /shell -->
 
 <div class="modal" id="g0"><div class="box">
   <h3>预派发确认（G0 人门）</h3>
@@ -747,8 +1019,8 @@
     <label>T 窗口数据（T.json）<input id="iTFile" type="file" accept=".json,application/json" onchange="previewIntakeFiles()" /></label>
     <label>T-30 基线数据（T30.json）<input id="iT30File" type="file" accept=".json,application/json" onchange="previewIntakeFiles()" /></label>
     <label>执行 runner<select id="iRunner">
-      <option value="fixture">演示（fixture；报告标 is_demo=true）</option>
       <option value="external">等待外部执行（external；DSH 会话产出 result.json）</option>
+      <option value="fixture">演示（fixture；报告标 is_demo=true，仅演练）</option>
       <option value="dsh">DSH 自动执行（M2 占位）</option>
     </select></label>
   </div>
@@ -790,6 +1062,7 @@
 <script src="tape-data.js"></script>
 <script src="sprites.js"></script>
 <script src="api-adapter.js"></script>
+<script src="workbench.js?v=20261026"></script>
 <script>
   /* =========================================================================
      AI 员工事务所 · 工作台 v0.7.1（M1.5：多任务 + 事件流 + 接单 + 审批门 + 团队真数据）
@@ -1344,7 +1617,7 @@
     if (stamp) { stamp.textContent = '待 签 字'; stamp.className = 'stamp'; stamp.style.borderColor = ''; stamp.style.color = ''; }
     const ok = $('ok'); if (ok) ok.classList.remove('show');
     const bs = $('bossSigned'); if (bs) { bs.style.display = 'none'; bs.textContent = '已签'; }
-    const btn = $('signBtn'); if (btn) btn.disabled = false;
+    const btn = $('paperSignBtn'); if (btn) btn.disabled = false;
     setText('sigHash', '签字哈希：待签字');
   }
   function applySignedState(signer, sha256, signedAt) {
@@ -1357,7 +1630,7 @@
       bs.style.display = 'block';
       bs.textContent = '已签 · ' + ((signedAt || '').slice(0, 10) || new Date().toISOString().slice(0, 10)) + (signer ? ' · ' + signer : '');
     }
-    const btn = $('signBtn');
+    const btn = $('paperSignBtn');
     if (btn) {
       // 指纹失效（gate 确认回写报告后）→ 必须保留「重新签字」能力，否则 UI 无解
       const stale = Boolean(UI.model && UI.model.signatureStale);
@@ -1454,7 +1727,7 @@
     if (gateBtn) gateBtn.disabled = !(UI.live && hasReport && state.requested);
     const finalBtn = $('finalizeBtn');
     if (finalBtn) finalBtn.style.display = (UI.live && hasReport && model.signature) ? '' : 'none';
-    const signBtn = $('signBtn');
+    const signBtn = $('paperSignBtn');
     // 签字指纹已与报告现字节脱钩（gate 确认回写报告后）→ 必须允许重新签字，
     // 否则 UI 卡在无解状态（finalize 报 hash mismatch，而签字按钮被禁用）。
     if (signBtn && model && model.report) {
@@ -1640,7 +1913,7 @@
       });
       if (preview) preview.textContent = formatTableResult(res);
       toast('已转换：T=' + (res.t_records != null ? res.t_records : '?') + ' 条 / T30=' + (res.t30_records != null ? res.t30_records : '?') + ' 条 · ' + taskId);
-      const runBtn = $('runBtn'); if (runBtn) runBtn.style.display = '';
+      const runBtn = $('deskRunBtn'); if (runBtn) runBtn.style.display = '';
       return res;
     } catch (e) {
       const msg = (e && e.message) ? e.message : String(e);
@@ -1667,7 +1940,7 @@
       notes: '接单抽屉创建；不可逆动作只呈请不执行。',
       scene_id: UI.sceneIntake || undefined
     };
-    const runner = ($('iRunner') && $('iRunner').value) || 'fixture';
+    const runner = ($('iRunner') && $('iRunner').value) || 'external';
     UI.runner = runner;
     if (!intake.line || !intake.metric) { toast('请填产线与指标'); return; }
     const adapter = window.APIAdapter;
@@ -1689,7 +1962,7 @@
         if (preview) preview.textContent = '已建任务\n' + JSON.stringify(Object.assign({}, saved, { ok: undefined }), null, 2);
         toast('已建任务 ' + (view.task_id || '') + ' · runner=' + view.runner + (view.data_ready ? ' · 数据就绪' : ' · 待补数据'));
         if (runner === 'fixture') toast('演示 runner：报告将标记「演示数据」，不可签字');
-        const runBtn = $('runBtn'); if (runBtn) runBtn.style.display = '';
+        const runBtn = $('deskRunBtn'); if (runBtn) runBtn.style.display = '';
         /* 若选了表格，建任务后立刻上传转换（CSV/Excel → T/T30），一步走完 */
         if (tableFileInput().file) {
           const upload = await uploadTableData();
@@ -1735,7 +2008,7 @@
       const on = t.task_id === currentId;
       return '<div class="task ' + (on ? 'on' : '') + '" data-id="' + esc(t.task_id) + '" title="' + esc(t.task_id + ' · ' + state) + '">'
         + '<span class="dotx ' + dot + '"></span><span class="tt">' + esc(t.title || t.task_id) + '</span>'
-        + '<span class="tt2">' + esc(shortTime(t.updated_at)) + '</span></div>';
+        + '<span class="tt2">' + esc(shortTime(t.updated_at)) + '</span>' + (t.is_demo ? '<span class="demo-flag">DEMO</span>' : '') + '</div>';
     }).join('') : '<span class="empty">暂无任务，点「接单 · 新建任务」</span>';
     const tail = summary ? '<span class="empty" style="margin-left:auto">' + summary.total + ' 单 · ' + summary.running + ' 进行中</span>' : '';
     bar.innerHTML = '<span class="tb-lab">任务栏</span>' + items + tail;
@@ -1756,7 +2029,7 @@
       const cls = (state === 'signed' || t.has_report) ? 'ok' : (state === 'failed' ? 'wait' : 'wait');
       const label = t.signed ? '已交付' : ({signed:'已交付', failed:'失败', awaiting_sign:'待签字', assembled:'待签字', running:'运行中', created:'已建单'}[state] || state);
       const due = t.review_due ? ('T+7 回看 · ' + esc(t.review_due)) : (t.signed ? '回看结论待回填' : '交付后自动排回看');
-      return '<div class="deliv" data-id="' + esc(t.task_id) + '"><div class="t">' + esc(t.title || t.task_id) + '<span class="' + cls + '">' + label + '</span></div>'
+      return '<div class="deliv" data-id="' + esc(t.task_id) + '"><div class="t">' + esc(t.title || t.task_id) + (t.is_demo ? '<span class="demo-flag">DEMO</span>' : '') + '<span class="' + cls + '">' + label + '</span></div>'
         + '<div class="d">' + esc(t.task_id) + ' · ' + esc(t.state || '') + (t.is_demo ? ' · DEMO' : '') + ' · 更新 ' + esc(shortTime(t.updated_at)) + '</div>'
         + '<div class="fu">' + due + '</div></div>';
     }).join('');
@@ -1767,6 +2040,92 @@
     if (!UI.live) return;
     window.APIAdapter.selectTask(card.dataset.id);
   });
+
+  /* ------------------------------------------------------------ 交付墙视图（#wall） */
+  function wallDue(taskId, row) {
+    const task = (UI.tasks || []).filter(function (t) { return t && t.task_id === taskId; })[0];
+    if (task && task.review_due) return String(task.review_due);
+    const at = row && (row.signed_at || row.decided_at);
+    const stamp = at ? Date.parse(at) : NaN;
+    if (!Number.isFinite(stamp)) return '';
+    return new Date(stamp + 7 * 86400000).toISOString().slice(0, 10);
+  }
+  function wallGoal(row) {
+    const goal = row && row.goal;
+    if (typeof goal === 'string') return goal;
+    if (goal && typeof goal === 'object') return goal.expected || goal.metric || goal.description || goal.target || '';
+    return (row && row.context) || '';
+  }
+  function wallCard(row) {
+    const id = row.task_id || row.decision_id || '';
+    const verdict = row.verdict_label || VERDICT_CN[row.verdict] || row.verdict || '—';
+    const score = row.score_total != null ? String(row.score_total) : '—';
+    return '<div class="wall-item" data-id="' + esc(id) + '">'
+      + '<div class="wi-top"><span class="wi-id">' + esc(id || '—') + '</span>'
+      + (row.is_demo ? '<span class="demo-flag">DEMO</span>' : '<span class="pill">' + esc(verdict) + '</span>') + '</div>'
+      + '<div class="wi-goal">' + esc(wallGoal(row) || '（未记录目标）') + '</div>'
+      + '<div class="wi-meta"><span>评分 <b>' + esc(score) + '</b></span>'
+      + '<span>结论 <b>' + esc(verdict) + '</b></span>'
+      + '<span>签字人 <b>' + esc(row.signer || row.actor || '—') + '</b></span>'
+      + '<span>回看 <b>' + esc(wallDue(id, row) || '待排期') + '</b></span></div></div>';
+  }
+  function wallRender() {
+    const pBox = $('wallPending'), sBox = $('wallSigned');
+    if (!pBox || !sBox) return;
+    if (!UI.live) {
+      const msg = '<div class="wall-empty">后端未连接 · 交付墙不展示离线演示数据<br/>启动本地服务后自动读取决策日志</div>';
+      pBox.innerHTML = msg;
+      sBox.innerHTML = msg;
+      setText('wallPendingCount', 0);
+      setText('wallSignedCount', 0);
+      return;
+    }
+    const rows = (DESK3 && DESK3.rows) || [];
+    const pending = rows.filter(function (r) { return r && r.outcome_pending; });
+    const signed = rows.filter(function (r) { return r && !r.outcome_pending; });
+    pBox.innerHTML = pending.length ? pending.map(wallCard).join('') : '<div class="wall-empty">没有待回填项</div>';
+    sBox.innerHTML = signed.length ? signed.map(wallCard).join('') : '<div class="wall-empty">还没有已签收的交付</div>';
+    setText('wallPendingCount', pending.length);
+    setText('wallSignedCount', signed.length);
+  }
+  function wallRefresh() {
+    wallRender();
+    const adapter = window.APIAdapter;
+    if (!adapter || !adapter.isLive || !adapter.isLive()) return;
+    try { if (adapter.listDecisions) adapter.listDecisions({ limit: 60 }); } catch (e) { /* 决策日志未就绪 */ }
+    try { if (adapter.refresh) adapter.refresh(); } catch (e) { /* ignore */ }
+  }
+  const wallView = $('view-wall');
+  if (wallView) wallView.addEventListener('click', function (ev) {
+    const card = ev.target.closest('.wall-item'); if (!card) return;
+    const id = card.getAttribute('data-id');
+    if (!id) return;
+    showView('console');
+    deskOpenDecision(id);
+  });
+
+  /* ------------------------------------------------------------ 离线横幅 / 工作台 DEMO 徽标 */
+  function setOffline(off) {
+    const bar = $('offlineBanner');
+    if (bar) bar.hidden = !off;
+    const dot = $('railDot');
+    if (dot) dot.className = 'rail-dot ' + (off ? 'off' : 'live');
+    setText('railState', off ? '离线演示' : '真数据');
+  }
+  function decorateWorkbenchDemos() {
+    const box = $('tasks');
+    const adapter = window.APIAdapter;
+    if (!box || !adapter || !adapter.tasks) return;
+    const demo = {};
+    (adapter.tasks() || []).forEach(function (t) { if (t && t.is_demo) demo[t.task_id || t.id] = 1; });
+    Array.prototype.forEach.call(box.querySelectorAll('.task'), function (el) {
+      if (!demo[el.getAttribute('data-id')] || el.querySelector('.demo-flag')) return;
+      const top = el.querySelector('.task-top');
+      if (top) top.insertAdjacentHTML('beforeend', '<span class="demo-flag">DEMO</span>');
+    });
+  }
+  const tasksBox = $('tasks');
+  if (tasksBox && window.MutationObserver) new MutationObserver(decorateWorkbenchDemos).observe(tasksBox, { childList: true });
   function renderCrew(crew, model) {
     UI.crew = crew || null;
     const card = $('crew'); if (!card) return;
@@ -1849,7 +2208,7 @@
         row.className = 'finding-row';
         const conf = Number(finding.confidence);
         const pct = Number.isFinite(conf) ? Math.max(0, Math.min(100, conf <= 1 ? conf * 100 : conf)) : 0;
-        row.innerHTML = '<span class="nm">' + esc(finding.factor || '—') + '</span><span class="bar"><i style="width:' + pct.toFixed(0) + '%;background:linear-gradient(90deg,#7c3aed,#a78bfa)"></i></span><span class="pct">' + esc(finding.confidence == null ? '—' : finding.confidence) + '</span>';
+        row.innerHTML = '<span class="nm">' + esc(finding.factor || '—') + '</span><span class="bar"><i style="width:' + pct.toFixed(0) + '%;background:linear-gradient(90deg,#0F6E73,#4E9A96)"></i></span><span class="pct">' + esc(finding.confidence == null ? '—' : finding.confidence) + '</span>';
         letter.insertBefore(row, chips);
       });
     }
@@ -1924,10 +2283,14 @@
       onMode(live, health, error) {
         UI.live = Boolean(live && !error);
         UI.health = health || null;
-        const runBtn = $('runBtn');
+        const runBtn = $('deskRunBtn');
         if (runBtn) runBtn.style.display = UI.live ? '' : 'none';
+        setOffline(!UI.live);
         const demoTag = $('demoTag');
-        if (demoTag && !UI.live) demoTag.style.display = 'none';
+        if (demoTag) {
+          demoTag.style.display = UI.live ? 'none' : '';
+          demoTag.textContent = 'DEMO · 演示数据';
+        }
         if (healthPill) healthPill.textContent = UI.live ? 'LIVE · 真实' : 'LIVE · 离线';
         if (UI.live) {
           const foot = document.querySelector('.foot');
@@ -1955,11 +2318,17 @@
         renderTaskbar(UI.tasks, adapter.currentTaskId(), summary);
         renderKpis(UI.tasks, summary);
         renderWall(UI.tasks);
+        try { decorateWorkbenchDemos(); } catch (e) { /* 工作台徽标不阻塞 */ }
+        try { wallRender(); } catch (e) { /* 交付墙静默回退 */ }
       },
       onTask(model, summary) {
         UI.model = model || null;
         const demoTag = $('demoTag');
-        if (demoTag) demoTag.style.display = (UI.live && model && (model.isDemo || (model.task && model.task.runner === 'fixture'))) ? '' : 'none';
+        if (demoTag) {
+          const isDemo = Boolean(model && (model.isDemo || (model.task && model.task.runner === 'fixture')));
+          if (isDemo) { demoTag.style.display = ''; demoTag.textContent = 'DEMO · 演示数据'; }
+          else if (UI.live) demoTag.style.display = 'none';
+        }
         if (!model) {
           const stamp = $('stamp'); if (stamp) { stamp.textContent = '待 建 单'; stamp.className = 'stamp'; }
           return;
@@ -2044,6 +2413,7 @@
         DESK3.meta = meta || DESK3.meta;
         DESK3.loaded = true;
         if (DESK.p === 'p3') { deskRenderDecisionFacets(); deskRenderDecisions(); }
+        try { wallRender(); } catch (e) { /* 交付墙静默回退 */ }
       },
       onSignature(sig, model) { if (sig) applySignedState(sig.signer || '', sig.report_sha256, sig.signed_at); },
       onSign(result) { applySignedState(result.signer || '', result.sha256, result.signed_at); },
@@ -2051,15 +2421,15 @@
         if (adapter.state && adapter.state.failures <= 1) toast('本地服务异常：' + (error && error.message ? error.message : error));
       }
     });
-    /* 视图启动：默认经营决策台；?view=office 打开事务所；?scene=<id> 直开场景工作台 */
+    /* 视图启动：hash 优先（#console / #workbench / #stage / #wall），兼容 ?view=office 与 ?scene=<id> */
     let params = null;
     try { params = new URLSearchParams(location.search); } catch (err) { params = null; }
-    const view = params ? params.get('view') : null;
     const sceneId = params ? params.get('scene') : null;
-    if (view === 'office') {
-      setView('office');
-    } else {
-      setView('desk');
+    const askedOffice = params && params.get('view') === 'office';
+    const initial = location.hash ? viewFromHash() : (askedOffice ? 'stage' : 'console');
+    showView(initial);
+    if (initial === 'console') {
+      deskRefresh();
       if (sceneId) DESK.pendingScene = sceneId;
     }
   }
@@ -2070,7 +2440,7 @@
     if (!adapter || !adapter.isLive()) { toast('需本地服务：python -B server/app.py --port 8787'); return; }
     if (!adapter.currentTaskId()) { toast('先在「接单 · 新建任务」里建一单'); return; }
     try {
-      const runner = ($('iRunner') && $('iRunner').value) || UI.runner || 'fixture';
+      const runner = ($('iRunner') && $('iRunner').value) || UI.runner || 'external';
       const r = await adapter.run(undefined, runner);
       toast('已开始运行：' + ((r && r.state) || 'running') + '（runner=' + runner + '）');
     } catch (e) { toast('运行失败：' + (e && e.message ? e.message : e)); }
@@ -2094,7 +2464,6 @@
       navigator.clipboard.writeText(url).then(done).catch(() => toast('复制失败，可手动复制地址栏'));
     } else { toast('过程链接：' + url); }
   }
-  function pushWecom() { toast('企微推送（原型）：交付卡 Markdown 已生成，工具见 tools/wecom_notify.py'); }
   function toast(msg) {
     const t = $('toast'); if (!t) return;
     t.textContent = msg; t.classList.add('show');
@@ -2186,19 +2555,31 @@
     document.querySelectorAll('.desk-nav .dbtn[data-p]').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-p') === which); });
     try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); }
   }
+  /* ------------------------------------------------------------ 四视图路由（#console / #workbench / #stage / #wall） */
+  const VIEWS = ['console', 'workbench', 'stage', 'wall'];
+  function viewFromHash() {
+    const h = String(location.hash || '').replace(/^#/, '');
+    return VIEWS.indexOf(h) >= 0 ? h : 'console';
+  }
+  function showView(name) {
+    const v = VIEWS.indexOf(name) >= 0 ? name : 'console';
+    document.body.dataset.view = v;
+    document.querySelectorAll('.rail-nav a').forEach(function (a) {
+      a.classList.toggle('on', a.getAttribute('data-view') === v);
+    });
+    if (v === 'console') { try { renderP0(); } catch (e) { /* 场景台静默回退 */ } }
+    if (v === 'wall') { try { wallRefresh(); } catch (e) { /* 交付墙静默回退 */ } }
+    if (v === 'workbench') { try { decorateWorkbenchDemos(); } catch (e) { /* 忽略 */ } }
+  }
   function setView(view, sceneId) {
-    const desk = String(view || 'desk') !== 'office';
-    document.body.classList.toggle('mode-desk', desk);
-    if (desk) {
+    const name = String(view || '') === 'office' ? 'stage' : 'console';
+    if (name === 'console') {
       deskShowP('p0');
       if (sceneId) openScene(sceneId);
       deskRefresh();
     }
-    try {
-      const u = new URL(location.href);
-      if (desk) u.searchParams.delete('view'); else u.searchParams.set('view', 'office');
-      history.replaceState(null, '', u.toString());
-    } catch (e) { /* file:// 忽略 */ }
+    try { history.replaceState(null, '', location.pathname + location.search + '#' + name); } catch (e) { /* file:// 忽略 */ }
+    showView(name);
   }
   function deskRefresh() {
     const adapter = window.APIAdapter;
@@ -2709,6 +3090,7 @@
   function deskOpenDecision(taskId) {
     const adapter = window.APIAdapter;
     if (!adapter || !taskId) return;
+    showView('console');
     const p = adapter.selectTask(taskId);
     Promise.resolve(p).then(function () {
       renderP2();
@@ -2738,7 +3120,12 @@
     if (card) { openScene(card.getAttribute('data-scene')); }
   });
 
-  /* 启动真数据适配（失败时静默保持静态演示） */
+  /* 启动真数据适配（失败时进入显式离线态：顶部横幅 + DEMO 徽标） */
+  window.addEventListener('hashchange', function () {
+    const v = viewFromHash();
+    showView(v);
+    try { if (v === 'console' && DESK.pendingScene) { openScene(DESK.pendingScene); DESK.pendingScene = ''; } } catch (e) { /* 忽略 */ }
+  });
   bindRealData();
 </script>
 </body>

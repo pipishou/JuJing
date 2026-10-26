@@ -122,13 +122,7 @@ def main():
                     help="数据合同检查用的因素表 YAML（透传 check_data_contract --factors-yaml）")
     ap.add_argument("--demo", action="store_true", help="组装 demo 报告（is_demo=true，跳过 require-real）")
     ap.add_argument("--allow-signers", default="")
-    ap.add_argument("--defer-sign", action="store_true",
-                    help="只跑到报告/四卡校验，签字留给人工复核（Web 工作台 task_server 用）")
     args = ap.parse_args()
-
-    # upstream v0.11.2 工作台兼容：--defer-sign 时不签字，等人工复核后再走 sign/finalize
-    if args.defer_sign:
-        args.signer = ""
 
     intake = {}
     if args.task_json:
@@ -385,8 +379,6 @@ def main():
 
         if decision_path.is_file():
             decision_status = decision_status or read_json(decision_path).get("status")
-        if args.defer_sign and not decision_status:
-            decision_status = "pending_signature"
 
         summary = {
             "ok": True,

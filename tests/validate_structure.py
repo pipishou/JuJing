@@ -43,14 +43,13 @@ def main():
         "team/memory/README.md", "team/memory/employee-memory.schema.yaml", "team/memory/example-memory.json",
         "team/goals/README.md", "team/goals/goal.schema.yaml", "team/goals/example-goal.json",
         "team/cost/README.md", "team/cost/cost-record.schema.yaml", "team/cost/example-cost.json",
-        "team/integrations/wecom.yaml", "tools/wecom_notify.py",
         "tools/ingest_task_data.py", "tools/check_data_contract.py", "tools/score_scorecard.py", "tools/sign_delivery.py",
         "tools/write_loop_bundle.py", "tools/validate_loop.py", "tools/finalize_delivery.py",
         "tools/run_task.py", "tools/install_review_task.ps1",
         "tools/cost_record.py", "tools/memory_retrieve.py",
         "tools/review_due.py", "tools/cost_monthly.py",
         "tests/real_mode_smoke.py", "tests/negative_gates.py", "tests/ops_smoke.py",
-        "tests/wecom_transport_smoke.py", "tests/no_finding_smoke.py", "tests/contract_values_smoke.py",
+        "tests/no_finding_smoke.py", "tests/contract_values_smoke.py",
         "tests/run_task_smoke.py",
         "templates/field-map.example.yaml",
         "team/loop/example-analysis.json",
@@ -78,7 +77,6 @@ def main():
         "docs/PRODUCT_BENCHMARK_2026-10-18_zh.md",
         "docs/FOUR_LOOP_UPGRADE_2026-10-18_zh.md",
         "docs/METHODOLOGY_INTEGRATION_2026-10-18_zh.md",
-        "docs/WECOM_INTEGRATION_2026-10-18_zh.md",
         "docs/GITHUB_REPO_PLAN_2026-10-18_zh.md",
         "runs/dsh-tape-sample.json",
         "tests/validate_structure.py", "tests/validate_report.py",
@@ -194,7 +192,7 @@ def main():
     check("example decision entity_id", bool(dec.get("entity_id")))
     check("example decision attribution_method", dec.get("attribution_method") in ("exclusion", "counterfactual", "rule_based"))
 
-    # 3.9 v0.6: 关系/记忆、目标、成本、企微
+    # 3.9 v0.6: 关系/记忆、目标、成本（企微通道 v0.13.0 已下线，IM 统一走飞书）
     mem = json.loads((ROOT / "team/memory/example-memory.json").read_text(encoding="utf-8"))
     check("memory >=3 entries", len(mem) >= 3)
     check("memory privacy enum", all(m.get("privacy") in ("public", "internal", "customer_sensitive") for m in mem))
@@ -202,9 +200,9 @@ def main():
     check("goal target/deadline", "target" in goal and "deadline" in goal)
     cost = json.loads((ROOT / "team/cost/example-cost.json").read_text(encoding="utf-8"))
     check("cost net/roi", "net_benefit_cny" in cost and "roi" in cost)
-    wecom = load_yaml("team/integrations/wecom.yaml") or {}
-    check("wecom rate limit", wecom.get("rate_limit_per_min") == 20)
-    check("wecom inbound deferred", (wecom.get("inbound") or {}).get("status") == "deferred")
+    check("legacy wecom channel removed",
+          not (ROOT / "team/integrations/wecom.yaml").exists()
+          and not (ROOT / "tools/wecom_notify.py").exists())
 
     # 3.10 v0.7: 单源一致 + 真实数据门
     roster_ids = [host.get("id")] + [m.get("id") for m in members]
@@ -212,11 +210,12 @@ def main():
     check("real report mode", "--real" in (ROOT / "orchestration/assemble_report.py").read_text(encoding="utf-8"))
     check("real report gate", "--require-real" in (ROOT / "tests/validate_report.py").read_text(encoding="utf-8"))
     check("sign delivery tool", (ROOT / "tools/sign_delivery.py").is_file())
-    check("workbench api", (ROOT / "tools/task_server.py").is_file())
-    check("workbench ui", all((ROOT / f"ui/workbench.{ext}").is_file() for ext in ("html", "css", "js")))
-    check("workbench defer-sign", "--defer-sign" in (ROOT / "tools/run_task.py").read_text(encoding="utf-8"))
-    check("workbench web test", (ROOT / "tests/web_api_smoke.py").is_file())
-    check("workbench doc", (ROOT / "docs/WEB_WORKBENCH_2026-10-19_zh.md").is_file())
+    # v0.13.0：legacy 工作台（task_server.py + workbench.html/css + web_api_smoke）已下线，
+    # 主工作台唯一实现为 server/app.py + ui/index.html + ui/workbench.js。
+    check("workbench ui script", (ROOT / "ui/workbench.js").is_file())
+    check("legacy task_server removed", not (ROOT / "tools/task_server.py").exists())
+    check("legacy workbench page removed",
+          not any((ROOT / f"ui/workbench.{ext}").exists() for ext in ("html", "css")))
     tape = json.loads((ROOT / "runs/dsh-tape-sample.json").read_text(encoding="utf-8"))
     check("tape sample beats>0", isinstance(tape.get("beats"), list) and len(tape["beats"]) > 0)
 

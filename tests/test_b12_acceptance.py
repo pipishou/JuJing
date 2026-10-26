@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""B11 独立验收测试（A13–A16）——Checker 侧黑盒验收。
+"""B11 独立验收测试（A14–A16）——Checker 侧黑盒验收。
 
 覆盖（规格来源：Lead 派单消息，仓库内无独立 B11 规格文件）：
-  A13 tests/web_api_smoke.py 在无 pandas 环境 exit 0（运行时 sys.modules 无 pandas）。
+  注：A13（tests/web_api_smoke.py 无 pandas exit 0）随 v0.13.0 legacy 工作台下线一并移除；
+      零 pandas 依赖由 A14 的「tools/ 与 server/ 零 import pandas」继续覆盖。
   A14 tools/ingest_task_data.py 对 CSV 夹具与 openpyxl 生成的 .xlsx 各跑一次：
       T/T30 JSON schema 正确、日期归一、缺列 rc=2 单行 JSON、无 traceback；
       tools/ 与 server/ 零 "import pandas" 命中。
@@ -15,11 +16,11 @@
       data_refs sha 校验通过 → /sign → /finalize 合法链；
       负例：损坏 CSV / 超大文件 / 越界窗口 / 非法 task_id / line 缺省回落 全拒。
   A16 版本 v0.12.0 在 README.md、SKILL.md、ui/README.md 三处一致；
-      README 有 M1.5 能力段且 task_server/workbench 标注 legacy；
+      README 有 M1.5 能力段，且不再提及已下线的 legacy 工作台（task_server / workbench.html）；
       tests/validate_structure.py PASS。
 
 运行方式：
-  python -B tests/test_b12_acceptance.py                 # 跑 A13–A16
+  python -B tests/test_b12_acceptance.py                 # 跑 A14–A16
   python -B tests/test_b12_acceptance.py --case A15      # 单跑一个
   python -B tests/test_b12_acceptance.py --regression    # 附带全量回归
   python -B tests/test_b12_acceptance.py --list          # 列出用例
@@ -432,56 +433,6 @@ def wait_state(srv: LocalServer, task_id: str, targets: set, timeout: float = 12
 def report_timeout(srv: LocalServer, task_id: str, timeout: float = 120.0) -> str:
     return wait_state(srv, task_id, {"assembled", "awaiting_sign", "signed", "failed"}, timeout)
 
-
-# ---------------------------------------------------------------------------
-# A13：web_api_smoke.py 无 pandas exit 0
-# ---------------------------------------------------------------------------
-
-
-def case_a13(_sb: Sandbox) -> str:
-    sb = _sb
-    script = sb.repo / "tests" / "web_api_smoke.py"
-    check(script.is_file(), f"缺少 tests/web_api_smoke.py：{script}")
-
-    pandas_probe = run_py(["-c", "import pandas"], cwd=sb.repo, timeout=60)
-    if pandas_probe.rc == 0:
-        test_issue("环境里仍能 import pandas，A13 的『无 pandas 环境』前提不成立")
-
-    wrapper = r"""
-import json, runpy, sys, traceback
-rc = 0
-try:
-    runpy.run_path(r"tests/web_api_smoke.py", run_name="__main__")
-except SystemExit as exc:
-    code = exc.code
-    rc = 0 if code in (None, 0) else (code if isinstance(code, int) else 1)
-except Exception:
-    traceback.print_exc()
-    rc = 1
-print("B11_WRAPPER " + json.dumps({"rc": rc, "pandas": "pandas" in sys.modules}))
-"""
-    res = run_py(["-c", wrapper], cwd=sb.repo, timeout=240)
-    marker = None
-    for line in res.out.splitlines():
-        if line.startswith("B11_WRAPPER "):
-            try:
-                marker = json.loads(line[len("B11_WRAPPER "):])
-            except Exception:
-                marker = None
-    if marker is None:
-        test_issue(
-            "web_api_smoke 包装执行未输出版本标记（脚本可能提前 sys.exit 于 import 阶段）："
-            + res.tail(1500)
-        )
-    combined = res.text
-    check("Traceback (most recent call last)" not in combined,
-          "web_api_smoke 运行抛 traceback：\n" + res.tail(2000))
-    check("No module named 'pandas'" not in combined and 'No module named "pandas"' not in combined,
-          "web_api_smoke 仍依赖 pandas：" + res.tail(1500))
-    check(marker.get("rc") == 0, f"web_api_smoke 退出码 {marker.get('rc')}（期望 0）：" + res.tail(2000))
-    check(marker.get("pandas") is False,
-          "web_api_smoke 运行后 sys.modules 出现 pandas（间接依赖未清干净）")
-    return "web_api_smoke.py rc=0，运行时 sys.modules 无 pandas"
 
 # ---------------------------------------------------------------------------
 # A14：ingest_task_data.py CSV / xlsx / 缺列 / 零 pandas 命中
@@ -986,13 +937,8 @@ def case_a15(sb: Sandbox) -> str:
 
 
 # ---------------------------------------------------------------------------
-# A16：版本三处一致 + README M1.5/legacy + validate_structure
+# A16：版本三处一致 + README M1.5 + legacy 清除 + validate_structure
 # ---------------------------------------------------------------------------
-
-
-def _legacy_near(lines: list, idx: int, span: int = 2) -> bool:
-    window = " ".join(lines[max(0, idx - span): idx + span + 1]).lower()
-    return any(tok in window for tok in ("legacy", "旧", "弃用", "deprecated"))
 
 
 def case_a16(sb: Sandbox) -> str:
@@ -1014,17 +960,16 @@ def case_a16(sb: Sandbox) -> str:
           "README.md 的 M1.5 能力段未提及安全门/securityGate/gate.json")
 
     lines = readme.splitlines()
-    for token, label in (("task_server", "task_server.py"), ("workbench", "workbench.html")):
-        idxs = [i for i, line in enumerate(lines) if token in line]
-        check(bool(idxs), f"README.md 未提及 {label}（无法核对 legacy 标注）")
-        check(any(_legacy_near(lines, i) for i in idxs),
-              f"README.md 中 {label} 未标注 legacy/旧/弃用/deprecated（±2 行内）")
+    gone = ("task_server", "workbench.html", "workbench.css", "web_api_smoke", "WEB_WORKBENCH")
+    for token in gone:
+        hits = [i + 1 for i, line in enumerate(lines) if token in line]
+        check(not hits, f"README.md 仍提及已下线组件 {token}（行 {hits}）；v0.13.0 起只保留主工作台")
 
     res = run_py(["tests/validate_structure.py"], cwd=sb.repo, timeout=180)
     check(res.rc == 0, f"validate_structure 退出码 {res.rc}（期望 0）：" + res.tail(1500))
     check("RESULT: PASS" in res.text,
           "validate_structure 未输出 RESULT: PASS：" + res.tail(1500))
-    return "v0.12.0 三处一致；README 含 M1.5 安全门段；task_server/workbench 标 legacy；validate_structure PASS"
+    return "v0.12.0 三处一致；README 含 M1.5 安全门段；legacy 工作台已从 README 清除；validate_structure PASS"
 
 
 # ---------------------------------------------------------------------------
@@ -1068,10 +1013,9 @@ def run_regression(sb: Sandbox) -> list:
 # ---------------------------------------------------------------------------
 
 CASES = {
-    "A13": ("web_api_smoke 无 pandas exit 0", case_a13),
     "A14": ("ingest_task_data CSV/xlsx/缺列/零 pandas", case_a14),
     "A15": ("multipart 上传 → external runner → 真报告 → sign/finalize", case_a15),
-    "A16": ("v0.12.0 三处一致 + M1.5 legacy 标注 + validate_structure", case_a16),
+    "A16": ("v0.12.0 三处一致 + M1.5 能力段 + legacy 清除 + validate_structure", case_a16),
 }
 
 
@@ -1084,8 +1028,8 @@ def main(argv: list) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
     except Exception:
         pass
-    parser = argparse.ArgumentParser(description="B11 独立验收测试（A13–A16）")
-    parser.add_argument("--case", default="", help="只跑指定用例（逗号分隔，如 A13,A15）")
+    parser = argparse.ArgumentParser(description="B11 独立验收测试（A14–A16）")
+    parser.add_argument("--case", default="", help="只跑指定用例（逗号分隔，如 A14,A15）")
     parser.add_argument("--list", action="store_true", help="列出用例")
     parser.add_argument("--keep", action="store_true", help="保留全部沙盒")
     parser.add_argument("--keep-failed", action="store_true", help="保留失败用例的沙盒")
