@@ -76,6 +76,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from notify_lark import notify_signed  # G1 飞书出站接线（同目录模块）
+
 HERE = Path(__file__).resolve().parent
 DEFAULT_ROOT = HERE.parent
 DEFAULT_HOST = "127.0.0.1"
@@ -1521,9 +1523,11 @@ def reconcile_sign_state(cfg, tdir):
     if approved is None:
         return status
     with cfg.task_lock(tdir.name):
-        return write_status(tdir, state="signed", step="finalized",
-                            decision_status=approved.get("status"),
-                            approval=approved.get("approval"), reconciled=True)
+        reconciled = write_status(tdir, state="signed", step="finalized",
+                                  decision_status=approved.get("status"),
+                                  approval=approved.get("approval"), reconciled=True)
+    notify_signed(cfg, tdir)  # G1：CLI 直收口的兜底路径同样推飞书回执（幂等）
+    return reconciled
 
 
 def get_task(cfg, task_id):
@@ -2972,6 +2976,7 @@ def post_finalize(cfg, task_id):
     sha256 = (parsed or {}).get("signature_sha256") if isinstance(parsed, dict) else ""
     if not sha256:
         sha256 = (read_json(sig) or {}).get("report_sha256")
+    notify_signed(cfg, tdir)  # G1：签字收口推飞书回执（幂等，失败不影响交付）
     return 200, {"ok": True, "decision": decision.get("id"), "status": decision.get("status"),
                  "signer": (decision.get("approval") or {}).get("by"),
                  "signature_sha256": sha256, "identity": cfg.identity()}

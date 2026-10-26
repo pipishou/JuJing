@@ -1,7 +1,5 @@
 # 聚鲸 Bot 团队（DSH 版）· 可迁移结构包
 
-> legacy 说明（v0.12.0）：v0.12.0 起 CSV/Excel 上传与复核签字已并入主工作台（`server/app.py` + `ui/index.html`）；`tools/task_server.py` + `ui/workbench.html` 保留为 legacy 参考，不再作为主入口。
->
 > 状态：v0.12.0，2026-10-20 本机（DSH 0.2.x / Windows）搭起并测试——**v0.12.0：合并上游 v0.11.2（本地 Web 工作台）＋ M1/M1.5 可信门与服务化**（v0.7：真实数据入口/真实报告门/评分卡/签字；v0.8：四段闭环 bundle；v0.9：UI 数据绑定 + 回看/月报；v0.10：无归因/值级合同/本机回看/签字收口；v0.11：一键收口）。
 > 用途：把「制造业经营归因四角色团队」做成**结构可跑、可测、可迁移**的包；明天带到工作电脑继续推进。
 
@@ -13,13 +11,12 @@
 - **两种运行模式**：确定性 `orchestration/team-workflow.mjs`（DSH `workflow` 工具）｜交互式 Agent Teams（`spawn_teammate`×3＋共享任务板）；
 - **可机检**：`tests/validate_structure.py`＋`tests/validate_report.py`；
 - **UI 概念原型**：`ui/index.html`（单文件离线，AI 员工事务所·舞台实况，假数据，用于 G0「第一眼」评审）；设计定稿见 `docs/OPTIMAL_TEAM_AND_UI_2026-10-18.md`；
-- **v0.11.2 本地 Web 工作台（legacy）**：`ui/workbench.html`＋`tools/task_server.py`（Python 标准库 HTTP，无 Flask/FastAPI）——建任务→上传 CSV/字段映射/workflow-result→运行收口→看报告→签字；真实数据只落 `runs/<task-id>/`，不进入浏览器存储；使用见 `docs/WEB_WORKBENCH_2026-10-19_zh.md`。**v0.12.0 起主入口改为 M1.5 主工作台（`server/app.py`＋`ui/index.html`，见下节）**；
 - **v0.2.1 增量**：`ui/sprites.js` 原创像素小人（Kairosoft 风格参考，不含开罗素材）＋ `tools/gen_ui_data.py`（YAML→`ui/team-data.js`）＋ `orchestration/dsh-session-tape.mjs`（DSH 日志→舞台 tape，样例 `runs/dsh-tape-sample.json`）；
 - **v0.3 增量**：角色 8 帧动画（idle/walk0/walk1/blink/talk/happy/think/surprised；说话口型、换拍行走、随机眨眼、按幕表情）＋真实 DSH 会话 tape 回放（`ui/tape-data.js`，`?mode=tape&t=N`；样例 120 beats）；
 - **v0.3.1 增量**：UI「新建任务」接单向导（生成 task JSON）＋`templates/task-intake.example.json`＋`docs/REAL_TASK_PLAYBOOK_2026-10-19_zh.md`＋`docs/PRODUCT_BENCHMARK_2026-10-18_zh.md`；交付卡加成本行（AI 成本/人工节省）；工作流支持 `args.data_dir`；
 - **v0.4 增量**：`team/loop/` 四段闭环卡（证据/分析/决策/闭环 schema + 状态机 + 示例）；`docs/FOUR_LOOP_UPGRADE_2026-10-18_zh.md`；GitHub 仓库方案 `docs/GITHUB_REPO_PLAN_2026-10-18_zh.md`；
 - **v0.5 增量**：与方法论 v1.3 对齐——`assets/scorecard_six_dim.yaml` 升 100 分制/硬护栏/阈值/CSOLR；新增 `assets/perception_rules.yaml`（L0 检测+三级降级+失败回滚）、`assets/decision_contract_refill.yaml`（决策契约）；四卡补齐决策日志字段；`docs/METHODOLOGY_INTEGRATION_2026-10-18_zh.md`；
-- **v0.6 增量**：关系层 `team/memory/`（员工记忆 schema+检索规则+脱敏样例）、目标层 `team/goals/`（目标卡+进度）、成本层 `team/cost/`（AI 成本/人工节省/净收益/ROI）、接入层 `team/integrations/wecom.yaml`＋`tools/wecom_notify.py`（企微群机器人出站，20 条/分钟，dry-run 已验证）；UI 加目标进度、员工记忆、企微推送按钮；
+- **v0.6 增量**：关系层 `team/memory/`（员工记忆 schema+检索规则+脱敏样例）、目标层 `team/goals/`（目标卡+进度）、成本层 `team/cost/`（AI 成本/人工节省/净收益/ROI）、接入层企微群机器人出站（**v0.13.0 已下线，IM 统一走飞书**）；UI 加目标进度、员工记忆；
 - **v0.7 增量**：真实数据入口 `tools/ingest_task_data.py`（CSV/Excel→T/T30）、`tools/check_data_contract.py`（11 因素/10%/30% 降级）；真实报告门 `assemble_report.py --real`＋`validate_report.py --require-real`；评分卡计算 `tools/score_scorecard.py`；签字持久化 `tools/sign_delivery.py`（拒绝 demo 签字）。
 - **迁移件**：`MIGRATION.md`＋`package.ps1`（zip＋manifest）。
 
@@ -66,19 +63,6 @@ python -B server/app.py            # 默认 127.0.0.1:8787；--port/--host/--roo
 | `tests/m1_smoke.py`（A1–A5 契约冒烟） | **PASS** |
 | `tests/validate_structure.py`（结构/名册/DAG/资产/演示数据完整性） | **PASS** |
 
-## Web 工作台（v0.11.2，legacy 参考）
-
-```powershell
-cd <bot-team 仓库根>
-python tools\task_server.py --port 8765
-# 浏览器打开 http://127.0.0.1:8765/workbench
-```
-
-> legacy：v0.12.0 起 CSV/Excel 上传与复核签字已并入主工作台（`server/app.py` + `ui/index.html`）；`tools/task_server.py` + `ui/workbench.html` 保留为 legacy 参考，不再作为主入口。迁移对照见 `docs/WEB_WORKBENCH_2026-10-19_zh.md`（8765→8787、`/workbench`→`/`、CSV 上传→接单抽屉）。
-
-顺序：**新建任务 → 上传 CSV/Excel＋字段映射 YAML＋workflow-result.json → 运行收口 → 看报告 → 签字**。
-服务端只做 s5（数据合同/真实报告门/四卡/签字）；s1–s4 归因仍由 DSH workflow 产出 `workflow-result.json`。已签字任务锁定，不能换文件/重跑/重复签字；真实数据只落 `runs/<task-id>/`（`.gitignore` 已忽略）。
-
 ## 真实数据流程（v0.7，命令行等价路径）
 
 ```powershell
@@ -105,24 +89,17 @@ python tools/review_due.py --root runs --out runs/review-due.md
 python tools/review_due.py --root runs --create-issue   # 仅 CI/装了 gh 的机器
 # 10. 成本月报
 python tools/cost_monthly.py --file runs/task-B/cost.jsonl --month 2026-10 --outdir runs
-# 11. 企微交付卡（从 report.json 自动填充；默认 dry-run）
-python tools/wecom_notify.py --kind delivery --report runs/task-B/report.json --cost "AI ¥0.02 / 人工节省 2.5h" --dry-run
-# 12. 负向门（确认 demo/叙述/缺数据真的被拒）
+# 11. 负向门（确认 demo/叙述/缺数据真的被拒）
 python tests/negative_gates.py
-# 13. 无真实数据也能回归（合成 11 列 CSV，跑通全链）
+# 12. 无真实数据也能回归（合成 11 列 CSV，跑通全链）
 python tests/real_mode_smoke.py
-# 14. 企微传输层（本地 HTTP server，成功/失败路径；不连真实企微）
-python tests/wecom_transport_smoke.py
-# 15. 无归因路径 + 值级合同 + 签字收口
+# 13. 无归因路径 + 值级合同 + 签字收口
 python tests/no_finding_smoke.py
 python tests/contract_values_smoke.py
 python tools/finalize_delivery.py --report runs/task-B/report.json --loop-dir runs/task-B/loop --signature runs/task-B/report.signature.json
-# 16. 一键收口（ingest→合同→real 报告→四卡→签字→approved）
+# 14. 一键收口（ingest→合同→real 报告→四卡→签字→approved）
 python tools/run_task.py --csv task.csv --line B --t-start 2026-10-05 --t-end 2026-10-11 --base-start 2026-09-05 --base-end 2026-10-04 --field-map templates/field-map.example.yaml --outdir runs/task-B --workflow-result runs/task-B/workflow-result.json --analysis-json team/loop/example-analysis.json --goal-json team/goals/example-goal.json --cost-json team/cost/example-cost.json --expected "T+7 补料率 ≤5.40%" --signer "业务负责人"
-# 17. legacy Web 工作台（建任务→上传→运行→签字；HTTP 全链回归；v0.12.0 起主入口见上节 8787）
-python tools/task_server.py --port 8765
-python tests/web_api_smoke.py
-# 18. 本机 T+7 回看计划任务（每周一 09:00）
+# 15. 本机 T+7 回看计划任务（每周一 09:00）
 powershell -ExecutionPolicy Bypass -File tools/install_review_task.ps1
 ```
 
@@ -166,7 +143,7 @@ bot-team/
 │   └─ team-workflow.mjs    # 确定性 runner（喂给 DSH workflow 工具）
 ├─ tests/                   # 结构与报告机检、M1/M1.5 验收
 ├─ runs/                    # 本机测试回执 + demo 报告
-├─ ui/                      # 主工作台 ui/index.html + api-adapter.js；legacy：workbench.html
+├─ ui/                      # 主工作台 ui/index.html + workbench.js + api-adapter.js
 └─ docs/                    # 方向手稿 / 试点规格 / 最优版团队+UI 设计 / 项目账本快照
 ```
 

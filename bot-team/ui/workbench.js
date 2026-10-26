@@ -1,4 +1,4 @@
-/* Bot Team 本地任务工作台：无框架、无外链，直接对接 tools/task_server.py */
+/* Bot Team 主工作台脚本：无框架、无外链，直接对接 server/app.py 的 /api */
 (function () {
   "use strict";
 
@@ -27,6 +27,16 @@
   }
   function statusOf(s) { return STATUS[s] || [s || "未知", "created"]; }
 
+  /* 合入 index.html 后的读侧兼容：本地服务可能返回裸数组 / 扁平任务对象（字段名为 task_id / state）。 */
+  function normTask(t) {
+    if (!t || typeof t !== "object") return t;
+    if (!t.id && t.task_id) t.id = t.task_id;
+    if (!t.status && t.state) t.status = t.state;
+    if (!t.line && t.input && t.input.line) t.line = t.input.line;
+    if (!t.context) t.context = t.title || "";
+    return t;
+  }
+
   function setHealth(ok, msg) {
     const el = $("health");
     el.className = "health " + (ok ? "ok" : "bad");
@@ -54,7 +64,7 @@
     try {
       res = await fetch(API + path, opts || {});
     } catch (e) {
-      throw new Error("无法连接本地服务。请先运行：python tools/task_server.py --port 8765");
+      throw new Error("无法连接本地服务。请先运行：python -B server/app.py --port 8787");
     }
     const raw = await res.text();
     let data = null;
@@ -80,7 +90,8 @@
 
   async function loadTasks(keepCurrent) {
     const data = await api("/tasks");
-    state.tasks = data.tasks || [];
+    const list = Array.isArray(data) ? data : (data.tasks || []);
+    state.tasks = list.map(normTask);
     renderTasks();
     if (!keepCurrent) {
       if (state.current && state.tasks.some((t) => t.id === state.current)) return;
@@ -119,18 +130,24 @@
 
   async function loadTask(id) {
     const data = await api("/tasks/" + encodeURIComponent(id));
+    const t = normTask(data.task || data);
+    const rawStatus = data.status;
+    const statusText = (rawStatus && typeof rawStatus === "object") ? (rawStatus.state || rawStatus.step) : rawStatus;
+    if (!t.status && statusText) t.status = statusText;
+    if (!t.report && data.report) t.report = data.report;
     state.current = id;
-    state.detail = data.task;
+    state.detail = t;
     renderTasks();
     setUploadEnabled(!!state.current);
-    renderDetail(data.task);
+    renderDetail(t);
   }
 
   /* ---------------- create / upload / run / sign ---------------- */
 
   async function createTask() {
     const body = {
-      id: $("fId").value.trim(),
+      task_id: $("fId").value.trim(),
+      runner: "external",
       line: $("fLine").value.trim(),
       t_start: $("fTStart").value,
       t_end: $("fTEnd").value,
@@ -149,8 +166,9 @@
     btn.disabled = true; btn.textContent = "创建中…";
     try {
       const data = await postJSON("/tasks", body);
-      state.current = data.task.id;
-      toast("任务已创建：" + data.task.id);
+      const created = data.task || data;
+      state.current = created.id || created.task_id;
+      toast("任务已创建：" + state.current);
       $("fId").value = "";
       await loadTasks();
     } catch (e) {
@@ -166,14 +184,17 @@
     const map = $("fMap").files[0];
     const wf = $("fWf").files[0];
     if (!csv && !map && !wf) { toast("至少选择一个文件", true); return; }
+    if (!csv) { toast("请选择 CSV / Excel 数据文件（表格由服务端转 T/T30）", true); return; }
     const fd = new FormData();
-    if (csv) fd.append("csv", csv, csv.name);
+    fd.append("table", csv, csv.name);
     if (map) fd.append("field_map", map, map.name);
-    if (wf) fd.append("workflow_result", wf, wf.name);
+    // ingest_task_data 需要显式窗口；取建任务表单里的日期
+    [["fTStart", "t_start"], ["fTEnd", "t_end"], ["fBStart", "base_start"], ["fBEnd", "base_end"]]
+      .forEach(function (pair) { const el = $(pair[0]); if (el && el.value) fd.append(pair[1], el.value); });
     const btn = $("uploadBtn");
     btn.disabled = true; btn.textContent = "上传中…";
     try {
-      await api("/tasks/" + encodeURIComponent(state.current) + "/files", { method: "POST", body: fd });
+      await api("/tasks/" + encodeURIComponent(state.current) + "/data", { method: "POST", body: fd });
       toast("文件已上传");
       await loadTask(state.current);
       await loadTasks(true);
@@ -190,7 +211,7 @@
     btn.disabled = true; btn.textContent = "运行中…";
     banner("");
     try {
-      const data = await postJSON("/tasks/" + encodeURIComponent(state.current) + "/run", {});
+      const data = await postJSON("/tasks/" + encodeURIComponent(state.current) + "/run", { runner: "external" });
       toast("收口完成，报告已生成");
       if (data.log) $("log").textContent = data.log;
     } catch (e) {
@@ -403,7 +424,7 @@
     $("refreshBtn").addEventListener("click", () => loadTasks().catch((e) => toast(e.message, true)));
 
     api("/health").then((h) => {
-      setHealth(true, "服务 v" + h.api_version + " · " + h.tasks + " 任务");
+      setHealth(true, "服务 v" + (h.api_version || h.version || "—"));
       setUploadEnabled(!!state.current);
       return loadTasks();
     }).then(() => {

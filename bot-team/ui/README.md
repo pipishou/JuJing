@@ -1,10 +1,9 @@
 # UI · AI 员工事务所（v0.12.0）
 
 > 口径（v0.12.0）：合并上游 v0.11.2（本地 Web 工作台）＋ M1/M1.5 可信门与服务化。
-> legacy 说明（v0.12.0）：CSV/Excel 上传与复核签字已并入主工作台（`server/app.py` + `ui/index.html`）；`workbench.html` 保留为 legacy 参考，不再作为主入口。
 
 - `index.html`：**舞台原型 + 主工作台**——单文件、离线可开（假数据，G0「第一眼」评审）；经 `server/app.py`（8787）打开时由 `api-adapter.js` 接真数据，成为 M1.5 主工作台。
-- `workbench.html`：**legacy 真实工作台**，接本地 `tools/task_server.py`（8765）——建任务→上传 CSV/Excel＋字段映射＋workflow-result→运行收口→看报告→签字。
+- `workbench.js`：主工作台的任务工作台视图逻辑（建任务→上传 CSV/Excel＋字段映射＋workflow-result→运行收口→看报告→签字），由 `index.html` 引入。
 
 ## 打开方式
 
@@ -17,20 +16,16 @@ start http://127.0.0.1:8787/      # 服务端会 302 到 /ui/index.html（见下
 # 舞台原型（离线直接开；也可 ?beat=3 直接停在第四拍）
 start ui\index.html
 start "ui\index.html?beat=3"
-
-# legacy 真实工作台（需要旧服务端）
-python tools\task_server.py --port 8765
-start http://127.0.0.1:8765/workbench
 ```
 
 ## v0.7.1 签字内容哈希（2026-10-18）
 
 - 「签字确认」不再只是改 DOM：浏览器用 `crypto.subtle` 对交付卡内容做 SHA-256，显示前 16 位；与 `tools/sign_delivery.py` 的报告 SHA256 对齐（UI 是示例内容哈希，正式签字以工具输出 signature.json 为准）。
 
-## v0.6 关系/目标/成本/企微（2026-10-18）
+## v0.6 关系/目标/成本（2026-10-18）
 
-- 班组卡加**目标进度条**（7.2%→5.4%，T+7 复查）；员工详情加**跨任务记忆** chips；交付卡加「企微推送」按钮（原型，实际工具 `tools/wecom_notify.py`）。
-- 记忆/目标/成本/企微的 schema 与规则见 `team/memory`、`team/goals`、`team/cost`、`team/integrations`。
+- 班组卡加**目标进度条**（7.2%→5.4%，T+7 复查）；员工详情加**跨任务记忆** chips；企微推送按钮与其工具已于 v0.13.0 下线（IM 统一走飞书）。
+- 记忆/目标/成本的 schema 与规则见 `team/memory`、`team/goals`、`team/cost`。
 
 ## v0.3.1 接单向导 + 成本行（2026-10-18）
 
@@ -123,7 +118,7 @@ state `assembled/awaiting_sign`、`/api/tasks/<id>/events` SSE 164 条、`/gate`
 
 ## v0.12.0 收口（2026-10-20）
 
-- 版本口径：合并上游 v0.11.2（本地 Web 工作台）＋ M1/M1.5 可信门与服务化；`index.html` 为主工作台页面（8787），`workbench.html` 转 legacy。
+- 版本口径：合并上游 v0.11.2（本地 Web 工作台）＋ M1/M1.5 可信门与服务化；`index.html` 为唯一主工作台页面（8787）；v0.13.0 起 legacy 工作台（`workbench.html/css`、`task_server.py`）整份删除。
 - 回归证据：`tests/test_core_m15.py` 188 项 PASS、`tests/test_m15_acceptance.py` A7–A12 PASS、`tests/m1_smoke.py` A1–A5 PASS、`tests/validate_structure.py` PASS。
 - 已知限制：`runner=dsh` 仍返回 501（M2 实现）；审批门/签字是本机留痕，不是法律电子签名。
 

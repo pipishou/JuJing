@@ -85,15 +85,16 @@ python tests/validate_report.py runs/demo-report.json   # 报告 schema＋断言
 - v0.3.1：接单向导（`ui/index.html` 新建任务）＋真实任务手册（`docs/REAL_TASK_PLAYBOOK_2026-10-19_zh.md`）＋竞品基准（`docs/PRODUCT_BENCHMARK_2026-10-18_zh.md`）；工作流 `args.data_dir` 支持真实数据目录。
 - v0.4：四段闭环卡（`team/loop/`：evidence/analysis/decision/closure schema + 状态机 + example）；交付物必须能回答"证据够不够/分析漏没漏/谁拍的板/结果回来没"。
 - v0.5：与方法论《AI智能经营模型 v1.3》对齐——`assets/scorecard_six_dim.yaml` 100 分制/硬护栏/阈值/CSOLR；新增 `assets/perception_rules.yaml`（L0 检测+三级降级+失败回滚）、`assets/decision_contract_refill.yaml`；四卡补齐决策日志字段。
-- v0.6：关系/记忆（`team/memory/`）、Goals（`team/goals/`）、成本透明（`team/cost/`）、企微出站（`team/integrations/wecom.yaml`＋`tools/wecom_notify.py`）；UI 加目标进度/记忆/企微推送。
+- v0.6：关系/记忆（`team/memory/`）、Goals（`team/goals/`）、成本透明（`team/cost/`）、企微出站（v0.13.0 已下线，IM 统一走飞书）；UI 加目标进度/记忆。
 - v0.7：真实数据入口（`tools/ingest_task_data.py`/`check_data_contract.py`）、真实报告门（`assemble_report --real`/`validate_report --require-real`）、评分卡计算（`score_scorecard.py`）、签字持久化（`sign_delivery.py`，拒绝 demo 签字）；`templates/field-map.example.yaml` + `tests/real_mode_smoke.py` 用合成 11 列数据跑通全链。
 - v0.8：四段闭环 bundle 自动写入（`assemble_report --records-dir` → `tools/write_loop_bundle.py` 写 evidence/decision/closure，analysis/goal/cost 由入参拷贝）+ `tools/validate_loop.py --require-complete` 门。
 - v0.8.1：`tools/cost_record.py`（成本记录/汇总）、`tools/memory_retrieve.py`（员工记忆检索，隐私/过期过滤）、`tests/negative_gates.py`（demo/叙述/缺数据必须被拒）。
-- v0.9：UI 数据绑定（goals/memory/cost 生成数据）、`tools/review_due.py`（T+7 回看→GitHub issue）、`tools/cost_monthly.py`（成本月报）、`wecom_notify.py --report`（交付卡自动填充）；`.github/workflows/review-due.yml`。
-- v0.9.2：`tests/wecom_transport_smoke.py` 用本地 HTTP server 验证企微 POST payload/成功/失败路径（不连真实企微、不需要 webhook）。
+- v0.9：UI 数据绑定（goals/memory/cost 生成数据）、`tools/review_due.py`（T+7 回看→GitHub issue）、`tools/cost_monthly.py`（成本月报）；`.github/workflows/review-due.yml`。
+- v0.9.2：（已随 v0.13.0 下线）企微传输层冒烟测试。
 - v0.10：无归因路径（finding=0 → decision.no_finding/chosen=不做，报告门+loop 门允许）；值级合同（日期重复/连续、数值范围）；`review_due --out` 本机清单；`finalize_delivery.py` 签字后 decision=approved（校验 hash）。
 - v0.11：`run_task.py` 一键收口（ingest→合同→real 报告→四卡→签字→approved）；`install_review_task.ps1` 注册本机每周回看任务。
-- v0.11.2：本地 Web 工作台（`tools/task_server.py` 标准库 HTTP + `ui/workbench.html/css/js`）——建任务→上传 CSV/Excel＋字段映射＋workflow-result→运行收口→看报告/证据缺口/评分卡→签字；已签任务锁定；`tests/web_api_smoke.py` 覆盖 HTTP 全链；不新增 Flask/FastAPI 依赖。
-- v0.12.0：合并上游 v0.11.2（本地 Web 工作台）＋ M1/M1.5 可信门与服务化——`core/`（ids/provenance/gates/pack/report_contract/team/events/gate/paths）、行业包 `packs/manufacturing` v1.1.0、主工作台 `server/app.py`（默认 127.0.0.1:8787；`/api/team`、`/api/tasks`、`/api/tasks/<id>/data`、`/events`（SSE）、`/gate`、`/sign`、`/finalize`；多任务；runner=fixture/external/dsh(501)；审批门 `gate.json` history append-only＋审计事件）；测试证据 `tests/test_core_m15.py`（188 项）、`tests/test_m15_acceptance.py`（A7–A12）、`tests/m1_smoke.py`（A1–A5）。**legacy**：`tools/task_server.py`＋`ui/workbench.html` 保留参考，CSV/Excel 上传与复核签字已并入主工作台。
+- v0.11.2：（已被 v0.13.0 取代）上游本地 Web 工作台曾提供 `tools/task_server.py` + `ui/workbench.html/css/js` 的第二套入口，v0.13.0 起整份删除，只保留主工作台。
+- v0.12.0：合并上游 v0.11.2（本地 Web 工作台）＋ M1/M1.5 可信门与服务化——`core/`（ids/provenance/gates/pack/report_contract/team/events/gate/paths）、行业包 `packs/manufacturing` v1.1.0、主工作台 `server/app.py`（默认 127.0.0.1:8787；`/api/team`、`/api/tasks`、`/api/tasks/<id>/data`、`/events`（SSE）、`/gate`、`/sign`、`/finalize`；多任务；runner=fixture/external/dsh(501)；审批门 `gate.json` history append-only＋审计事件）；测试证据 `tests/test_core_m15.py`（188 项）、`tests/test_m15_acceptance.py`（A7–A12）、`tests/m1_smoke.py`（A1–A5）。
+- v0.13.0：架构减法——legacy 工作台（`tools/task_server.py` + `ui/workbench.html/css` + `tests/web_api_smoke.py` + 其文档）整份下线，`run_task.py --defer-sign` 随之移除；主工作台为唯一 Web 入口；验收判据 A13 撤销、A16 反转为「README 不得再提及已下线组件」。
 
 
