@@ -14,6 +14,8 @@ runs/task-*/
 bot-team/runs/task-*/
 bot-team/runs/.task_seq.json
 bot-team/runs/*.log
+bot-team/*.log
+bot-team/.reply-consume-state.json
 **/runs/*/
 *.zst
 *.jsonl.zstd

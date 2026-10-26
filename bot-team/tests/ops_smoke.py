@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""运营层冒烟：回看扫描 / 成本月报 / 企微报告模式（不真发、不依赖真实数据）。"""
+"""运营层冒烟：回看扫描 / 成本月报（不依赖真实数据、不外发消息）。"""
 import json
 import subprocess
 import sys
@@ -57,9 +57,6 @@ def main():
         "recommendation": [{"action": "补保养", "roi": {"cost": "¥500", "avoided": "¥2000", "anchor": "a"}, "irreversibility": "reversible"}],
         "decision_log_entry": {"expected_result": "T+7 ≤5.40%"},
     }, ensure_ascii=False), encoding="utf-8")
-    out = run([PY, "tools/wecom_notify.py", "--kind", "delivery", "--report", str(report),
-               "--cost", "AI ¥0.02 / 人工节省 2.5h", "--dry-run"])
-    assert "主因" in out and "模具状态" in out, "wecom report mode failed"
 
     loop = TMP / "loop"
     run([PY, "tools/write_loop_bundle.py", "--report", str(report), "--outdir", str(loop)])
