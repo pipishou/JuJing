@@ -8,10 +8,11 @@
 | 项 | 值 |
 |---|---|
 | 女娲包路径 | `C:\Users\kf-41\Desktop\个人内容\skill\nuwa-skill-main\nuwa-skill-main\examples\steve-jobs-perspective` |
-| 蒸馏产物 | `SKILL.md`（6 心智模型 / 8 决策启发式 / 表达 DNA / 失败模式 Fallback 树） |
-| 蒸馏截止 | 2026-04-05（女娲包调研时间） |
-| 本仓库最后校验 | 2026-10-26 |
-| 环境变量覆盖 | `NUWA_ROOT`（默认即上表路径） |
+| 现用底稿 | `@pack:persona/steve-jobs/distill/SKILL.md`（包内重蒸稿；女娲再更新不覆盖） |
+| 蒸馏产物 | `SKILL.md`（6 心智模型 / 8 决策启发式 / **后见之明校验层** / 表达 DNA / 失败模式 Fallback 树） |
+| 蒸馏截止 | 2026-10-28（重蒸：补 2012–2026 后见之明 + 3 本新传记/档案） |
+| 本仓库最后校验 | 2026-10-28 |
+| 环境变量覆盖 | `NUWA_ROOT`（默认即上表路径）、`ADVISORY_PACK` |
 
 ## 增量采集
 
@@ -25,11 +26,11 @@ persona/steve-jobs/inbox/YYYY-MM-DD-<slug>.md
 
 | 已消化日期 | 条目 | 影响 |
 |---|---|---|
-| （暂无） | — | — |
+| 2026-10-28 | 2026 重蒸批：后见之明（Apple Silicon 2020 / After Steve 2022 / Make Something Wonderful 2023 / Vision Pro 2023-24 / Apple Intelligence + DMA 2024） | 新增「后见之明校验」层；模型仍 6 条，但每条附 15 年后判定；如实标注联网检索不可用（API 402），条目为公开常识级 |
 
 ## 更新三步
 
-1. **收** → 2. **蒸**（女娲重蒸覆盖 `SKILL.md` 或改 `VOICE.md`） → 3. **刷**（`--apply` 后 `--check` 退出 0）。
+1. **收**（新料进 `inbox/`） → 2. **蒸**（改 `distill/SKILL.md`，或改 `VOICE.md` 调风格；女娲源只作底稿起点） → 3. **刷**（`rebuild_persona.py --apply` 后 `--check` 退出 0） → 4. **验**（`tests/test_advisory_pack.py`）。
 
 ## 边界
 

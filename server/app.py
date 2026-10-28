@@ -393,6 +393,15 @@ def _upload_payload(item, label):
     raise ApiError(400, f"{label} 缺失或类型不对")
 
 
+def _rel_posix(path, root):
+    """相对 root 的 POSIX 路径；root 之外（隔离 BOT_RUNS_ROOT）退回绝对路径，不抛异常。"""
+    p = Path(str(path)).resolve()
+    try:
+        return p.relative_to(Path(root).resolve()).as_posix()
+    except ValueError:
+        return p.as_posix()
+
+
 def _table_upload(cfg, body):
     """解析并校验 table 上传项 → (safe_relative 文件名, 字节)。"""
     name, data = _upload_payload(body.get("table"), "table")
@@ -1159,14 +1168,14 @@ def ingest_table(cfg, task_id, body):
         task["data_refs"] = merged_refs
         task["table_upload"] = {
             "name": rel_table,
-            "path": table_path.resolve().relative_to(root).as_posix(),
+            "path": _rel_posix(table_path, root),
             "sha256": sha256_bytes(table_bytes),
             "size": len(table_bytes),
             "line": line,
             **dates,
         }
         if field_map_path:
-            task["field_map"] = field_map_path.resolve().relative_to(root).as_posix()
+            task["field_map"] = _rel_posix(field_map_path, root)
         task["updated_at"] = now_iso()
         write_json_atomic(Path(tdir) / "task.json", task)
         status_task = read_status(tdir).get("task")

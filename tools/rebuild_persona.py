@@ -44,7 +44,7 @@ from core import telemetry  # noqa: E402
 #   "@pack:<rel>"   → 包内 <rel>/SKILL.md（本仓库重蒸稿，跟包一起走，不被女娲更新覆盖）
 ROLES = {
     "karpathy": ("agents/karpathy.md", "persona/andrej-karpathy", "@pack:persona/andrej-karpathy/distill"),
-    "jobs": ("agents/jobs.md", "persona/steve-jobs", "steve-jobs-perspective"),
+    "jobs": ("agents/jobs.md", "persona/steve-jobs", "@pack:persona/steve-jobs/distill"),
     "content-operator": (
         "agents/content-operator.md",
         "persona/manufacturing-content-operator",
@@ -59,6 +59,9 @@ MODEL_HEAD_RE = re.compile(r"^##\s+.*(六个核心)?心智模型\s*$")
 HEUR_HEAD_RE = re.compile(r"^##\s+决策启发式\s*$")
 MODEL_ITEM_RE = re.compile(r"^###\s+模型[一二三四五六七八九\d]+\s*[:：]\s*(?P<title>.+?)\s*$")
 HEUR_ITEM_RE = re.compile(r"^\d+\.\s+\*\*(?P<title>.+?)\*\*")
+
+
+HINDSIGHT_HEAD_RE = re.compile(r"^##\s+.*后见之明.*$")
 
 
 def pack_dir() -> Path:
@@ -91,6 +94,22 @@ def extract_section_items(text: str, head_re: re.Pattern, item_re: re.Pattern) -
     return items
 
 
+def extract_section_body(text: str, head_re: re.Pattern) -> str:
+    """抓取某个二级标题的正文，直到下一个二级/三级标题（用于「后见之明」这类校验层）。"""
+    out: list[str] = []
+    inside = False
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if head_re.match(line):
+            inside = True
+            continue
+        if inside and (line.startswith("## ") or line.startswith("### ")):
+            break
+        if inside:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
 def source_skill(example: str) -> Path:
     """@pack: 前缀 → 包内重蒸稿；否则 → 女娲 examples 原版。"""
     if example.startswith("@pack:"):
@@ -109,6 +128,7 @@ def build_block(role: str, persona_rel: str, example: str) -> str:
     skill = read(src_skill)
     models = extract_section_items(skill, MODEL_HEAD_RE, MODEL_ITEM_RE)
     heurs = extract_section_items(skill, HEUR_HEAD_RE, HEUR_ITEM_RE)
+    hindsight = extract_section_body(skill, HINDSIGHT_HEAD_RE)
     if len(models) < 6 or len(heurs) < 8:
         raise ValueError(f"{example} 抽取不足：模型 {len(models)}/6，启发式 {len(heurs)}/8（源改版？先修 VOICE/正则）")
 
@@ -133,6 +153,7 @@ def build_block(role: str, persona_rel: str, example: str) -> str:
         "",
         "\n".join(f"{i}. {h}" for i, h in enumerate(heurs, 1)),
         "",
+        *(["**后见之明校验（外部评价，不是我的原话）**", "", hindsight, ""] if hindsight else []),
         voice_body,
     ]
     return "\n".join(body).strip() + "\n"
