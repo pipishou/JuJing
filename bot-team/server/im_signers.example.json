@@ -1,0 +1,7 @@
+{
+  "_说明": "复制成 server/im_signers.json 后填真实 ID（该文件不入库）。id 是 IM 应用维度身份：飞书 open_id（每应用不同）/ 企微 userid；signer 必须出现在服务端 --allow-signers 白名单里。",
+  "signers": [
+    {"id": "ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxx", "id_type": "open_id", "name": "Mo", "signer": "老板", "chat_id": ""},
+    {"id": "zhangsan", "id_type": "user_id", "name": "张三（代理人）", "signer": "老板", "chat_id": "oc_yyyyyyyyyyyy"}
+  ]
+}

@@ -135,11 +135,13 @@ def build_card(task_id, decision, signer, closure, image_key=None):
         verdict = ""       # unverified/空 都不是结论，不能显示成「已回填」
     due_line = f"**T+7 回看**  {due}" + (f"（已回填：{verdict}）" if verdict else "")
 
-    def btn(text, letter, kind="default"):
+    def btn(text, letter, kind="default", action=""):
+        value = {"letter": letter, "task_id": task_id}
+        if action:
+            value["action"] = action
         return {"tag": "button", "text": {"tag": "plain_text", "content": text},
                 "type": kind,
-                "behaviors": [{"type": "callback",
-                               "value": {"letter": letter, "task_id": task_id}}]}
+                "behaviors": [{"type": "callback", "value": value}]}
 
     return {
         "schema": "2.0",
@@ -167,6 +169,12 @@ def build_card(task_id, decision, signer, closure, image_key=None):
                  "elements": [btn("转人工", "b")]},
                 {"tag": "column", "width": "weighted", "weight": 1,
                  "elements": [btn("转补充分析", "c")]},
+            ]},
+            {"tag": "hr"},
+            {"tag": "markdown", "content": "确认无误就签字定案（只认白名单里的签字人，签名带 sha256）。"},
+            {"tag": "column_set", "flex_mode": "bisect", "columns": [
+                {"tag": "column", "width": "weighted", "weight": 1,
+                 "elements": [btn("签字并定案", "", "danger", action="sign")]},
             ]},
         ]},
     }
