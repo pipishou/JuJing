@@ -245,6 +245,14 @@ def import_core(cfg, name):
                        f"契约见 audit/M1.5-build-spec.md §2")
 
 
+def emit_telemetry(cfg, name, props):
+    """埋点不得中断业务：遥测导入/校验/落盘失败一律吞掉，绝不让 HTTP 变 500。"""
+    try:
+        import_core(cfg, "telemetry").emit(name, props)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def core_paths_module(cfg):
     """core.paths 优先；未就绪时返回 None（调用方用内置兜底，handoff 记录）。"""
     try:
@@ -2821,6 +2829,19 @@ def post_run(cfg, task_id, body=None):
     try:
         task["runner"] = runner
         write_json_atomic(tdir / "task.json", task)
+        # 接单埋点：仅首次 run（status=created）记 task_created；重跑沿用原状态，跳过以免重复计数。
+        if str(read_status(tdir).get("state") or "") == "created":
+            scene_id = task.get("scene_id") or task.get("metric_id")
+            if not scene_id and isinstance(task.get("metric"), str):
+                scene_id = task.get("metric")
+            created = {
+                "task_id": task_id,
+                "scene_id": str(scene_id or "unscoped"),
+                "source": "manual",
+            }
+            if task.get("line") not in (None, ""):
+                created["line"] = str(task.get("line"))
+            emit_telemetry(cfg, "task_created", created)
         if runner == "fixture":
             source = prepare_fixture_result(cfg, tdir)
             extra_args = ["--demo"]
@@ -2910,6 +2931,9 @@ def post_sign(cfg, task_id, body):
     payload = {"ok": True, "sha256": sha256, "signer": sig.get("signer") or signer,
                "signed_at": sig.get("signed_at"), "path": str(out),
                "signature_file": str(out), "identity": cfg.identity()}
+    emit_telemetry(cfg, "sign", {"task_id": task_id,
+                                 "signer": str(payload["signer"]),
+                                 "signature_hash": str(sha256)[:16]})
     if gate_pending:
         # 只提示、不阻断：A6 契约允许「含未确认 securityGate 的真实报告」先签字，
         # fail-closed 发生在 /finalize（core.gates.check_finalize）。
@@ -2977,6 +3001,11 @@ def post_finalize(cfg, task_id):
     if not sha256:
         sha256 = (read_json(sig) or {}).get("report_sha256")
     notify_signed(cfg, tdir)  # G1：签字收口推飞书回执（幂等，失败不影响交付）
+    signer_final = (decision.get("approval") or {}).get("by") or cfg.owner
+    sign_props = {"task_id": task_id, "signer": str(signer_final)}
+    if sha256:
+        sign_props["signature_hash"] = str(sha256)[:16]
+    emit_telemetry(cfg, "sign", sign_props)
     return 200, {"ok": True, "decision": decision.get("id"), "status": decision.get("status"),
                  "signer": (decision.get("approval") or {}).get("by"),
                  "signature_sha256": sha256, "identity": cfg.identity()}
@@ -3042,6 +3071,12 @@ def post_gate(cfg, task_id, body):
                          gate_at=payload.get("at") or payload.get("confirmed_at"))
     except Exception:  # noqa: BLE001 - 状态写失败不回滚 gate 本身
         log(traceback.format_exc())
+    gate_props = {"task_id": task_id, "gate_id": "securityGate",
+                  "verdict": "pass" if action == "confirm" else "reject",
+                  "signer": confirmer}
+    if action == "reject" and comment:
+        gate_props["reason_code"] = comment[:200]
+    emit_telemetry(cfg, "gate", gate_props)
     return 200, payload
 
 

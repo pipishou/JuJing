@@ -32,6 +32,9 @@ DEFAULT_PACK = OCTOP_HOME / "expert_market" / "manufacturing-advisory-board"
 # 静默回退到 settings.active_model（曾因此连撞 glm 免费额度 429）。
 DEFAULT_MODEL = os.environ.get("ADVISORY_MODEL", "Zhipu/glm-4.7-flash")
 
+sys.path.insert(0, str(ROOT))
+from core import telemetry  # noqa: E402
+
 
 def _target_workspace(agent_id: str) -> Path:
     return OCTOP_HOME / "agents" / agent_id
@@ -121,8 +124,28 @@ def main() -> int:
             shutil.copyfile(src, dst)
             copied += 1
             print("updated:", dst.relative_to(ws))
+    try:
+        before_hash = telemetry.text_hash(_read_db_prompt(args.agent_id))
+    except (SystemExit, Exception):  # noqa: BLE001
+        before_hash = ""          # agent 不存在：无旧指纹，也不报 role_change
     _write_db_prompt(args.agent_id, soul, args.model)
     print(f"system_prompt 已写入 DB（{len(soul)} 字符），model={args.model}，copied={copied}")
+
+    # 埋点不得中断业务
+    try:
+        after_hash = telemetry.text_hash(soul)
+        telemetry.emit("role_snapshot", {
+            "agent_id": args.agent_id, "prompt_hash": after_hash,
+            "source": "sync_agent_soul", "model": args.model,
+        })
+        if before_hash and before_hash != after_hash:
+            telemetry.emit("role_change", {
+                "agent_id": args.agent_id, "field": "system_prompt",
+                "before_hash": before_hash, "after_hash": after_hash,
+                "reason": "sync_agent_soul", "actor": "sync_agent_soul",
+            })
+    except Exception:  # noqa: BLE001
+        pass
 
     rc = _reload(args.agent_id)
     print(f"reload exit={rc}")

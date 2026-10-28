@@ -22,6 +22,19 @@ from pathlib import Path
 
 MARK_PREFIX = ".nudged-"
 
+ROOT = Path(__file__).resolve().parents[1]          # bot-team
+sys.path.insert(0, str(ROOT))
+from core import telemetry  # noqa: E402
+
+
+def _delivery_date(tdir):
+    """该任务的推送日期（.lark-signed.json 的 sent_at）；取不到返回 None。"""
+    try:
+        j = json.loads((tdir / ".lark-signed.json").read_text(encoding="utf-8-sig"))
+        return date.fromisoformat(str(j.get("sent_at") or "")[:10])
+    except Exception:  # noqa: BLE001
+        return None
+
 
 def _log(message):
     try:
@@ -87,6 +100,7 @@ def main():
         if mark.exists():
             _log(f"{task_id} 已催办过（{due_iso}），跳过")
             continue
+        nudge_no = len(list(tdir.glob(MARK_PREFIX + "*"))) + 1
         decision = {}
         for dpath in (tdir / "decision.json", tdir / "loop" / "decision.json"):
             try:
@@ -117,6 +131,17 @@ def main():
                                         "gateway": str(gateway)}, ensure_ascii=False),
                             encoding="utf-8")
             _log(f"{task_id} 催办已推送（due={due_iso}）")
+            # 埋点不得中断业务
+            try:
+                props = {"task_id": task_id, "nudge_no": nudge_no}
+                delivered = _delivery_date(tdir)
+                if delivered:
+                    days = (today - delivered).days
+                    if days >= 0:
+                        props["days_since_delivery"] = days
+                telemetry.emit("nudge", props)
+            except Exception:  # noqa: BLE001
+                pass
         else:
             _log(f"{task_id} 推送失败 rc={proc.returncode}: "
                  f"{((proc.stdout or '') + (proc.stderr or ''))[:200]}")

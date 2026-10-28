@@ -196,7 +196,7 @@ def case_a4(tmp):
     check("A4 100 分报告 validate_report --require-real PASS", rc == 0, log[-400:])
     rc, log = run([ROOT / "tools" / "run_task.py", "--demo", "--outdir", tmp / "a4-task",
                    "--workflow-result", ROOT / "runs" / "demo-result-2026-10-19.json",
-                   "--expected", "T+7 复查"])
+                   "--expected", "T+7 复查"], env={"BOT_RUNS_ROOT": str(tmp / "runs")})
     check("A4 run_task rc0", rc == 0, log[-400:])
     r = load(tmp / "a4-task" / "report.json")
     check("A4 run_task report 含 total/verdict", "total" in r["scorecard"] and "verdict" in r["scorecard"])

@@ -29,6 +29,9 @@ ROOT = Path(__file__).resolve().parent.parent          # JuJing/bot-team
 DEFAULT_PACK = ROOT.parents[1] / ".octop" / "expert_market" / "manufacturing-advisory-board"
 DEFAULT_NUWA = Path(r"C:\Users\kf-41\Desktop\个人内容\skill\nuwa-skill-main\nuwa-skill-main\examples")
 
+sys.path.insert(0, str(ROOT))
+from core import telemetry  # noqa: E402
+
 # role -> (agent 文件, persona 目录, 女娲 example 目录名)
 ROLES = {
     "karpathy": ("agents/karpathy.md", "persona/andrej-karpathy", "andrej-karpathy-perspective"),
@@ -159,6 +162,16 @@ def apply_role(role: str, agent_rel: str, persona_rel: str, example: str) -> tup
     new_text = text[:start] + "\n" + block + text[end:]
     if new_text != text:
         agent_path.write_text(new_text, encoding="utf-8", newline="\n")
+        # 埋点不得中断业务
+        try:
+            props = {"agent_id": role, "prompt_hash": telemetry.text_hash(new_text),
+                     "role": role, "source": "rebuild_persona"}
+            voice = pack_dir() / persona_rel / "VOICE.md"
+            if voice.is_file():
+                props["persona_hash"] = telemetry.file_hash(voice)
+            telemetry.emit("role_snapshot", props)
+        except Exception:  # noqa: BLE001
+            pass
         return True, f"[{role}] 已刷新 sha {digest(block.strip(chr(10)))[:8]}"
     return True, f"[{role}] 无变化"
 

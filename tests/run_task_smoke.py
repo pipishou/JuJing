@@ -3,6 +3,7 @@
 """一键收口冒烟：合成 11 列数据 → run_task.py → is_demo=false + decision=approved。"""
 import datetime as dt
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -56,7 +57,8 @@ def main():
         "--goal-json", "team/goals/example-goal.json",
         "--cost-json", "team/cost/example-cost.json",
         "--expected", "T+7 ≤5.40%", "--signer", "smoke",
-    ], cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace")
+    ], cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env=dict(os.environ, BOT_RUNS_ROOT=str(TMP / "runs"), BOT_LEDGER_ROOT=str(TMP)))
     if p.returncode != 0:
         print(p.stdout[-3000:])
         print(p.stderr[-3000:], file=sys.stderr)
