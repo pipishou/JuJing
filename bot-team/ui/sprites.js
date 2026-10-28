@@ -18,7 +18,8 @@
     biz:      { hair: '#4a3320', hair2: '#33220f', shirt: '#b45309', shirt2: '#92400e', pants: '#7c2d12', accent: '#fbbf24', prop: 'helmet' },
     qa:       { hair: '#111827', hair2: '#0b1220', shirt: '#334155', shirt2: '#1f2937', pants: '#1f2937', accent: '#22c55e', prop: 'check' },
     data:     { hair: '#1f2937', hair2: '#111827', shirt: '#0e7490', shirt2: '#155e75', pants: '#155e75', accent: '#cffafe', prop: 'box' },
-    content:  { hair: '#64748b', hair2: '#475569', shirt: '#94a3b8', shirt2: '#64748b', pants: '#64748b', accent: '#cbd5e1', prop: 'none', grey: true },
+    content:  { hair: '#334155', hair2: '#1e293b', shirt: '#0f766e', shirt2: '#115e59', pants: '#134e4a', accent: '#a5f3fc', prop: 'notebook' },
+    media:    { hair: '#4c0519', hair2: '#881337', shirt: '#be123c', shirt2: '#9f1239', pants: '#881337', accent: '#fda4af', prop: 'megaphone' },
     cost:     { hair: '#64748b', hair2: '#475569', shirt: '#94a3b8', shirt2: '#64748b', pants: '#64748b', accent: '#cbd5e1', prop: 'none', grey: true }
   };
 
@@ -138,6 +139,15 @@
     if (p.prop === 'check') {
       R(14, 16, 4, 5, OUT); R(15, 17, 3, 3, '#f8fafc');
       R(15, 18, 1, 1, p.accent); R(16, 19, 1, 1, p.accent); R(17, 18, 1, 1, p.accent);
+    }
+    if (p.prop === 'notebook') {
+      R(14, 16, 4, 5, OUT); R(15, 17, 3, 3, '#f8fafc');
+      R(15, 18, 2, 1, p.accent); R(15, 20, 2, 1, p.accent);
+    }
+    if (p.prop === 'megaphone') {
+      R(13, 17, 3, 4, OUT); R(14, 18, 2, 2, p.accent);
+      R(16, 16, 1, 6, OUT); R(17, 15, 1, 8, OUT);
+      R(17, 16, 1, 6, p.accent);
     }
     if (p.prop === 'box') {
       R(14, 17, 4, 4, OUT); R(15, 18, 3, 3, '#b45309');

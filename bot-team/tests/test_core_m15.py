@@ -426,14 +426,14 @@ def case_team(tmp):
     # 真实仓库数据（/api/team 的单一事实源）
     real = team.load_team()
     real_ids = [e["id"] for e in real["employees"]]
-    check("真实 team 员工 7 人", len(real_ids) == 7, real_ids)
+    check("真实 team 员工 8 人（含内容操盘手）", len(real_ids) == 8, real_ids)
     real_sprites = [e["sprite_key"] for e in real["employees"]]
     check("真实 team sprite 唯一", len(set(real_sprites)) == len(real_sprites), real_sprites)
     check("真实 team sprite⊆像素角色库", set(real_sprites) <= set(team.SPRITE_KEYS), real_sprites)
     real_crews = {c["id"] for c in real["crews"]}
     check("真实 pack.crew_id∈crews（A7 前置）",
           real["pack"].get("crew_id") in real_crews, (real["pack"].get("crew_id"), real_crews))
-    check("真实 team persona 三份", sum(1 for e in real["employees"] if e["persona"]) == 3,
+    check("真实 team persona 四份（卡帕西/乔布斯/内容操盘手/业务专家）", sum(1 for e in real["employees"] if e["persona"]) == 4,
           [e["id"] for e in real["employees"] if e["persona"]])
 
 

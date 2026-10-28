@@ -1101,6 +1101,7 @@
     qa:'<svg viewBox="0 0 100 124"><rect x="34" y="70" width="32" height="40" rx="10" fill="#334155"/><circle cx="50" cy="46" r="24" fill="#f7c9a3"/><path d="M26 44c0-14 11-22 24-22s24 8 24 22c-4-7-12-10-24-10S30 37 26 44z" fill="#111827"/><circle cx="41" cy="48" r="2.4" fill="#1f2937"/><circle cx="59" cy="48" r="2.4" fill="#1f2937"/><path d="M44 58h12" stroke="#0f766e" stroke-width="2" stroke-linecap="round"/><rect x="66" y="62" width="12" height="16" rx="3" fill="#e2e8f0"/><path d="M69 67l2 2 4-4" stroke="#0f766e" stroke-width="2" fill="none"/></svg>',
     data:'<svg viewBox="0 0 100 124"><rect x="34" y="70" width="32" height="40" rx="10" fill="#0e7490"/><circle cx="50" cy="46" r="24" fill="#ffd9b3"/><path d="M26 44c0-14 11-22 24-22s24 8 24 22c-4-7-12-10-24-10S30 37 26 44z" fill="#1f2937"/><circle cx="41" cy="48" r="2.4" fill="#1f2937"/><circle cx="59" cy="48" r="2.4" fill="#1f2937"/><path d="M44 58c4 2 8 2 12 0" stroke="#9a3412" stroke-width="2" fill="none" stroke-linecap="round"/><rect x="70" y="66" width="10" height="22" rx="3" fill="#cffafe"/></svg>',
     content:'<svg viewBox="0 0 100 124"><rect x="34" y="70" width="32" height="40" rx="10" fill="#94a3b8"/><circle cx="50" cy="46" r="24" fill="#f2bd92"/><path d="M26 44c0-14 11-22 24-22s24 8 24 22c-4-7-12-10-24-10S30 37 26 44z" fill="#64748b"/><circle cx="41" cy="48" r="2.4" fill="#1f2937"/><circle cx="59" cy="48" r="2.4" fill="#1f2937"/><path d="M44 58h12" stroke="#64748b" stroke-width="2" stroke-linecap="round"/></svg>',
+    media:'<svg viewBox="0 0 100 124"><rect x="34" y="70" width="32" height="40" rx="10" fill="#be123c"/><circle cx="50" cy="46" r="24" fill="#ffd9b3"/><path d="M26 44c0-14 11-22 24-22s24 8 24 22c-4-7-12-10-24-10S30 37 26 44z" fill="#4c0519"/><circle cx="41" cy="48" r="2.4" fill="#1f2937"/><circle cx="59" cy="48" r="2.4" fill="#1f2937"/><path d="M44 57c4 3 8 3 12 0" stroke="#9f1239" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M68 66l14-6v20l-14-6z" fill="#fda4af"/><rect x="64" y="66" width="5" height="6" rx="2" fill="#881337"/></svg>',
     cost:'<svg viewBox="0 0 100 124"><rect x="34" y="70" width="32" height="40" rx="10" fill="#94a3b8"/><circle cx="50" cy="46" r="24" fill="#ffd9b3"/><path d="M26 44c0-14 11-22 24-22s24 8 24 22c-4-7-12-10-24-10S30 37 26 44z" fill="#64748b"/><circle cx="41" cy="48" r="2.4" fill="#1f2937"/><circle cx="59" cy="48" r="2.4" fill="#1f2937"/><path d="M44 58h12" stroke="#64748b" stroke-width="2" stroke-linecap="round"/><rect x="66" y="62" width="10" height="18" rx="3" fill="#e2e8f0"/></svg>'
   };
 
@@ -1111,7 +1112,7 @@
   const STATE_CN = {active:'在岗', resident:'常驻', craft:'工序', coming:'待上架', not_ready:'缺件', retired:'退役'};
   const VERDICT_CN = {output:'输出可用', output_with_flag:'输出带标注', reference_only:'仅参考', no_output:'无输出', force_manual_review:'强制人工复核'};
   const KIND_CN = {user:'用户', speak:'发言', tool:'工具', think:'思考', status:'状态', artifact:'产物'};
-  const ROLE_NAME = {host:'工作助理', analyst:'咨询分析师', attr:'AI 归因专家', biz:'制造业业务专家', qa:'合规质检', data:'取数员', content:'记录员', cost:'成本管家'};
+  const ROLE_NAME = {host:'工作助理', analyst:'咨询分析师', attr:'AI 归因专家', biz:'制造业业务专家', qa:'合规质检', data:'取数员', content:'记录员', media:'内容操盘手', cost:'成本管家'};
   const SPRITE_MAP = {};
   function spriteKeyFor(id) {
     const key = String(id == null ? '' : id);

@@ -1,0 +1,126 @@
+# A-6 决策日志 Schema — 归因结论的结构化记录
+# 与 WAL 同构（append-only + clause 锚点）。
+# [KNOWN] 来源：聚鲸工作流自优化飞轮设计。
+
+version: "0.1.0"
+schema_version: "1.0"
+
+record_fields:
+  - field: record_id
+    type: ULID
+    required: true
+
+  - field: timestamp
+    type: ISO8601
+    required: true
+
+  - field: session_id
+    type: string
+    required: true
+    note: "关联的对话会话 ID"
+
+  - field: anomaly_id
+    type: string
+    required: true
+    note: "异常事件唯一标识"
+
+  - field: anomaly_description
+    type: string
+    required: true
+
+  - field: baseline_window
+    type: string
+    required: true
+    example: "T-30d ~ T-7d"
+
+  - field: comparison_window
+    type: string
+    required: true
+    example: "T-2h ~ T+2h"
+
+  - field: primary_attribution
+    type: string
+    required: false
+    note: "单一归因的主因素 ID（来自 A-1）"
+
+  - field: confidence_score
+    type: float
+    required: true
+    range: [0, 100]
+
+  - field: confidence_band
+    type: enum
+    values: [A, B, C]
+    required: true
+
+  - field: cannot_attribute
+    type: string
+    required: true
+    note: "CRP 强制槽位"
+
+  - field: evidence_list
+    type: array[string]
+    required: true
+    min_items: 3
+
+  - field: action_suggestions
+    type: array[object]
+    required: true
+    schema:
+      - field: action
+        type: string
+      - field: cost_yuan
+        type: float
+      - field: roi_anchor
+        type: enum
+        values: [A-7_模具, A-7_保养, A-7_停机]
+      - field: irreversible
+        type: boolean
+
+  - field: degradation_level
+    type: integer
+    required: true
+    range: [0, 3]
+
+  - field: clause_anchor
+    type: string
+    required: true
+    note: "与 WAL 同构的锚点，如 exclusion_six_steps::s5_scorecard"
+
+  - field: verifier_human
+    type: boolean
+    required: false
+    note: "是否有人工复核"
+
+  - field: verifier_result
+    type: enum
+    values: [correct, wrong, partial]
+    required: false
+
+example_record: |
+  record_id: rec_01M4XXX
+  timestamp: "2026-10-12T08:30:00+08:00"
+  session_id: RC98TE:dashboard:1:dm
+  anomaly_id: ANOM_20261012_001
+  anomaly_description: "补料率从 2% 升至 8%"
+  baseline_window: "T-30d ~ T-7d"
+  comparison_window: "T-2h ~ T+2h"
+  primary_attribution: f_mold
+  confidence_score: 83.35
+  confidence_band: A
+  cannot_attribute: "高置信度归因，但不能排除供应商批次问题（未同步检测）"
+  evidence_list:
+    - "模具磨损率从 0.3% 升至 1.2%（3σ）"
+    - "保养周期从 30 天缩短到 45 天"
+    - "当班班组与历史对比无异常"
+  action_suggestions:
+    - action: "安排模具保养"
+      cost_yuan: 500
+      roi_anchor: A-7_保养
+      irreversible: false
+    - action: "停机检修"
+      cost_yuan: 1200
+      roi_anchor: A-7_停机
+      irreversible: true
+  degradation_level: 0
+  clause_anchor: exclusion_six_steps::s6_residual

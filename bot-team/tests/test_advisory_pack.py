@@ -78,7 +78,7 @@ def check_manifest() -> None:
 
 
 def check_agents() -> None:
-    expected = {"karpathy", "jobs", "manufacturing-ops-expert"}
+    expected = {"karpathy", "jobs", "manufacturing-ops-expert", "content-operator"}
     found = {p.stem for p in (PACK / "agents").glob("*.md")}
     ok(found == expected, f"agents 名单与设计一致：{sorted(found)}")
     for stem in sorted(expected & found):
@@ -96,7 +96,7 @@ def check_agents() -> None:
 # ---------------------------------------------------------------- L2 场景契约
 def check_scene_contracts() -> None:
     required_sections = ["## 职责边界", "## 场景输出契约", "## 禁止"]
-    for stem in ("karpathy", "jobs", "manufacturing-ops-expert"):
+    for stem in ("karpathy", "jobs", "manufacturing-ops-expert", "content-operator"):
         text = read(PACK / "agents" / f"{stem}.md")
         for sec in required_sections:
             ok(sec in text, f"[{stem}] 有「{sec}」")
@@ -137,7 +137,7 @@ def check_host_soul() -> None:
     ]:
         ok(token in soul, f"SOUL：{label}")
     ok("不替" in soul, "SOUL：禁止替专家发言（空壳防线）")
-    for slug in ("karpathy", "manufacturing-ops-expert", "jobs"):
+    for slug in ("karpathy", "manufacturing-ops-expert", "jobs", "content-operator"):
         ok(slug in soul, f"SOUL：点名可派发对象 {slug}")
 
 
@@ -179,7 +179,7 @@ def check_update_pipeline() -> None:
         print(proc.stderr.strip())
     ok(proc.returncode == 0, "人格层无漂移（--check 退出 0）")
 
-    for role_dir in ("persona/andrej-karpathy", "persona/steve-jobs"):
+    for role_dir in ("persona/andrej-karpathy", "persona/steve-jobs", "persona/manufacturing-content-operator"):
         src = read(PACK / role_dir / "SOURCES.md")
         ok("女娲" in src, f"{role_dir}/SOURCES.md 记录女娲源")
         ok("inbox" in src, f"{role_dir}/SOURCES.md 有增量采集入口")
