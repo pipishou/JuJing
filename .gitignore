@@ -1,0 +1,41 @@
+# bot-team 独立仓 .gitignore（2026-10-28 从 JuJing/.gitignore 拆出）
+
+# 密钥与凭据
+.env
+.env.*
+.credentials*
+*.key
+*.pem
+server/im_signers.json
+
+# 项目记忆与决策账本（本地资产，随人走不入库）
+.junshi/
+
+# 任务运行态：每个任务一个目录，含真实数据与签名
+runs/*/
+runs/.task_seq.json
+runs/*.log
+runtime/
+*.log
+
+# 飞轮遥测与回信状态
+.telemetry/
+.reply-consume-state.json
+.lark-signed.json
+
+# WinSW 服务包装器：55MB 二进制，只在本机部署
+server/services/*.exe
+server/services/*.xml
+server/services/*.log
+server/services/install.log
+
+# 缓存
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+.venv/
+
+# 系统
+Thumbs.db
+.DS_Store
