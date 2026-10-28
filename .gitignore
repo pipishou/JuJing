@@ -16,6 +16,11 @@ bot-team/runs/.task_seq.json
 bot-team/runs/*.log
 bot-team/*.log
 bot-team/.reply-consume-state.json
+bot-team/.telemetry/
+# WinSW 服务包装器/XML/安装日志：55MB 二进制，只在本机部署，不入库
+bot-team/server/services/*.exe
+bot-team/server/services/*.xml
+bot-team/server/services/install.log
 **/runs/*/
 *.zst
 *.jsonl.zstd

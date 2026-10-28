@@ -54,6 +54,9 @@ STATE = BOT_TEAM / ".reply-consume-state.json"
 TRACE = BOT2 / ".junshi" / "reply-consume.jsonl"
 RUNLOG = BOT2 / ".junshi" / "reply-consume-runs.jsonl"   # 每次运行快照（调度静默失败排查）
 
+sys.path.insert(0, str(BOT_TEAM))
+from core import telemetry  # noqa: E402
+
 LETTER_RE = re.compile(r"^\s*([abcABC])\s*(?:[.。、:：,，!！]|\s|$)")
 ANY_LETTER_RE = re.compile(r"(?<![A-Za-z0-9])[abcABC](?![A-Za-z0-9])")
 
@@ -218,7 +221,7 @@ def to_sec(raw_since):
 
 
 def pick_task(root):
-    """最近收口的任务（closure.json 最新）——回信默认指向它。"""
+    """最近收口的任务（closure.json 最新）——回信归属的兜底，不是首选依据。"""
     best = None
     for clo in root.glob("*/closure.json"):
         try:
@@ -228,6 +231,57 @@ def pick_task(root):
         if best is None or mt > best[0]:
             best = (mt, clo.parent)
     return best[1] if best else None
+
+
+def pushed_tasks():
+    """遥测账本里的成功推送 [(推送时刻, task_id)]，升序。
+
+    回信归属的唯一硬依据：Mo 只对「最近一封交付」回信，所以按推送时间切，
+    而不是按 closure.json 的 mtime 猜（多任务同日会串号，采纳率直接失真）。
+    """
+    out = []
+    try:
+        rows = telemetry.read()
+    except Exception:  # noqa: BLE001
+        return out
+    for row in rows:
+        if row.get("name") != "push_sent" or row.get("ok") is not True:
+            continue
+        task_id = row.get("task_id")
+        try:
+            ts = datetime.fromisoformat(str(row.get("ts") or ""))
+        except ValueError:
+            continue
+        if task_id and ts.tzinfo:
+            out.append((ts, str(task_id)))
+    return sorted(out)
+
+
+def attribute_task(root, reply_dt, pushes, max_age_days=14):
+    """把一封回信归到任务上，返回 (task_dir|None, 依据)。
+
+    依据取值：push_index（回信前最近一次成功推送）｜fallback（无推送记录时按最近收口）。
+    """
+    best = None
+    for ts, task_id in pushes:
+        if ts <= reply_dt and (reply_dt - ts).total_seconds() <= max_age_days * 86400:
+            best = task_id
+    if best:
+        cand = Path(root) / best
+        if cand.is_dir():
+            return cand, "push_index"
+    return pick_task(Path(root)), "fallback"
+
+
+def delivery_dt(task_dir):
+    """该任务的推送时间（.lark-signed.json 的 sent_at）；取不到返回 None。"""
+    if task_dir is None:
+        return None
+    try:
+        j = json.loads((task_dir / ".lark-signed.json").read_text(encoding="utf-8-sig"))
+        return datetime.fromisoformat(str(j.get("sent_at") or "")).replace(tzinfo=TZ)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def runlog(row):
@@ -393,7 +447,7 @@ def main():
         return 2
 
     seen = consumed_ids()
-    task_dir = pick_task(Path(args.root))
+    pushes = pushed_tasks()
     gateway = None if args.dry else find_gateway()
 
     rows, max_ms = [], None
@@ -420,30 +474,49 @@ def main():
         if letter is None:
             skipped["not_reply"] += 1
             continue                      # 非回信：不消费不回复
+        # 归属：回信时刻 → 此前最近一次成功推送的任务（push_index）；无推送记录才兜底
+        reply_dt = (datetime.fromtimestamp(int(ct) / 1000, TZ)
+                    if ct.isdigit() else now)
+        task_dir, attr = attribute_task(Path(args.root), reply_dt, pushes)
         row = {"date": now.isoformat(timespec="seconds"), "message_id": mid,
                "create_time": ct, "letter": letter,
                "action": ACTION.get(letter, "needs_human"), "text": raw[:400],
-               "task": task_dir.name if task_dir else None, "dry": args.dry}
+               "task": task_dir.name if task_dir else None, "attr": attr,
+               "dry": args.dry}
         if not args.dry:
             append_trace(row)
         markdown = handle(letter, raw, task_dir, args)
         sent = ack(gateway, markdown, "reply-" + mid, args.dry) if not args.dry else False
         row["acked"] = sent
+        # 埋点不得中断业务：无 task_id（未匹配到任务）时不猜，宁可不记
+        if not args.dry and letter in ACTION and task_dir is not None:
+            try:
+                props = {"task_id": task_dir.name, "letter": letter, "attr": attr}
+                pushed = delivery_dt(task_dir)
+                if pushed and ct.isdigit():
+                    sec = (datetime.fromtimestamp(int(ct) / 1000, TZ) - pushed).total_seconds()
+                    if sec >= 0:
+                        props["latency_s"] = round(sec, 1)
+                telemetry.emit("reply", props)
+            except Exception:  # noqa: BLE001
+                pass
         rows.append(row)
         print(json.dumps(row, ensure_ascii=False))
 
     if not args.dry and max_ms:
         write_state(max_ms)
+    last = rows[-1] if rows else {}
     runlog({"at": now.isoformat(timespec="seconds"), "rc": 0, "since": start_sec,
             "pulled": len(msgs), "consumed": len(rows), "has_more": has_more,
-            "skipped": skipped, "cred_source": cred_src,
-            "task": task_dir.name if task_dir else None, "dry": args.dry,
+            "skipped": skipped, "cred_source": cred_src, "pushes": len(pushes),
+            "task": last.get("task"), "attr": last.get("attr"), "dry": args.dry,
             "python": sys.executable})
     print(json.dumps({"ok": True, "pulled": len(msgs), "consumed": len(rows),
                       "has_more": has_more, "since": datetime.fromtimestamp(
                           start_sec, TZ).isoformat(timespec="seconds"),
                       "skipped": skipped, "cred_source": cred_src,
-                      "task": task_dir.name if task_dir else None,
+                      "pushes": len(pushes),
+                      "task": last.get("task"), "attr": last.get("attr"),
                       "dry": args.dry}, ensure_ascii=False))
     if has_more:
         _log("has_more=true：本轮只消费了首页，游标已推进，下轮续拉")

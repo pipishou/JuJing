@@ -25,6 +25,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from datetime import date, datetime
 from pathlib import Path
 
@@ -32,10 +33,14 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core import events, fsutil, ids, pack as pack_mod  # noqa: E402
+from core import events, fsutil, ids, pack as pack_mod, telemetry  # noqa: E402
 
 PY = sys.executable
 RUNS = Path(os.environ.get("BOT_RUNS_ROOT") or (ROOT / "runs"))
+# 账本跟随 runs 根：runs 被隔离到临时目录时，账本也落在同一侧，避免测试污染真实账本
+LEDGER_ROOT = (os.environ.get("BOT_LEDGER_ROOT")
+               or (str(Path(os.environ["BOT_RUNS_ROOT"]).parent)
+                   if os.environ.get("BOT_RUNS_ROOT") else None))
 
 
 def now_iso():
@@ -86,6 +91,27 @@ def run_step(outdir, phase, role, cmd):
         if text.strip():
             log_line(outdir, phase, role, text, kind="tool")
     return proc.returncode == 0, out
+
+
+def emit_telemetry(name, props):
+    """埋点不得中断业务：校验失败/磁盘失败一律吞掉，不改主流程。"""
+    try:
+        telemetry.emit(name, props, root=LEDGER_ROOT)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def timed_step(outdir, phase, role, cmd, task_id, error_kind="tool_exit"):
+    """执行子步骤并记 step_run：duration_ms 为实测墙钟，status 按真实退出码。"""
+    started = time.perf_counter()
+    ok, out = run_step(outdir, phase, role, cmd)
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    props = {"task_id": task_id, "step": phase, "role": role,
+             "status": "ok" if ok else "fail", "duration_ms": duration_ms}
+    if not ok:
+        props["error_kind"] = error_kind
+    emit_telemetry("step_run", props)
+    return ok, out, duration_ms
 
 
 def looks_like_task_id(name):
@@ -190,6 +216,25 @@ def main():
 
         # M1.5 §2.2 / A10：阶段事件 s1..s5 齐活（s1‖s2 并行阶段都出现）。
         window = doc.get("window") or {}
+        # 接单埋点：task.json 首建才算接单（server 建单后调 run 时由 /run 端点记，
+        # 这里用 old 判重，避免同一任务重复计数）。
+        if not old:
+            scene_id = doc.get("scene_id") or doc.get("metric_id")
+            if not scene_id and isinstance(doc.get("metric"), str):
+                scene_id = doc.get("metric")
+            created = {
+                "task_id": task_id,
+                "scene_id": str(scene_id or "unscoped"),
+                "source": "manual",
+            }
+            line_value = doc.get("line") or args.line
+            if line_value:
+                created["line"] = str(line_value)
+            if window.get("start"):
+                created["window_start"] = str(window["start"])
+            if window.get("end"):
+                created["window_end"] = str(window["end"])
+            emit_telemetry("task_created", created)
         log_line(outdir, "s1", "consulting-analyst",
                  f"s1 拆解任务：line={doc.get('line') or '-'} metric={doc.get('metric') or '-'} "
                  f"window={window.get('start') or '?'}~{window.get('end') or '?'}")
@@ -233,7 +278,7 @@ def main():
             if cand.is_file() and cand not in data_files:
                 data_files.append(cand)
         if not data_files and args.csv:
-            ok, out = run_step(outdir, "s2", "data-fetcher", [
+            ok, out, _ = timed_step(outdir, "s2", "data-fetcher", [
                 PY, str(ROOT / "tools" / "ingest_task_data.py"),
                 "--input", args.csv, "--line", args.line or intake.get("line", ""),
                 "--t-start", args.t_start or ((intake.get("window") or {}).get("start") or ""),
@@ -241,7 +286,7 @@ def main():
                 "--base-start", args.base_start or ((intake.get("baseline_window") or {}).get("start") or ""),
                 "--base-end", args.base_end or ((intake.get("baseline_window") or {}).get("end") or ""),
                 "--outdir", str(outdir),
-            ] + (["--field-map", args.field_map] if args.field_map else []))
+            ] + (["--field-map", args.field_map] if args.field_map else []), task_id)
             if not ok:
                 raise RuntimeError("取数失败（ingest_task_data）：\n" + out[-1500:])
             for name in ("material_refill_T.json", "material_refill_T30.json"):
@@ -262,7 +307,8 @@ def main():
                 ccmd += ["--t30", str(t30_file)]
             if args.contract_factors_yaml:
                 ccmd += ["--factors-yaml", args.contract_factors_yaml]
-            ok, out = run_step(outdir, "s2", "data-fetcher", ccmd)
+            ok, out, _ = timed_step(outdir, "s2", "data-fetcher", ccmd, task_id,
+                                    error_kind="contract")
             contract = extract_json_object(out)
             if isinstance(contract, dict):
                 # 合同结论落盘：呈现层据此判定降级态（降级≠失败，只是不出建议）
@@ -303,7 +349,8 @@ def main():
                           ("--cost-json", args.cost_json)):
             if val:
                 cmd += [flag, str(val)]
-        ok, out = run_step(outdir, "s5", "host", cmd)
+        ok, out, assemble_ms = timed_step(outdir, "s5", "host", cmd, task_id,
+                                         error_kind="assemble")
         if not ok:
             raise RuntimeError("组装报告失败（assemble_report）：\n" + out[-2000:])
         set_status(outdir, "running", step="assembled", task_id=task_id)
@@ -312,12 +359,23 @@ def main():
         report_sha = __import__("hashlib").sha256((outdir / "report.json").read_bytes()).hexdigest()
         log_line(outdir, "s5", "host",
                  f"report assembled: total={report.get('scorecard', {}).get('total')} verdict={report.get('scorecard', {}).get('verdict')} is_demo={report.get('is_demo')}")
+        # 报告产出埋点：finding_count 取报告有效发现数；degraded_pct 不在数据合同
+        # 字段里（合同只有 degradation_level 枚举），不编造，故不传。
+        emit_telemetry("report_built", {
+            "task_id": task_id,
+            "finding_count": len(report.get("finding") or []),
+            "is_demo": report.get("is_demo") is True,
+            "cannot_attribute_count": len(report.get("cannot_attribute") or []),
+            "report_hash": report_sha[:16],
+            "elapsed_ms": assemble_ms,
+        })
 
         # ---- 6) 报告契约校验（A2/A4） ----
         vcmd = [PY, str(ROOT / "tests" / "validate_report.py"), str(outdir / "report.json")]
         if real:
             vcmd.append("--require-real")
-        ok, out = run_step(outdir, "gate", "compliance-reviewer", vcmd)
+        ok, out, _ = timed_step(outdir, "gate", "compliance-reviewer", vcmd, task_id,
+                                error_kind="report_contract")
         if not ok:
             raise RuntimeError("报告契约校验未通过（validate_report）：\n" + out[-2000:])
 
@@ -325,7 +383,8 @@ def main():
         scmd = [PY, str(ROOT / "tools" / "score_scorecard.py"), "--from-report", str(outdir / "report.json")]
         if args.pack_path:
             scmd += ["--pack-path", args.pack_path]
-        ok, out = run_step(outdir, "gate", "compliance-reviewer", scmd)
+        ok, out, _ = timed_step(outdir, "gate", "compliance-reviewer", scmd, task_id,
+                                error_kind="scorecard")
         if not ok:
             raise RuntimeError("score_scorecard 独立调用失败：\n" + out[-1500:])
         try:
@@ -339,10 +398,10 @@ def main():
 
         # ---- 8) 四卡完整性 ----
         if args.analysis_json and args.goal_json and args.cost_json:
-            ok, out = run_step(outdir, "gate", "host", [
+            ok, out, _ = timed_step(outdir, "gate", "host", [
                 PY, str(ROOT / "tools" / "validate_loop.py"),
                 "--task-dir", str(records), "--require-complete",
-            ])
+            ], task_id, error_kind="loop_incomplete")
             if not ok:
                 raise RuntimeError("四卡不完整（validate_loop --require-complete）：\n" + out[-1500:])
 
@@ -351,12 +410,22 @@ def main():
         decision_path = records / "decision.json"
         decision_status = None
         if args.signer:
-            ok, out = run_step(outdir, "s5", "host", [
+            ok, out, _ = timed_step(outdir, "s5", "host", [
                 PY, str(ROOT / "tools" / "sign_delivery.py"), str(outdir / "report.json"),
                 "--signer", args.signer, "--out", str(signature_path),
-            ] + (["--allow-demo"] if report.get("is_demo") else []))
+            ] + (["--allow-demo"] if report.get("is_demo") else []), task_id,
+                error_kind="sign")
             if not ok:
                 raise RuntimeError("签字失败（sign_delivery）：\n" + out[-1500:])
+            sign_props = {"task_id": task_id, "signer": str(args.signer)}
+            sig_doc = {}
+            try:
+                sig_doc = read_json(signature_path)
+            except Exception:  # noqa: BLE001 - 读不到签名文件就不传 hash
+                sig_doc = {}
+            if isinstance(sig_doc, dict) and sig_doc.get("report_sha256"):
+                sign_props["signature_hash"] = str(sig_doc["report_sha256"])[:16]
+            emit_telemetry("sign", sign_props)
             set_status(outdir, "awaiting_sign", step="signature_written", task_id=task_id)
             fcmd = [
                 PY, str(ROOT / "tools" / "finalize_delivery.py"),
@@ -369,7 +438,8 @@ def main():
             allow = args.allow_signers or os.environ.get("BOT_SIGNERS") or ""
             if allow:
                 fcmd += ["--allow-signers", allow]
-            ok, out = run_step(outdir, "gate", "host", fcmd)
+            ok, out, _ = timed_step(outdir, "gate", "host", fcmd, task_id,
+                                    error_kind="finalize")
             if not ok:
                 raise RuntimeError("收口拒绝（finalize_delivery）：\n" + out[-2000:])
             decision_status = "approved"
