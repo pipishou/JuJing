@@ -425,6 +425,42 @@
   body[data-view="stage"] #view-stage{display:grid;grid-template-columns:1fr}
   body[data-view="workbench"] #view-workbench{display:block}
   body[data-view="wall"] #view-wall{display:block}
+  body[data-view="workitems"] #view-workitems{display:block}
+  #view-workitems{display:none;padding:22px 26px 60px}
+  .wi-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+  .wi-head h1{font:600 22px/1.3 var(--font);margin:0}
+  .wi-head p{margin:4px 0 0;color:var(--ink-3);font-size:12px}
+  .wi-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:0 0 14px}
+  .wi-kpi .k{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .wi-kpi .k b{display:block;font:600 20px/1.2 var(--font);color:var(--ink-1)}
+  .wi-kpi .k span{font-size:11px;color:var(--ink-3)}
+  .wi-kpi .k.warn b{color:#b45309}
+  .wi-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  .wi-bar input[type=search],.wi-bar select{font:inherit;font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink-1)}
+  .wi-bar input[type=search]{min-width:200px}
+  .wi-table{width:100%;border-collapse:collapse;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .wi-table th,.wi-table td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+  .wi-table th{background:var(--wash);font-weight:600;color:var(--ink-2);white-space:nowrap;position:sticky;top:0;z-index:2}
+  .wi-table tr.sec td{background:#f3f4f6;font-weight:600;color:var(--ink-2)}
+  .wi-table tr.over td:first-child{box-shadow:inset 3px 0 0 #dc2626}
+  .wi-table td.title{min-width:220px}
+  .wi-table input,.wi-table select{font:inherit;font-size:12px;padding:3px 5px;border:1px solid transparent;border-radius:6px;background:transparent;color:inherit;width:100%}
+  .wi-table input:hover,.wi-table select:hover{border-color:var(--line)}
+  .wi-table input:focus,.wi-table select:focus{border-color:#2563eb;background:#fff;outline:none}
+  .wi-table td.p{width:78px}
+  .wi-table td.s{width:104px}
+  .wi-table td.due{width:120px}
+  .wi-table td.own{width:110px}
+  .wi-pill{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;border:1px solid var(--line);color:var(--ink-2)}
+  .wi-pill.st-doing{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+  .wi-pill.st-done{background:#ecfdf5;border-color:#a7f3d0;color:#047857}
+  .wi-pill.st-paused{background:#fffbeb;border-color:#fde68a;color:#b45309}
+  .wi-pill.st-blocked{background:#fef2f2;border-color:#fecaca;color:#b91c1c}
+  .wi-empty{padding:30px;text-align:center;color:var(--ink-3);font-size:13px}
+  .wi-toast{position:fixed;right:20px;bottom:20px;background:#111827;color:#fff;padding:9px 14px;border-radius:10px;font-size:12px;opacity:0;transform:translateY(8px);transition:.18s;z-index:99}
+  .wi-toast.on{opacity:1;transform:none}
+  .wi-toast.bad{background:#b91c1c}
+  @media (max-width:1100px){#view-workitems{padding:14px 12px 50px}.wi-table td.title{min-width:150px}}
   #view-stage .side{display:none}
   #view-stage,#view-workbench,#view-wall{min-height:100vh}
 
@@ -522,15 +558,52 @@
       <div><b>AI 员工事务所</b><span>经营决策台 · 统一入口</span></div>
     </div>
     <nav class="rail-nav">
-      <a href="#console" data-view="console" class="on"><span class="idx">01</span>决策台</a>
-      <a href="#workbench" data-view="workbench"><span class="idx">02</span>任务工作台</a>
-      <a href="#stage" data-view="stage"><span class="idx">03</span>执行舞台</a>
-      <a href="#wall" data-view="wall"><span class="idx">04</span>交付墙</a>
+      <a href="#workitems" data-view="workitems" class="on"><span class="idx">01</span>工作事项台</a>
+      <a href="#console" data-view="console"><span class="idx">02</span>决策台</a>
+      <a href="#workbench" data-view="workbench"><span class="idx">03</span>任务工作台</a>
+      <a href="#stage" data-view="stage"><span class="idx">04</span>执行舞台</a>
+      <a href="#wall" data-view="wall"><span class="idx">05</span>交付墙</a>
     </nav>
     <div class="rail-foot"><span class="rail-dot" id="railDot"></span><span id="railState">连接中……</span></div>
   </aside>
   <div class="workarea">
 <!-- ================= 视图 01 · B15 经营决策台（P0 / P1 / P2，场景驱动，零场景常量） ================= -->
+<!-- ================= 视图 00 · 工作事项台（唯一更新入口） ================= -->
+<section id="view-workitems">
+  <div class="wi-head">
+    <div>
+      <h1>工作事项台</h1>
+      <p id="wiMeta">正在读取账本……</p>
+    </div>
+    <div class="wi-bar" style="margin:0">
+      <button class="dbtn" onclick="wiLoad(true)">刷新</button>
+      <button class="dbtn" onclick="wiOpenImport()">从本机清单导入</button>
+      <a class="dbtn" href="/api/workitems/export.csv" download="工作事项.csv">导出 CSV</a>
+      <button class="dbtn primary" onclick="wiMakeTask()">生成周度盘点单</button>
+    </div>
+  </div>
+  <div class="wi-kpi" id="wiKpi"></div>
+  <div class="wi-bar">
+    <input type="search" id="wiSearch" placeholder="搜索事项 / 责任人 / 备注" oninput="wiRender()" />
+    <select id="wiStatus" onchange="wiRender()"><option value="">全部状态</option></select>
+    <select id="wiSection" onchange="wiRender()"><option value="">全部分组</option></select>
+    <label style="font-size:12px;color:var(--ink-3)"><input type="checkbox" id="wiOverdue" onchange="wiRender()" /> 只看逾期</label>
+    <span style="font-size:12px;color:var(--ink-3)" id="wiCount"></span>
+  </div>
+  <div id="wiTableWrap"><div class="wi-empty">正在连接本地服务……</div></div>
+  <div class="wi-toast" id="wiToast"></div>
+  <div class="wcard" id="wiImportPanel" hidden style="margin-top:14px">
+    <h4>从本机清单导入（幂等，重复导入不翻倍）</h4>
+    <div class="wbody">
+      <div class="row"><span class="k">清单文件</span><span class="v"><select id="wiSource" style="min-width:320px"></select></span></div>
+      <div class="row"><span class="k">说明</span><span class="v" id="wiSourceNote">目录见下方；导入后会覆盖同一条事项的字段，未出现的保留。</span></div>
+      <div class="row"><span class="k"></span><span class="v">
+        <button class="dbtn primary" onclick="wiDoImport()">导入</button>
+        <button class="dbtn" onclick="wiOpenImport(false)">取消</button>
+      </span></div>
+    </div>
+  </div>
+</section>
 <div id="deskRoot">
   <header class="desk-top">
     <div class="desk-brand">
@@ -2572,18 +2645,19 @@
     try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); }
   }
   /* ------------------------------------------------------------ 四视图路由（#console / #workbench / #stage / #wall） */
-  const VIEWS = ['console', 'workbench', 'stage', 'wall'];
+  const VIEWS = ['workitems', 'console', 'workbench', 'stage', 'wall'];
   function viewFromHash() {
     const h = String(location.hash || '').replace(/^#/, '');
-    return VIEWS.indexOf(h) >= 0 ? h : 'console';
+    return VIEWS.indexOf(h) >= 0 ? h : 'workitems';
   }
   function showView(name) {
-    const v = VIEWS.indexOf(name) >= 0 ? name : 'console';
+    const v = VIEWS.indexOf(name) >= 0 ? name : 'workitems';
     document.body.dataset.view = v;
     document.querySelectorAll('.rail-nav a').forEach(function (a) {
       a.classList.toggle('on', a.getAttribute('data-view') === v);
     });
     if (v === 'console') { try { renderP0(); } catch (e) { /* 场景台静默回退 */ } }
+    if (v === 'workitems') { try { wiLoad(); } catch (e) { /* 工作事项台静默回退 */ } }
     if (v === 'wall') { try { wallRefresh(); } catch (e) { /* 交付墙静默回退 */ } }
     if (v === 'workbench') { try { decorateWorkbenchDemos(); } catch (e) { /* 忽略 */ } }
   }
@@ -3270,6 +3344,282 @@
     try { if (v === 'console' && DESK.pendingScene) { openScene(DESK.pendingScene); DESK.pendingScene = ''; } } catch (e) { /* 忽略 */ }
   });
   bindRealData();
+</script>
+
+<script>
+/* ============ 视图 00 · 工作事项台（唯一更新入口） ============
+   数据源：GET /api/workitems（账本 runtime/workitems/current.json）
+   写入：POST /api/workitems {action:add|update|delete}（服务端是唯一写入方）
+   导入：POST /api/workitems/import {path}（本机 xlsx/csv，幂等合并）
+   设计：单元格直改即保存；失败回滚并提示，不打断页面。 */
+(function () {
+  var st = { store: null, loading: false, saving: {}, sections: [], toastTimer: null, live: false };
+
+  function $(id) { return document.getElementById(id); }
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function toast(text, bad) {
+    var el = $('wiToast'); if (!el) return;
+    el.textContent = text;
+    el.className = 'wi-toast on' + (bad ? ' bad' : '');
+    clearTimeout(st.toastTimer);
+    st.toastTimer = setTimeout(function () { el.className = 'wi-toast'; }, 2600);
+  }
+  function api(path, opts) {
+    return fetch(path, opts).then(function (res) {
+      return res.text().then(function (raw) {
+        var data = null;
+        try { data = raw ? JSON.parse(raw) : null; } catch (e) { data = { ok: false, error: raw.slice(0, 200) }; }
+        if (!res.ok) throw new Error((data && (data.error || data.message)) || ('HTTP ' + res.status));
+        return data;
+      });
+    });
+  }
+  function b64utf8(text) {
+    var bytes = new TextEncoder().encode(text);
+    var bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+
+  window.wiLoad = function (force) {
+    if (st.loading) return;
+    st.loading = true;
+    api('/api/workitems').then(function (data) {
+      st.store = data; st.live = true;
+      wiPaintMeta(); wiPaintKpi(); wiPaintFilters(); wiRender();
+    }).catch(function (err) {
+      st.live = false; st.store = null;
+      var wrap = $('wiTableWrap');
+      if (wrap) wrap.innerHTML = '<div class="wi-empty">读不到本地服务：' + esc(err.message) +
+        '<br/><span style="font-size:12px">先在 bot-team 下运行 python -B server/app.py --port 8787，再刷新本页。</span></div>';
+      var meta = $('wiMeta');
+      if (meta) meta.textContent = '离线：账本不可读（后端未启动或端口不同）';
+      if (force) toast('刷新失败：' + err.message, true);
+    }).then(function () { st.loading = false; });
+  };
+
+  function wiPaintMeta() {
+    var d = st.store || {};
+    var src = d.source || {};
+    var name = src.file ? String(src.file).split(/[\\/]/).pop() : (src.kind === 'empty' ? '空账本' : '本地维护');
+    var meta = $('wiMeta');
+    if (meta) {
+      meta.textContent = '来源：' + name + ' · 修订 r' + (d.revision || 0) +
+        ' · 最近更新 ' + (d.updated_at || '—') + ' · 账本 ' + (d.path || '');
+    }
+  }
+
+  function wiPaintKpi() {
+    var s = (st.store && st.store.summary) || {};
+    var cards = [
+      ['事项总数', s.total, ''],
+      ['在办', s.active, ''],
+      ['逾期', s.overdue_count, s.overdue_count ? 'warn' : ''],
+      ['逾期率', s.overdue_rate == null ? '—' : s.overdue_rate + '%', 'warn'],
+      ['本周闭环率', s.closure_rate == null ? '—' : s.closure_rate + '%', '']
+    ];
+    var box = $('wiKpi');
+    if (!box) return;
+    box.innerHTML = cards.map(function (c) {
+      return '<div class="k ' + c[2] + '"><b>' + esc(c[1] == null ? '—' : c[1]) + '</b><span>' + esc(c[0]) + '</span></div>';
+    }).join('');
+  }
+
+  function wiPaintFilters() {
+    var d = st.store || {};
+    var stSel = $('wiStatus'); var secSel = $('wiSection');
+    if (stSel) {
+      var keep = stSel.value;
+      stSel.innerHTML = '<option value="">全部状态</option>' + (d.status_order || []).map(function (k) {
+        var label = (d.status_labels || {})[k] || k;
+        return '<option value="' + esc(k) + '">' + esc(label) + '</option>';
+      }).join('');
+      stSel.value = keep || '';
+    }
+    if (secSel) {
+      var keepSec = secSel.value;
+      var secs = (d.summary && d.summary.by_section) || {};
+      secSel.innerHTML = '<option value="">全部分组</option>' + Object.keys(secs).sort().map(function (k) {
+        return '<option value="' + esc(k) + '">' + esc(k) + '（' + secs[k] + '）</option>';
+      }).join('');
+      secSel.value = keepSec || '';
+    }
+  }
+
+  function wiVisible() {
+    var d = st.store || {};
+    var q = ($('wiSearch') && $('wiSearch').value || '').trim().toLowerCase();
+    var stf = ($('wiStatus') && $('wiStatus').value) || '';
+    var sec = ($('wiSection') && $('wiSection').value) || '';
+    var onlyOver = $('wiOverdue') && $('wiOverdue').checked;
+    var overIds = {};
+    ((d.summary && d.summary.overdue) || []).forEach(function (x) { overIds[x.id] = true; });
+    return (d.items || []).filter(function (it) {
+      if (stf && it.status !== stf) return false;
+      if (sec && it.section !== sec) return false;
+      if (onlyOver && !overIds[it.id]) return false;
+      if (q) {
+        var hay = [it.title, it.owner, it.note, it.section, it.priority, it.type].join(' ').toLowerCase();
+        if (hay.indexOf(q) < 0) return false;
+      }
+      return true;
+    });
+  }
+
+  window.wiRender = function () {
+    var wrap = $('wiTableWrap');
+    if (!wrap) return;
+    if (!st.store) return;
+    var items = wiVisible();
+    var d = st.store;
+    var overIds = {};
+    ((d.summary && d.summary.overdue) || []).forEach(function (x) { overIds[x.id] = true; });
+    if (!items.length) {
+      wrap.innerHTML = '<div class="wi-empty">当前筛选下没有事项。清空搜索/状态筛选试试。</div>';
+    } else {
+      var labels = d.status_labels || {};
+      var order = d.status_order || [];
+      var rows = [];
+      var lastSec = null;
+      items.forEach(function (it) {
+        if (it.section !== lastSec) {
+          lastSec = it.section;
+          var n = (d.summary.by_section || {})[it.section] || '';
+          rows.push('<tr class="sec"><td colspan="8">▎' + esc(it.section || '未分组') + (n ? '（' + esc(n) + ' 项）' : '') + '</td></tr>');
+        }
+        var opts = order.map(function (k) {
+          return '<option value="' + esc(k) + '"' + (k === it.status ? ' selected' : '') + '>' + esc(labels[k] || k) + '</option>';
+        }).join('');
+        rows.push('<tr class="' + (overIds[it.id] ? 'over' : '') + '" data-id="' + esc(it.id) + '">' +
+          '<td>' + esc(it.seq || '') + '</td>' +
+          '<td class="title">' + esc(it.title) + (it.impact ? '<br/><span style="font-size:11px;color:#6b7280">' + esc(it.impact) + '</span>' : '') + '</td>' +
+          '<td class="own"><input value="' + esc(it.owner) + '" placeholder="责任人" onchange="wiSave(\'' + esc(it.id) + '\',{owner:this.value})" /></td>' +
+          '<td class="due"><input value="' + esc(it.due_raw || it.due) + '" placeholder="截止日" onchange="wiSave(\'' + esc(it.id) + '\',{due:this.value})" /></td>' +
+          '<td class="s"><select onchange="wiSave(\'' + esc(it.id) + '\',{status:this.value})">' + opts + '</select></td>' +
+          '<td class="p"><input type="number" min="0" max="100" step="5" value="' + esc(it.progress) + '" onchange="wiSave(\'' + esc(it.id) + '\',{progress:Number(this.value)})" /></td>' +
+          '<td>' + esc(it.priority || '') + '</td>' +
+          '<td><input value="' + esc(it.note) + '" placeholder="备注" onchange="wiSave(\'' + esc(it.id) + '\',{note:this.value})" /></td>' +
+          '</tr>');
+      });
+      wrap.innerHTML = '<table class="wi-table"><thead><tr>' +
+        '<th>#</th><th>事项</th><th>责任人</th><th>计划完成</th><th>状态</th><th>进度</th><th>优先级</th><th>备注</th>' +
+        '</tr></thead><tbody>' + rows.join('') + '</tbody></table>';
+    }
+    var cnt = $('wiCount');
+    if (cnt) cnt.textContent = '显示 ' + items.length + ' / 共 ' + ((d.items || []).length) + ' 项';
+  };
+
+  window.wiSave = function (id, patch) {
+    if (!id) return;
+    var key = id + ':' + Object.keys(patch).join(',');
+    if (st.saving[key]) return;
+    st.saving[key] = true;
+    api('/api/workitems', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ action: 'update', id: id, patch: patch, by: '老板' })
+    }).then(function (data) {
+      if (data && data.item) {
+        var list = (st.store && st.store.items) || [];
+        for (var i = 0; i < list.length; i++) if (list[i].id === id) list[i] = data.item;
+        st.store.summary = data.summary || st.store.summary;
+        st.store.revision = data.revision || st.store.revision;
+        wiPaintKpi(); wiPaintFilters(); wiRender();
+        toast('已保存 ' + id);
+      }
+      delete st.saving[key];
+    }).catch(function (err) {
+      delete st.saving[key];
+      toast('保存失败：' + err.message, true);
+      wiLoad(true);
+    });
+  };
+
+  window.wiOpenImport = function (open) {
+    var panel = $('wiImportPanel');
+    if (!panel) return;
+    var show = open === undefined ? panel.hidden : !!open;
+    panel.hidden = !show;
+    if (!show) return;
+    var sel = $('wiSource');
+    if (sel) sel.innerHTML = '<option value="">读取目录中……</option>';
+    api('/api/workitems/sources').then(function (data) {
+      var files = (data && data.files) || [];
+      if (!sel) return;
+      if (!files.length) {
+        sel.innerHTML = '<option value="">目录里没有 xlsx/csv</option>';
+      } else {
+        sel.innerHTML = files.map(function (f) {
+          return '<option value="' + esc(f.path) + '">' + esc(f.name) + '（' + Math.round((f.size || 0) / 1024) + 'KB · ' + esc(f.mtime || '') + '）</option>';
+        }).join('');
+      }
+      var note = $('wiSourceNote');
+      if (note) {
+        note.textContent = '目录：' + (data.dir || '—') + (data.dir_exists ? '' : '（不存在，可用环境变量 BOT_WORKITEMS_DIR 指定）') +
+          (data.current ? ' · 当前账本来源：' + String(data.current).split(/[\\/]/).pop() : '');
+      }
+    }).catch(function (err) {
+      if (sel) sel.innerHTML = '<option value="">读取失败：' + esc(err.message) + '</option>';
+    });
+  };
+
+  window.wiDoImport = function () {
+    var sel = $('wiSource');
+    var path = sel && sel.value;
+    if (!path) { toast('先选一个清单文件', true); return; }
+    toast('导入中……');
+    api('/api/workitems/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ path: path, by: '老板' })
+    }).then(function (data) {
+      var s = (data && data.stats) || {};
+      toast('导入完成：新增 ' + (s.added || 0) + ' / 更新 ' + (s.updated || 0) + ' / 共 ' + (s.total || 0) + ' 项');
+      wiOpenImport(false);
+      wiLoad(true);
+    }).catch(function (err) { toast('导入失败：' + err.message, true); });
+  };
+
+  window.wiMakeTask = function () {
+    if (!st.store) { toast('账本还没读到', true); return; }
+    var today = new Date().toISOString().slice(0, 10);
+    var payload = {
+      title: '工作任务周度盘点（' + today + '）',
+      goal: '本人在办工作事项的逾期分布与本周建议',
+      source: 'workitems',
+      scene_id: 'scene-workitems-weekly',
+      metric: 'overdue_rate',
+      metric_id: 'overdue_rate',
+      line: '全部',
+      runner: 'external',
+      intake: {
+        raw_text: '工作事项台一键生成：周度盘点',
+        data_owner: '老板',
+        line_owner: '老板',
+        notes: '数据来自工作事项账本 r' + (st.store.revision || 0)
+      },
+      data_files: [{
+        name: 'workitems-' + today + '.json',
+        content: b64utf8(JSON.stringify(st.store, null, 2))
+      }]
+    };
+    toast('建单中……');
+    api('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify(payload)
+    }).then(function (data) {
+      toast('已建单 ' + (data.task_id || '') + '，接着让团队出报告');
+      if (data && data.task_id) {
+        try { location.hash = '#workbench'; if (window.APIAdapter && APIAdapter.selectTask) APIAdapter.selectTask(data.task_id); } catch (e) {}
+      }
+    }).catch(function (err) { toast('建单失败：' + err.message, true); });
+  };
+})();
 </script>
 </body>
 </html>
