@@ -152,3 +152,17 @@ steps:
 - 不在验收表未全绿时给出「已完成」。
 - 不给执行指令——只给可拍板的选项，拍板权在老板。
 - 不引用角色人格里的名言充当论据（人格是视角，不是证据）。
+
+## 收敛产物双落盘（并链契约）
+
+收敛步（host）必须同时产出两件，缺 JSON 视为未交付：
+
+1. `generated/<标题>.md` —— 给人看的收敛报告。
+2. `advisory-report.v1` JSON —— 给机器接签字的产物，字段见 `assets/advisory-report.v1.schema.json`，样例见 `bot-team/tests/fixtures/advisory/advisory-refill-B-20261026.json`。
+
+JSON 由 `bot-team/tools/advisory_to_task.py` 转成 `runs/<task_id>/report.json`（证据拷入 `data/` 并算 sha256、评分卡走 `core.report_contract` 百分制、不可逆建议缺 securityGate 直接 fail closed），随后进入 `POST /api/tasks/<id>/sign` → `/finalize` → T+7 回看。
+
+纪律：
+- 评分卡六维必须真打分，**禁止**全 5 分或一律 4 分；一致性无人参与结论时必须为 0。
+- 任何 `irreversible` 建议必须带 `security_gate`（status=pending_user_confirmation 起），不得自行填 confirmed。
+- `sources` 必须指向真实文件；没有证据文件支撑的 finding 不得写入。

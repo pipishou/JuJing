@@ -36,9 +36,17 @@ def check(name, ok, detail=""):
 def main():
     raw = sys.argv[1:]
     require_real = "--require-real" in raw
-    args = [a for a in raw if a != "--require-real"]
+    base = ROOT
+    if "--base" in raw:
+        idx = raw.index("--base")
+        if idx + 1 >= len(raw):
+            print("usage: validate_report.py <report.json> [--require-real] [--base <dir>]")
+            return 2
+        base = Path(raw[idx + 1]).resolve()
+    drop = {"--require-real", "--base"}
+    args = [a for i, a in enumerate(raw) if a not in drop and not (i > 0 and raw[i - 1] == "--base")]
     if len(args) != 1:
-        print("usage: validate_report.py <report.json> [--require-real]")
+        print("usage: validate_report.py <report.json> [--require-real] [--base <dir>]")
         return 2
     p = Path(args[0])
     if not p.is_file():
@@ -92,7 +100,7 @@ def main():
         try:
             from core import gates as _gates
 
-            errs = _gates.real_report_errors(r, ROOT)
+            errs = _gates.real_report_errors(r, base)
         except Exception as exc:  # noqa: BLE001
             errs = [f"可信门执行异常：{exc}"]
         check("real 可信门（占位/证据/溯源/total-verdict）", not errs, "；".join(str(e) for e in errs)[:500])
