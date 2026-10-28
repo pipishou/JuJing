@@ -33,3 +33,4 @@ node_modules/
 # OS
 Thumbs.db
 .DS_Store
+bot-team/server/services/*.log

@@ -212,6 +212,22 @@ def write_outputs(task_dir: Path, report: dict, task_id: str) -> None:
         fh.write(f"{now_iso()} phase=assemble role=host kind=status line=参谋团产物已并链（advisory_to_task）\n")
 
 
+def write_loop(task_dir: Path, advisory_path: Path, task_id: str) -> tuple[bool, str]:
+    """调 tools/write_loop_bundle.py 生成 loop/ 四卡（analysis/decision/evidence/closure）。"""
+    script = ROOT / "tools" / "write_loop_bundle.py"
+    if not script.is_file():
+        return False, f"找不到 {script}"
+    cmd = [sys.executable, "-B", str(script),
+           "--report", str(task_dir / "report.json"),
+           "--outdir", str(task_dir / "loop"),
+           "--task-id", task_id,
+           "--analysis-json", str(advisory_path)]
+    out = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if out.returncode != 0:
+        return False, (out.stderr or out.stdout or "")[-600:]
+    return True, ""
+
+
 def selfcheck(task_dir: Path, base: Path) -> tuple[bool, str]:
     proc = subprocess.run(
         [sys.executable, "-B", str(ROOT / "tests" / "validate_report.py"),
@@ -229,6 +245,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--runs-root", default=str(ROOT / "runs"), help="runs 目录（测试用）")
     ap.add_argument("--skip-sources", action="store_true", help="不拷证据文件，只用 JSON 里的 data_refs")
     ap.add_argument("--dry-run", action="store_true", help="只打印将写入的报告，不落盘")
+    ap.add_argument("--skip-loop", action="store_true",
+                    help="不生成 loop/ 四卡（默认生成，否则 finalize 会因缺四卡拒签）")
     args = ap.parse_args(argv)
 
     adv_path = Path(args.advisory)
@@ -237,7 +255,9 @@ def main(argv: list[str] | None = None) -> int:
     if not task_id:
         print("[ERROR] 缺 --task-id（或 advisory JSON 里的 task_id）；任务必须由 POST /api/tasks 先建", file=sys.stderr)
         return 2
-    task_dir = Path(args.runs_root) / task_id
+    # 必须 resolve：--runs-root 常给相对路径（../../_tmp_x/runs），不 resolve 时
+    # stage_evidence 的 dst.relative_to(绝对 base) 会失败并退化成绝对/相对混合 ref。
+    task_dir = (Path(args.runs_root) / task_id).resolve()
     if not task_dir.is_dir():
         print(f"[ERROR] 任务目录不存在：{task_dir}（先用 POST /api/tasks 建任务）", file=sys.stderr)
         return 2
@@ -264,6 +284,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     write_outputs(task_dir, report, task_id)
+    if not args.skip_loop:
+        # 四卡是 finalize 的前置（server 会校验 loop/），所以并链必须一并产出，
+        # 否则「报告已写、签字被拒」——这正是 workops 第一次接单踩到的坑。
+        loop_ok, loop_detail = write_loop(task_dir, adv_path, task_id)
+        print(f"[{'OK' if loop_ok else 'FAIL'}] loop/ 四卡")
+        if loop_detail:
+            print(loop_detail)
     ok, detail = selfcheck(task_dir, base)
     print(f"[OK] 已写 {task_dir / 'report.json'}")
     print(f"[{'OK' if ok else 'FAIL'}] validate_report --require-real")
