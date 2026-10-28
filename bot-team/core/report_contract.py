@@ -23,6 +23,12 @@ import re
 SIX_DIMS = ["data_completeness", "timeliness", "significance", "exclusivity",
             "history", "human_ai_consistency"]
 
+# C-1：交付卡三卡型。六维评分卡只对 attribution 生效；review/content 走各自
+# 强制字段（见 core.gates.content_plan_errors / review_errors）。
+# 报告顶层缺 card_kind 视为 attribution（向后兼容旧报告）；未知值一律报错不静默。
+CARD_KINDS = ("attribution", "review", "content")
+DEFAULT_CARD_KIND = "attribution"
+
 WEIGHT_EACH_DISPLAY = 16.67
 FULL_SCALE = 5.0
 TOTAL_MAX = 100.0
@@ -203,9 +209,41 @@ def compute(raw, strict=False, pack=None):
     }
 
 
+def card_kind(report):
+    """读取交付卡卡型：缺省 attribution；未知值 → ValueError（C-1，不静默）。
+
+    兼容：card_kind 为 None/空白字符串时按缺省处理；非字符串 → ValueError。
+    """
+    if not isinstance(report, dict):
+        raise ValueError("report 必须是 JSON 对象才能判定 card_kind")
+    raw = report.get("card_kind", DEFAULT_CARD_KIND)
+    if raw is None:
+        return DEFAULT_CARD_KIND
+    if not isinstance(raw, str):
+        raise ValueError(f"card_kind 必须是字符串，收到 {type(raw).__name__}（允许 {list(CARD_KINDS)}）")
+    kind = raw.strip()
+    if not kind:
+        return DEFAULT_CARD_KIND
+    if kind not in CARD_KINDS:
+        raise ValueError(f"未知 card_kind: {kind!r}（允许 {list(CARD_KINDS)}）")
+    return kind
+
+
 def apply(report, pack=None):
-    """把 total/verdict/label/guardrails/points 写进 report['scorecard']（原地修改并返回计算结果）。"""
+    """把 total/verdict/label/guardrails/points 写进 report['scorecard']（原地修改并返回计算结果）。
+
+    C-1 三卡型：
+      - attribution（缺省）：行为完全不变（六维强制）。
+      - review/content：无 scorecard 或缺六维 → 不抛异常、不改写 scorecard，
+        返回 {"skipped": True, "card_kind": kind}；给了完整六维仍照常计算（允许自评）。
+    """
+    if not isinstance(report, dict):
+        raise ValueError("report 必须是 JSON 对象")
+    kind = card_kind(report)  # 未知 card_kind 在这里报错（fail closed）
     sc = report.get("scorecard")
+    if kind != "attribution":
+        if not isinstance(sc, dict) or any(dim not in sc for dim in SIX_DIMS):
+            return {"skipped": True, "card_kind": kind}
     if not isinstance(sc, dict):
         raise ValueError("report.scorecard 必须是对象")
     result = compute(sc, pack=pack)
@@ -214,7 +252,9 @@ def apply(report, pack=None):
     sc["label"] = result["label"]
     sc["guardrails"] = result["guardrails"]
     sc["points"] = result["points"]
-    return result
+    out = dict(result)
+    out["card_kind"] = kind
+    return out
 
 
 def consistency_errors(scorecard, pack=None):

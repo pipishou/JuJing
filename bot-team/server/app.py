@@ -612,7 +612,9 @@ class RawBody:
 class Config:
     def __init__(self, root, owner=DEFAULT_OWNER, allow_signers=DEFAULT_ALLOW_SIGNERS):
         self.root = Path(root).resolve()
-        self.runs = self.root / "runs"
+        # 与 tools/run_task.py 一致：允许用 BOT_RUNS_ROOT 把 runs 根指向临时目录，
+        # 否则「跑测试＝污染真账本/runs」只能靠人肉清理（D-010 的同类缺口）。
+        self.runs = Path(os.environ.get("BOT_RUNS_ROOT") or (self.root / "runs"))
         self.ui = self.root / "ui"
         self.runs.mkdir(parents=True, exist_ok=True)
         self.owner = str(owner or DEFAULT_OWNER).strip() or DEFAULT_OWNER
@@ -1005,6 +1007,27 @@ def create_task(cfg, body):
         "created_at": task.get("created_at"), "updated_at": now_iso(),
     })
     files, data_files = apply_uploads(cfg, tdir, task_id, uploads)
+    # task-15：接单埋点（飞轮漏斗分母含「建了但没跑」的单）。
+    # 只在真正新建时记一次：重复 task_id 在 tdir.exists() 处已 409，走不到这里；
+    # 后续 /run 的兜底埋点看到 created_via=api 会跳过，避免同单重复计数。
+    task["created_via"] = "api"
+    write_json_atomic(tdir / "task.json", task)
+    created = {
+        "task_id": task_id,
+        "scene_id": str(task.get("scene_id") or task.get("metric_id")
+                        or task.get("metric") or "unscoped"),
+        "source": str(body.get("source") or "manual"),
+    }
+    intake_doc = task.get("intake") if isinstance(task.get("intake"), dict) else {}
+    line_value = task.get("line") or intake_doc.get("line")
+    if line_value not in (None, ""):
+        created["line"] = str(line_value)
+    window = task.get("window") if isinstance(task.get("window"), dict) else {}
+    if window.get("start"):
+        created["window_start"] = str(window["start"])
+    if window.get("end"):
+        created["window_end"] = str(window["end"])
+    emit_telemetry(cfg, "task_created", created)
     response = dict(task)
     response["ok"] = True
     response["data_files"] = data_files
@@ -1545,9 +1568,19 @@ def get_task(cfg, task_id):
     scene_doc = read_json(tdir / "scene.json") if (tdir / "scene.json").is_file() else None
     report = read_json(tdir / "report.json")
     outcome = read_outcome(tdir)
+    task_doc = read_json(tdir / "task.json")
+    task_doc = task_doc if isinstance(task_doc, dict) else {}
+    report_doc = report if isinstance(report, dict) else {}
+    card_kind = _card_kind_of(report_doc)
     return {
-        "task": read_json(tdir / "task.json"),
+        "task": task_doc,
         "report": report,
+        # task-15 / C-2：卡型 + 本卡班组（与 /delivery 同源；无报告时 crew=None）
+        "card_kind": card_kind,
+        "card_kind_label": CARD_KIND_LABEL.get(card_kind, card_kind),
+        "crew": _crew_view(cfg, report_doc, task_doc) if report_doc else None,
+        "content_plan": report_doc.get("content_plan") if isinstance(report_doc.get("content_plan"), dict) else None,
+        "review": report_doc.get("review") if isinstance(report_doc.get("review"), dict) else None,
         "status": read_status(tdir),
         "loop": read_loop(tdir),
         "signature": signature_doc(tdir),
@@ -1564,6 +1597,135 @@ def get_task(cfg, task_id):
     }
 
 
+# --------------------------------------------------------------------------- #
+# task-15 / C-2：交付卡卡型 + 本卡班组（呈现层视图，report 仍是唯一事实源）
+#   - card_kind：宽松读取报告顶层字段，缺省 attribution；不 import 并行开发中的
+#     core.report_contract.CARD_KINDS（等契约稳定后再对齐，避免耦合未落地代码）。
+#   - crew：core.team.load_team + crew_for_kind；只标「本卡报告里真实出现」的产出，
+#     未出现的步骤 produced=false（UI 灰字「未产出」，绝不编造）。
+# --------------------------------------------------------------------------- #
+CARD_KIND_DEFAULT = "attribution"
+CARD_KIND_LABEL = {"attribution": "归因卡", "review": "回看卡", "content": "内容卡"}
+# 精灵 key → 头像 emoji（纯展示映射；员工数据本身不含 emoji，不冒充事实）
+SPRITE_EMOJI = {
+    "host": "🧑‍💼", "analyst": "📊", "attr": "🔍", "biz": "🏭",
+    "qa": "🛡️", "data": "📦", "content": "✍️", "cost": "💰", "media": "🎬",
+}
+
+
+def _card_kind_of(report):
+    """报告卡型：缺省 attribution；未知/非字符串按缺省兜底（契约层负责报错）。"""
+    if not isinstance(report, dict):
+        return CARD_KIND_DEFAULT
+    raw = report.get("card_kind")
+    if raw in (None, ""):
+        return CARD_KIND_DEFAULT
+    if not isinstance(raw, str):
+        return CARD_KIND_DEFAULT
+    kind = raw.strip()
+    return kind or CARD_KIND_DEFAULT
+
+
+def _produced_agents(kind, report):
+    """本卡报告里真实出现的产出 → 对应员工 id 集合（不编造未出现的产物）。"""
+    if not isinstance(report, dict):
+        return set()
+    finding = report.get("finding") if isinstance(report.get("finding"), list) else []
+    recs = report.get("recommendation") if isinstance(report.get("recommendation"), list) else []
+    log = report.get("decision_log_entry") if isinstance(report.get("decision_log_entry"), dict) else {}
+    refs = log.get("data_refs") or report.get("data_refs") or []
+    content_plan = report.get("content_plan") if isinstance(report.get("content_plan"), dict) else None
+    review = report.get("review") if isinstance(report.get("review"), dict) else None
+    outcome = report.get("outcome") if isinstance(report.get("outcome"), dict) else None
+    out = set()
+    if kind == "content":
+        if content_plan:
+            out.update({"content-operator", "host"})
+        if refs:
+            out.add("consulting-analyst")
+        if review:
+            out.add("compliance-reviewer")
+    elif kind == "review":
+        if review or outcome:
+            out.update({"compliance-reviewer", "host"})
+        if refs:
+            out.add("data-fetcher")
+    else:
+        if finding:
+            out.add("ai-attribution-expert")
+        if recs:
+            out.add("manufacturing-ops-expert")
+        if log:
+            out.add("host")
+        if refs:
+            out.add("consulting-analyst")
+    return out
+
+
+def _crew_view(cfg, report, task):
+    """本卡班组视图 {id,name,card_kind,steps:[{agent,what,employee_name,emoji,produced}]}。
+
+    班组取 task.crew_id（或 intake.crew_id）；缺省按 card_kind 取第一个班组。
+    core.team 不可用 / 无班组 → 返回 None（UI 整条隐藏，绝不造假）。
+    """
+    try:
+        team_mod = import_core(cfg, "team")
+        team = team_mod.load_team(str(cfg.root))
+    except Exception:  # noqa: BLE001 - 班组是呈现增强项，失败不拖垮交付视图
+        return None
+    if not isinstance(team, dict):
+        return None
+    crews = team.get("crews") if isinstance(team.get("crews"), list) else []
+    if not crews:
+        return None
+    kind = _card_kind_of(report)
+    task = task if isinstance(task, dict) else {}
+    intake = task.get("intake") if isinstance(task.get("intake"), dict) else {}
+    wanted = str(task.get("crew_id") or intake.get("crew_id") or "").strip()
+    crew = None
+    for item in crews:
+        if isinstance(item, dict) and wanted and str(item.get("id") or "") == wanted:
+            crew = item
+            break
+    if crew is None:
+        pick = getattr(team_mod, "crew_for_kind", None)
+        if callable(pick):
+            crew = pick(team, kind)
+        if crew is None:
+            for item in crews:
+                if isinstance(item, dict) and str(item.get("card_kind") or "") == kind:
+                    crew = item
+                    break
+        if crew is None:
+            return None
+    employees = {}
+    for emp in team.get("employees") or []:
+        if isinstance(emp, dict) and emp.get("id"):
+            employees[str(emp.get("id"))] = emp
+    produced = _produced_agents(kind, report)
+    steps = []
+    for step in crew.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        agent = str(step.get("agent") or "")
+        emp = employees.get(agent) or {}
+        sprite = str(emp.get("sprite_key") or agent)
+        steps.append({
+            "agent": agent,
+            "what": str(step.get("what") or ""),
+            "employee_name": str(emp.get("name") or agent),
+            "emoji": SPRITE_EMOJI.get(sprite, "🙂"),
+            "sprite_key": sprite,
+            "produced": agent in produced,
+        })
+    return {
+        "id": str(crew.get("id") or ""),
+        "name": str(crew.get("name") or crew.get("id") or ""),
+        "card_kind": kind,
+        "steps": steps,
+    }
+
+
 def delivery_view(cfg, task_id):
     tdir = task_dir(cfg, task_id)
     report = read_json(tdir / "report.json")
@@ -1575,6 +1737,8 @@ def delivery_view(cfg, task_id):
     if not signature and (tdir / "report.signature.json").is_file():
         signature = read_json(tdir / "report.signature.json") or {}
     outcome = read_outcome(tdir)
+    task_doc = read_json(tdir / "task.json")
+    task_doc = task_doc if isinstance(task_doc, dict) else {}
     card = _decision_card(cfg, tdir)
     # B19 裁定：降级不是失败，但降级态呈现层不出建议（report.json 保持机器真值不动）
     degradation = ((card.get("context") or {}).get("degradation")
@@ -1597,6 +1761,12 @@ def delivery_view(cfg, task_id):
         "decision_log": report.get("decision_log_entry") or {},
         "outcome": outcome,
         "outcome_pending": outcome is None,
+        # task-15 / C-2：卡型三分支 + 本卡班组 + content_plan（呈现层，只读报告）
+        "card_kind": _card_kind_of(report),
+        "card_kind_label": CARD_KIND_LABEL.get(_card_kind_of(report), _card_kind_of(report)),
+        "crew": _crew_view(cfg, report, task_doc),
+        "content_plan": report.get("content_plan") if isinstance(report.get("content_plan"), dict) else None,
+        "review": report.get("review") if isinstance(report.get("review"), dict) else None,
         "signature": signature,
         "signature_sha256": signature.get("report_sha256"),
         # B16：P2 决策卡（DEC §3.3）——report 的呈现层视图，不新增事实源
@@ -2829,15 +2999,19 @@ def post_run(cfg, task_id, body=None):
     try:
         task["runner"] = runner
         write_json_atomic(tdir / "task.json", task)
-        # 接单埋点：仅首次 run（status=created）记 task_created；重跑沿用原状态，跳过以免重复计数。
-        if str(read_status(tdir).get("state") or "") == "created":
+        # 接单埋点兜底：仅首次 run（status=created）且不是 POST /api/tasks 建的单
+        # （created_via=api 时建单端点已记过，避免重复计数）；重跑跳过。
+        status_doc = read_status(tdir)
+        intake_doc = task.get("intake") if isinstance(task.get("intake"), dict) else {}
+        source = str(task.get("source") or intake_doc.get("source") or "manual")
+        if str(status_doc.get("state") or "") == "created" and str(task.get("created_via") or "") != "api":
             scene_id = task.get("scene_id") or task.get("metric_id")
             if not scene_id and isinstance(task.get("metric"), str):
                 scene_id = task.get("metric")
             created = {
                 "task_id": task_id,
                 "scene_id": str(scene_id or "unscoped"),
-                "source": "manual",
+                "source": source,
             }
             if task.get("line") not in (None, ""):
                 created["line"] = str(task.get("line"))

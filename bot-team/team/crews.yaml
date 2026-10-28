@@ -13,6 +13,7 @@ limits:
 crews:
   - id: c-refill-attribution
     name: 补料率归因
+    card_kind: attribution
     purpose: 给小型制造业的补料率异常做根因归因与 ROI 算账
     want: 一条产线异常（指标＋时间窗＋变化幅度）
     needs: T 窗口与 T-30 基线数据、11 因素字段
@@ -35,6 +36,7 @@ crews:
         text: 复查 7 日均值是否回落；回填 actual_result 与复盘结论
   - id: c-downtime-attribution
     name: 异常停机归因
+    card_kind: attribution
     purpose: 同底座换数据源，处理停机时长异常
     want: 产线异常停机描述（时间窗/环比）
     needs: 停机记录、保养记录、换模记录
@@ -55,6 +57,7 @@ crews:
         text: 复查停机时长是否下降；回填复盘
   - id: c-weekly-ops
     name: 周报与任务管理
+    card_kind: review
     purpose: 内部经营周报与任务收口
     want: 本周任务清单与关键指标
     needs: 任务数据、上周周报
@@ -73,6 +76,7 @@ crews:
         text: 回看上周动作完成率
   - id: c-compliance-review
     name: 合规审查
+    card_kind: review
     purpose: 横切复核班组交付物（夸大/假紧迫/价钱口径/功效边界）
     want: 待发布的交付卡或文案
     needs: 合规底稿、待审内容
@@ -89,6 +93,7 @@ crews:
         text: 回看打回项是否复发
   - id: c-content-publish
     name: 内容选题与产出
+    card_kind: content
     purpose: 把一条真实经营事实做成可分发内容（视频号/公众号），产出可直接拍的方案
     want: 一条真实事实（异常/改善/交付）＋可用素材说明
     needs: 数据快照或决策卡结论、可拍素材（车间/单据）、不可外发清单

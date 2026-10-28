@@ -354,6 +354,21 @@
   .desk-form .row .k{color:#6b7280;flex:0 0 168px}
   .desk-form .row .v{flex:1;min-width:0}
   .desk-form .row .v .dbtn{width:auto}
+  /* task-15：本卡班组 / 内容标题可复制 / 卡型徽章 */
+  .crew-strip{margin:0 0 16px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#faf9f5}
+  .crew-strip h4{margin:0 0 8px;font-size:12px;color:#0f766e;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .crew-seats{display:flex;flex-wrap:wrap;gap:8px}
+  .crew-seat{display:flex;flex-direction:column;gap:2px;border:1px solid var(--line);border-radius:10px;padding:6px 10px;background:#fffdf8;font-size:11px;min-width:104px}
+  .crew-seat.on{border-color:#0f766e;box-shadow:inset 0 0 0 1px rgba(15,118,110,.28)}
+  .crew-seat.off{opacity:.6}
+  .crew-seat .em{font-size:15px;line-height:1.1}
+  .crew-seat .nm{font-weight:600}
+  .crew-seat .tag{font-size:10px;color:#6b7280}
+  .crew-seat .tag.ok{color:#0f766e}
+  .copy-titles{list-style:none;margin:6px 0 0;padding:0}
+  .copy-titles li{display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px dashed #eee7da;font-size:11.5px}
+  .copy-titles li span{flex:1;line-height:1.6}
+  .dbtn.mini{padding:2px 8px;font-size:10.5px;line-height:1.4}
   @media (max-width:1100px){.wb-grid{grid-template-columns:1fr}.desk-main{padding:16px 14px 32px}.desk-top{padding:10px 14px;flex-wrap:wrap}.desk-nav{margin-left:0}}
   @media print{
     body{background:#fff}
@@ -2909,6 +2924,116 @@
       toast('回填失败：' + (e && e.message ? e.message : e));
     }
   }
+  /* ================= task-15 / C-2：本卡班组 + 卡型三分支（P2） ================= */
+  const CARD_KIND_LABEL = { attribution: '归因卡', review: '回看卡', content: '内容卡' };
+  function deskCardKind(model) {
+    const raw = (model && model.cardKind) || (model && model.report && model.report.card_kind) || 'attribution';
+    const kind = String(raw || '').trim();
+    return kind || 'attribution';
+  }
+  function deskCopyText(text, btn) {
+    const value = String(text == null ? '' : text);
+    const done = function (ok) {
+      if (btn) {
+        const old = btn.textContent;
+        btn.textContent = ok ? '已复制' : '复制失败';
+        setTimeout(function () { btn.textContent = old; }, 1200);
+      }
+      if (ok) toast('已复制：' + value.slice(0, 24));
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(value).then(function () { done(true); }, function () { done(false); });
+      return;
+    }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = value;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      done(true);
+    } catch (e) { done(false); }
+  }
+  // 本卡班组条：同一 agent 多步合并一席并标「多步」；有产出=实心，无产出=灰字；
+  // crew 缺失时整条隐藏（renderP2 不渲染），绝不编造未出现的产物。
+  function crewStripHtml(model) {
+    const crew = model && model.crew;
+    const steps = (crew && Array.isArray(crew.steps)) ? crew.steps : [];
+    if (!steps.length) return '';
+    const seats = [];
+    const byAgent = {};
+    steps.forEach(function (st) {
+      const key = String((st && st.agent) || '');
+      if (!byAgent[key]) {
+        byAgent[key] = { agent: key, name: (st && st.employee_name) || key, emoji: (st && st.emoji) || '🙂', what: [], produced: false, count: 0 };
+        seats.push(byAgent[key]);
+      }
+      const seat = byAgent[key];
+      seat.count += 1;
+      if (st && st.what) seat.what.push(st.what);
+      if (st && st.produced) seat.produced = true;
+    });
+    const seatHtml = seats.map(function (seat) {
+      const multi = seat.count > 1 ? '<span class="tag">多步</span>' : '';
+      const note = seat.produced
+        ? ' <span class="tag ok">已产出</span>'
+        : ' <span class="tag">未产出（本卡不含此步产物）</span>';
+      return '<div class="crew-seat ' + (seat.produced ? 'on' : 'off') + '" title="' + deskEsc(seat.what.join('；')) + '">' +
+        '<span class="em">' + deskEsc(seat.emoji) + '</span>' +
+        '<span class="nm">' + deskEsc(seat.name) + ' ' + multi + '</span>' + note + '</div>';
+    }).join('');
+    return '<div class="crew-strip"><h4><span>本卡班组 · ' + deskEsc(crew.name || crew.id || '') + '</span>' +
+      '<span class="tag">按报告的 crew 逐步标注，未出现的产物不伪造</span></h4>' +
+      '<div class="crew-seats">' + seatHtml + '</div></div>';
+  }
+  function deskChip(text, cls) {
+    return '<span class="badge-status ' + (cls || '') + '">' + deskEsc(text) + '</span>';
+  }
+  function contentPlanHtml(model) {
+    const cp = model.contentPlan || {};
+    const titles = Array.isArray(cp.titles) ? cp.titles : [];
+    const structure = Array.isArray(cp.structure) ? cp.structure : [];
+    const metrics = Array.isArray(cp.review_metrics) ? cp.review_metrics : [];
+    const labels = Array.isArray(cp.labels) ? cp.labels : [];
+    if (!Object.keys(cp).length) {
+      return '<div class="desk-empty">报告未附 content_plan（内容卡缺字段，契约层应拦下）；这里不编造。</div>';
+    }
+    const titlesHtml = titles.length
+      ? '<ul class="copy-titles">' + titles.map(function (t, i) {
+          const text = String(t || '');
+          const arg = text.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+          return '<li><span>' + (i + 1) + '. ' + deskEsc(text) + '</span>' +
+            '<button class="dbtn mini" onclick="deskCopyText(\'' + arg + '\', this)">复制</button></li>';
+        }).join('') + '</ul>'
+      : '<div class="muted">无标题候选</div>';
+    return '<div class="wrow"><span class="k">选题角度 angle</span><span class="v">' + deskEsc(cp.angle || '—') + '</span></div>' +
+      '<div class="wrow"><span class="k">结构 structure</span><span class="v">' + (structure.length ? structure.map(function (x) { return deskEsc(x); }).join(' → ') : '—') + '</span></div>' +
+      '<div class="wrow"><span class="k">渠道 channel</span><span class="v">' + deskEsc(cp.channel || '—') + '</span></div>' +
+      '<div class="wrow"><span class="k">复盘指标 review_metrics</span><span class="v">' + (metrics.length ? metrics.map(function (x) { return deskChip(x); }).join(' ') : '—') + '</span></div>' +
+      '<div class="wrow"><span class="k">标签 labels</span><span class="v">' + (labels.length ? labels.map(function (x) { return deskChip(x); }).join(' ') : '—') + '</span></div>' +
+      '<div class="wrow"><span class="k">标题候选 titles</span><span class="v">共 ' + titles.length + ' 条，可逐条复制</span></div>' + titlesHtml;
+  }
+  function reviewHtml(model) {
+    const rv = model.review || {};
+    const outcome = model.outcome || {};
+    const rows = [
+      ['实际结果 observed_outcome', rv.observed_outcome != null ? rv.observed_outcome : outcome.observed_outcome],
+      ['实际动作 actual_action', rv.actual_action != null ? rv.actual_action : outcome.actual_action],
+      ['改判原因 override_reason', rv.override_reason != null ? rv.override_reason : outcome.override_reason],
+      ['动作成本 action_cost', rv.action_cost != null ? rv.action_cost : outcome.action_cost],
+      ['增量 increment_value', rv.increment_value != null ? rv.increment_value : outcome.increment_value],
+      ['回看窗口 outcome_window', rv.outcome_window != null ? rv.outcome_window : outcome.outcome_window]
+    ].filter(function (row) { return row[1] != null && row[1] !== ''; });
+    if (!rows.length) {
+      return '<div class="desk-empty">回看卡缺 observed_outcome（review/outcome 字段，契约层应拦下）；这里不编造数据。</div>';
+    }
+    return rows.map(function (row) {
+      return '<div class="wrow"><span class="k">' + deskEsc(row[0]) + '</span><span class="v">' + deskEsc(deskOutcomeText(row[1])) + '</span></div>';
+    }).join('');
+  }
   function renderP2() {
     const host = $('decisionCard');
     if (!host) return;
@@ -2921,6 +3046,8 @@
       return;
     }
     const r = model.report || {};
+    const kind = deskCardKind(model);
+    const kindLabel = CARD_KIND_LABEL[kind] || ('未知卡型 ' + kind);
     const finding = model.finding || r.finding || [];
     const recs = model.recommendation || r.recommendation || [];
     const log = model.log || r.decision_log_entry || {};
@@ -2953,34 +3080,49 @@
       const h = (x && x.sha256) ? String(x.sha256) : '';
       return deskEsc(String(p) + (h ? ' · ' + String(h).slice(0, 16) : ''));
     }).join('<br/>') || '—';
+    const evidenceHtml = '<div class="evidence">' + refHtml + '</div>' +
+      '<div class="wrow"><span class="k">报告生成时间</span><span class="v">' + deskEsc(r.generated_at || '—') + '</span></div>' +
+      '<div class="wrow"><span class="k">pack</span><span class="v">' + deskEsc((model.pack && (model.pack.pack_id || model.pack.id)) || '—') + ' ' + deskEsc((model.pack && model.pack.version) || '') + '</span></div>' +
+      '<div class="wrow"><span class="k">排除不了</span><span class="v">' + deskEsc((cannot || []).length) + ' 条</span></div>';
     const signHtml = sig
       ? '<div class="dec-sign"><span>确认人：<b>' + deskEsc(sig.signer || sig.signed_by || '—') + '</b></span><span>签字时间：<b>' + deskEsc(sig.signed_at || '—') + '</b></span><span>报告指纹：<span class="hash">' + deskEsc(deskSha(sig.report_sha256 || sig.sha256)) + '</span></span></div>'
       : '<div class="dec-sign"><span>待签字：在事务所工作台交付卡确认（60 秒内可完成）</span><span>报告指纹：<span class="hash">' + deskEsc(deskSha((refs && refs[0] && refs[0].sha256) || '')) + '</span></span></div>';
-    host.innerHTML = '<div class="dec-card">' +
-      '<div class="dec-head"><div><h2>' + deskEsc(spec ? (spec.title || spec.scene_id) : (model.title || '决策卡')) + '</h2>' +
-      '<div class="id">决策卡 ' + deskEsc(log.id || '—') + ' · 任务 ' + deskEsc((model.task && model.task.task_id) || '—') + (model.isDemo ? ' · <span class="badge-status bad">演示数据</span>' : '') + '</div></div>' +
-      '<div style="text-align:right"><div style="font-size:30px;font-weight:800">' + deskEsc(score.total != null ? score.total : '—') + '</div><div class="id">' + deskEsc(ver) + '</div></div></div>' +
-      '<div class="dec-sec"><h4>一、结论</h4><div class="body">' + findingHtml + '</div></div>' +
-      '<div class="dec-sec"><h4>二、建议与可逆性</h4><div class="body">' + recHtml + '</div></div>' +
-      '<div class="dec-sec"><h4>三、证据与追溯</h4><div class="body"><div class="evidence">' + refHtml + '</div>' +
-      '<div class="wrow"><span class="k">报告生成时间</span><span class="v">' + deskEsc(r.generated_at || '—') + '</span></div>' +
-      '<div class="wrow"><span class="k">pack</span><span class="v">' + deskEsc((model.pack && (model.pack.pack_id || model.pack.id)) || '—') + ' ' + deskEsc((model.pack && model.pack.version) || '') + '</span></div>' +
-      '<div class="wrow"><span class="k">排除不了</span><span class="v">' + deskEsc((cannot || []).length) + ' 条</span></div></div></div>' +
-      '<div class="dec-sec"><h4>四、签字</h4><div class="body">' + signHtml + '</div></div>' +
-      '<div class="dec-sec"><h4>五、回看</h4><div class="body">' +
-      '<div class="wrow"><span class="k">下一步</span><span class="v">' + deskEsc(log.next_step || log.verification_plan || '—') + '</span></div>' +
-      '<div class="wrow"><span class="k">预期结果</span><span class="v">' + deskEsc(log.expected_result || '—') + '</span></div>' +
-      '<div class="wrow"><span class="k">回看时间</span><span class="v">' + deskEsc(reviewDue) + '</span></div>' +
-      '<div class="wrow"><span class="k">回看状态</span><span class="v"><span class="badge-status ' + (outcome ? 'ok' : 'warn') + '">' + (outcome ? '已回填' : '待回看') + '</span></span></div>' +
-      (outcome ? '<div class="wrow"><span class="k">实际结果</span><span class="v">' + deskEsc(deskOutcomeText(outcome.observed_outcome)) + '</span></div>' +
-        '<div class="wrow"><span class="k">增量</span><span class="v">' + deskEsc(deskOutcomeText(outcome.increment_value)) + '</span></div>' +
-        '<div class="wrow"><span class="k">实际动作</span><span class="v">' + deskEsc(outcome.actual_action || '—') + '</span></div>' +
-        '<div class="wrow"><span class="k">改判原因</span><span class="v">' + deskEsc(outcome.override_reason || '—') + '</span></div>' +
-        '<div class="wrow"><span class="k">动作成本</span><span class="v">' + deskEsc(deskOutcomeText(outcome.action_cost)) + '</span></div>' +
-        '<div class="wrow"><span class="k">回看窗口</span><span class="v">' + deskEsc(outcome.outcome_window || '—') + '</span></div>' : '') +
-      (outcome ? '' : outcomeFormHtml(model)) +
-      '<div class="wrow"><span class="k">当前状态</span><span class="v">' + deskEsc(deskStateText(model.state)) + '</span></div></div></div>' +
-      '</div>';
+    const scoreHtml = kind === 'attribution'
+      ? '<div style="text-align:right"><div style="font-size:30px;font-weight:800">' + deskEsc(score.total != null ? score.total : '—') + '</div><div class="id">' + deskEsc(ver) + '</div></div>'
+      : '<div style="text-align:right"><div>' + deskChip(kindLabel) + '</div><div class="id">不计六维</div></div>';
+    const headHtml = '<div class="dec-head"><div><h2>' + deskEsc(spec ? (spec.title || spec.scene_id) : (model.title || '决策卡')) + '</h2>' +
+      '<div class="id">' + deskEsc(kindLabel) + ' ' + deskEsc(log.id || '—') + ' · 任务 ' + deskEsc((model.task && model.task.task_id) || '—') + (model.isDemo ? ' · <span class="badge-status bad">演示数据</span>' : '') + '</div></div>' + scoreHtml + '</div>';
+    let sections = '';
+    if (kind === 'content') {
+      sections = '<div class="dec-sec"><h4>一、内容方案（content_plan 六段）</h4><div class="body">' + contentPlanHtml(model) + '</div></div>' +
+        '<div class="dec-sec"><h4>二、证据与追溯</h4><div class="body">' + evidenceHtml + '</div></div>' +
+        '<div class="dec-sec"><h4>三、签字</h4><div class="body">' + signHtml + '</div></div>';
+    } else if (kind === 'review') {
+      sections = '<div class="dec-sec"><h4>一、回看表（T+7）</h4><div class="body">' + reviewHtml(model) +
+        '<div class="wrow"><span class="k">回看时间</span><span class="v">' + deskEsc(reviewDue) + '</span></div>' +
+        '<div class="wrow"><span class="k">当前状态</span><span class="v">' + deskEsc(deskStateText(model.state)) + '</span></div></div></div>' +
+        '<div class="dec-sec"><h4>二、证据与追溯</h4><div class="body">' + evidenceHtml + '</div></div>' +
+        '<div class="dec-sec"><h4>三、签字</h4><div class="body">' + signHtml + '</div></div>';
+    } else {
+      sections = '<div class="dec-sec"><h4>一、结论</h4><div class="body">' + findingHtml + '</div></div>' +
+        '<div class="dec-sec"><h4>二、建议与可逆性</h4><div class="body">' + recHtml + '</div></div>' +
+        '<div class="dec-sec"><h4>三、证据与追溯</h4><div class="body">' + evidenceHtml + '</div></div>' +
+        '<div class="dec-sec"><h4>四、签字</h4><div class="body">' + signHtml + '</div></div>' +
+        '<div class="dec-sec"><h4>五、回看</h4><div class="body">' +
+        '<div class="wrow"><span class="k">下一步</span><span class="v">' + deskEsc(log.next_step || log.verification_plan || '—') + '</span></div>' +
+        '<div class="wrow"><span class="k">预期结果</span><span class="v">' + deskEsc(log.expected_result || '—') + '</span></div>' +
+        '<div class="wrow"><span class="k">回看时间</span><span class="v">' + deskEsc(reviewDue) + '</span></div>' +
+        '<div class="wrow"><span class="k">回看状态</span><span class="v"><span class="badge-status ' + (outcome ? 'ok' : 'warn') + '">' + (outcome ? '已回填' : '待回看') + '</span></span></div>' +
+        (outcome ? '<div class="wrow"><span class="k">实际结果</span><span class="v">' + deskEsc(deskOutcomeText(outcome.observed_outcome)) + '</span></div>' +
+          '<div class="wrow"><span class="k">增量</span><span class="v">' + deskEsc(deskOutcomeText(outcome.increment_value)) + '</span></div>' +
+          '<div class="wrow"><span class="k">实际动作</span><span class="v">' + deskEsc(outcome.actual_action || '—') + '</span></div>' +
+          '<div class="wrow"><span class="k">改判原因</span><span class="v">' + deskEsc(outcome.override_reason || '—') + '</span></div>' +
+          '<div class="wrow"><span class="k">动作成本</span><span class="v">' + deskEsc(deskOutcomeText(outcome.action_cost)) + '</span></div>' +
+          '<div class="wrow"><span class="k">回看窗口</span><span class="v">' + deskEsc(outcome.outcome_window || '—') + '</span></div>' : '') +
+        (outcome ? '' : outcomeFormHtml(model)) +
+        '<div class="wrow"><span class="k">当前状态</span><span class="v">' + deskEsc(deskStateText(model.state)) + '</span></div></div></div>';
+    }
+    host.innerHTML = '<div class="dec-card">' + headHtml + crewStripHtml(model) + sections + '</div>';
   }
   /* ================= R4：P3 决策日志（跨任务时间线） ================= */
   function deskDecisionFilters() {

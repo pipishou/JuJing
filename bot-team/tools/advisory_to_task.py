@@ -32,7 +32,14 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent          # JuJing/bot-team
-REQUIRED = ("goal", "finding", "cannot_attribute", "scorecard", "recommendation", "decision_log_entry")
+REQUIRED = ("goal", "finding", "cannot_attribute", "recommendation", "decision_log_entry")
+REQUIRED_ATTRIBUTION = REQUIRED + ("scorecard",)
+# 非归因卡不套归因字段：content 的交付物是 content_plan，review 的交付物是回看结果。
+# 归因字段（finding/cannot_attribute/recommendation）对这两类卡没有语义，缺了不该拦。
+REQUIRED_BY_KIND = {
+    "content": ("goal", "content_plan", "decision_log_entry"),
+    "review": ("goal", "decision_log_entry"),
+}
 DL_REQUIRED = ("context", "advice", "expected_result", "verification_plan")
 SIX = ("data_completeness", "timeliness", "significance", "exclusivity", "history", "human_ai_consistency")
 
@@ -65,17 +72,36 @@ def resolve(path_like: str) -> Path:
 def check_input(doc: dict) -> None:
     if str(doc.get("schema") or "") != "advisory-report.v1":
         raise BridgeError(f"schema 必须是 advisory-report.v1，实际 {doc.get('schema')!r}")
-    missing = [k for k in REQUIRED if not doc.get(k)]
+    # C-1：卡型透传；未知值 fail closed（不静默按 attribution 处理）
+    try:
+        kind = report_contract.card_kind(doc)
+    except ValueError as exc:
+        raise BridgeError(str(exc)) from exc
+    if kind == "attribution":
+        required = REQUIRED_ATTRIBUTION
+    else:
+        required = REQUIRED_BY_KIND.get(kind, REQUIRED)
+    missing = [k for k in required if not doc.get(k)]
     if missing:
         raise BridgeError(f"缺必填字段：{', '.join(missing)}")
     dl = doc.get("decision_log_entry") or {}
     missing_dl = [k for k in DL_REQUIRED if not dl.get(k)]
     if missing_dl:
         raise BridgeError(f"decision_log_entry 缺：{', '.join(missing_dl)}")
-    sc = doc.get("scorecard") or {}
-    missing_sc = [k for k in SIX if sc.get(k) is None]
-    if missing_sc:
-        raise BridgeError(f"scorecard 缺维度：{', '.join(missing_sc)}")
+    # 六维评分卡只对 attribution 强制；content/review 走各自强制面（复用 gates 判据）
+    if kind == "attribution":
+        sc = doc.get("scorecard") or {}
+        missing_sc = [k for k in SIX if sc.get(k) is None]
+        if missing_sc:
+            raise BridgeError(f"scorecard 缺维度：{', '.join(missing_sc)}")
+    elif kind == "content":
+        cp_errors = gates.content_plan_errors(doc.get("content_plan"))
+        if cp_errors:
+            raise BridgeError("content_plan 不完整：" + "；".join(cp_errors))
+    elif kind == "review":
+        rv_errors = gates.review_errors(doc)
+        if rv_errors:
+            raise BridgeError("；".join(rv_errors))
     irreversible = [r.get("action") for r in doc["recommendation"] if r.get("irreversibility") == "irreversible"]
     if irreversible and not doc.get("security_gate"):
         raise BridgeError(
@@ -110,9 +136,14 @@ def stage_evidence(task_dir: Path, sources: list[str], base: Path) -> list[dict]
 
 
 def build_report(doc: dict, task_id: str, task_dir: Path, pack: dict, refs: list[dict]) -> dict:
-    holder = {"scorecard": dict(doc["scorecard"])}
-    report_contract.apply(holder, pack=pack)   # 原地补 total/verdict/label/guardrails/points
-    scorecard = holder["scorecard"]
+    kind = report_contract.card_kind(doc)
+    # C-1：attribution（缺省）六维强制；content/review 不走六维强制（apply 会 skip）。
+    scorecard = None
+    if isinstance(doc.get("scorecard"), dict):
+        holder = {"card_kind": kind, "scorecard": dict(doc["scorecard"])}
+        applied = report_contract.apply(holder, pack=pack)   # 原地补 total/verdict/label/guardrails/points
+        if not (isinstance(applied, dict) and applied.get("skipped")):
+            scorecard = holder["scorecard"]
     dl_raw = dict(doc["decision_log_entry"])
     dl_id = ids.allocate(task_dir, "report", task_id)
     decision_log = {
@@ -133,19 +164,29 @@ def build_report(doc: dict, task_id: str, task_dir: Path, pack: dict, refs: list
         "generated_at": now_iso(),
         "is_demo": False,
         "task_id": task_id,
+        "card_kind": kind,
         "goal": doc["goal"],
         "pack": pack.get("pack_id") or pack.get("id") or "manufacturing",
         "roi_anchors": (pack.get("roi_anchors") or {}),
         "finding": doc["finding"],
         "cannot_attribute": doc["cannot_attribute"],
         "data_refs": refs,
-        "scorecard": scorecard,
         "recommendation": doc["recommendation"],
         "security_gate_requested": any(r.get("irreversibility") == "irreversible" for r in doc["recommendation"]),
         "decision_log_entry": decision_log,
         "role_coverage": doc.get("role_coverage") or ["karpathy", "manufacturing-ops-expert", "content-operator", "host"],
         "source": doc.get("source") or "advisory-report.v1",
     }
+    if scorecard is not None:
+        report["scorecard"] = scorecard
+    # C-1：content/review 卡专属强制字段原样透传（判定统一在 core.gates）
+    if kind == "content" and doc.get("content_plan") is not None:
+        report["content_plan"] = doc["content_plan"]
+    if kind == "review":
+        if doc.get("review") is not None:
+            report["review"] = doc["review"]
+        if doc.get("outcome") is not None:
+            report["outcome"] = doc["outcome"]
     if report["security_gate_requested"]:
         report["security_gate"] = doc.get("security_gate") or {}
     return report
