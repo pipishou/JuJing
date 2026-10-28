@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -28,8 +29,10 @@ from lark_oapi.event.callback.model.p2_card_action_trigger import (  # noqa: E40
     P2CardActionTrigger, P2CardActionTriggerResponse)
 
 from core import telemetry  # noqa: E402
+from im_signers import resolve as resolve_im_signer  # noqa: E402
+from im_sign import sign_task as im_sign_task  # noqa: E402
 from lark_send import load_app_creds  # noqa: E402
-from reply_consume import MO_OPEN_ID  # noqa: E402
+from reply_consume import MO_OPEN_ID  # noqa: E402,F401  （保留旧常量，兼容外部 import）
 
 LETTERS = {"a": "采纳归档", "b": "转人工", "c": "转补充分析"}
 LOG_PATH = BOT_TEAM / ".telemetry" / "card-consumer.log"
@@ -124,22 +127,74 @@ def _result_card(task_id, letter, at):
     }
 
 
+def _start_sign(task_id, operator, chat_id, message_id):
+    """后台跑签字：3 秒窗口里只回 toast，结果用消息回（失败也回，不许静默）。"""
+    def _work():
+        try:
+            from im_sign import sign_task
+            result = im_sign_task(task_id, operator, chat_id=chat_id,
+                                  message_id=message_id,
+                                  server=os.environ.get("BOT_SERVER") or None)
+        except Exception as exc:  # noqa: BLE001
+            result = {"ok": False, "stage": "exception", "error": repr(exc)}
+        try:
+            if result.get("ok"):
+                text = ("**已签字** %s\n任务 `%s`\n决策 `%s` · 状态 `%s`\n所签版本 `%s`"
+                        % (result.get("signer"), task_id, result.get("decision") or "-",
+                           result.get("status") or result.get("stage"),
+                           (result.get("sha256") or "")[:16]))
+            else:
+                text = ("**签字未完成** %s\n任务 `%s`\n原因：%s"
+                        % (result.get("signer") or "-", task_id,
+                           result.get("error") or result.get("stage")))
+            if chat_id:
+                from lark_send import tenant_send
+                tenant_send(chat_id, markdown=text)
+            _log("sign-done task=%s ok=%s stage=%s" % (task_id, result.get("ok"), result.get("stage")))
+        except Exception as exc:  # noqa: BLE001
+            _log("sign-reply 失败 task=%s: %r" % (task_id, exc))
+
+    threading.Thread(target=_work, name="im-sign-%s" % task_id, daemon=True).start()
+
+
 def _on_card(data: P2CardActionTrigger):
     resp = P2CardActionTriggerResponse()
     ev = getattr(data, "event", None)
     operator = getattr(getattr(ev, "operator", None), "open_id", None)
     value = getattr(getattr(ev, "action", None), "value", None) or {}
-    message_id = getattr(getattr(ev, "context", None), "open_message_id", None)
+    ctx = getattr(ev, "context", None)
+    message_id = getattr(ctx, "open_message_id", None)
+    chat_id = getattr(ctx, "open_chat_id", None)
     task_id = str(value.get("task_id") or "")
     letter = str(value.get("letter") or "").lower()
+    action = str(value.get("action") or "").strip().lower()
     _record_click({"ts": datetime.now().isoformat(timespec="seconds"),
                    "operator": operator or "", "task_id": task_id,
-                   "letter": letter, "message_id": message_id or "",
+                   "letter": letter, "action": action, "message_id": message_id or "",
                    "value": value})
 
-    if operator != MO_OPEN_ID:
+    # 身份：白名单（server/im_signers.json）优先，未配置时退回 legacy open_id。
+    # 白名单坏了要「停」，不是「放过」——签字这道门不能靠异常兜底。
+    try:
+        signer = resolve_im_signer(operator, chat_id=chat_id)
+    except Exception as exc:  # noqa: BLE001
+        _log("IM 签字白名单不可用，拒绝操作: %s" % exc)
+        resp.toast = {"type": "error", "content": "签字白名单不可用，请联系管理员"}
+        return resp
+    if not signer:
         resp.toast = {"type": "error", "content": "无权操作这张回执"}
         return resp
+
+    # 签字动作（卡片上的「签字」按钮）：3 秒内回不来，所以丢后台线程，结果用消息回。
+    if action == "sign":
+        if not task_id:
+            resp.toast = {"type": "error", "content": "按钮参数异常：缺 task_id"}
+            return resp
+        _start_sign(task_id, operator, chat_id or "", message_id or "")
+        resp.toast = {"type": "info", "content": "已收到签字请求，处理完用消息回你"}
+        _log("sign-request task=%s by=%s" % (task_id, operator))
+        return resp
+
     if letter not in LETTERS or not task_id:
         resp.toast = {"type": "error", "content": "按钮参数异常"}
         _log("bad value=%s task=%s" % (value, task_id))

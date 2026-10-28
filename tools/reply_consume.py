@@ -55,7 +55,9 @@ TRACE = BOT2 / ".junshi" / "reply-consume.jsonl"
 RUNLOG = BOT2 / ".junshi" / "reply-consume-runs.jsonl"   # 每次运行快照（调度静默失败排查）
 
 sys.path.insert(0, str(BOT_TEAM))
+sys.path.insert(0, str(TOOLS_DIR))
 from core import telemetry  # noqa: E402
+from im_signers import resolve as resolve_im_signer  # noqa: E402
 
 LETTER_RE = re.compile(r"^\s*([abcABC])\s*(?:[.。、:：,，!！]|\s|$)")
 ANY_LETTER_RE = re.compile(r"(?<![A-Za-z0-9])[abcABC](?![A-Za-z0-9])")
@@ -460,7 +462,16 @@ def main():
             skipped["deleted"] += 1
             continue
         sender = m.get("sender") or {}
-        if sender.get("sender_type") != "user" or sender.get("id") != MO_OPEN_ID:
+        # 身份口径：白名单文件（server/im_signers.json）优先，未配置时退回 legacy open_id。
+        # 这里只认「有权记账的人」，不是「能看见卡片的人」——两件事别混。
+        signer = None
+        if sender.get("sender_type") == "user":
+            try:
+                signer = resolve_im_signer(sender.get("id"), chat_id=m.get("chat_id"))
+            except Exception as exc:  # noqa: BLE001 - 白名单坏了必须停，不能放行
+                _log("IM 签字白名单不可用，本轮不消费任何回信: %s" % exc)
+                return 2
+        if not signer:
             skipped["not_mo"] += 1
             continue
         if m.get("msg_type") != "text":
