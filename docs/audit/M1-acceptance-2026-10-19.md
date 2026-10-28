@@ -1,7 +1,7 @@
 # M1 验收回执 · 真实一单可信闭环（2026-10-19）
 
 > 结论：**M1 达成**。A1–A6 独立验收全绿；本地服务 + 真报告上屏链路跑通；可信门 fail-closed。
-> 规格：`audit/M1-build-spec.md` ｜ 决策账本：`.junshi/ledger.md` ｜ 独立验收：`JuJing/bot-team/tests/test_m1_acceptance.py`
+> 规格：`audit/M1-build-spec.md` ｜ 决策账本：`.junshi/ledger.md` ｜ 独立验收：`bot-team/tests/test_m1_acceptance.py`
 
 ---
 

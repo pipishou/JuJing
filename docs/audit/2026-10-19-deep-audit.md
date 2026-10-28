@@ -152,6 +152,6 @@ C 形态落地：DSH Web 插件整页/面板 + 反壳（禁模型名/token/插�
 
 - 后端完整报告（59 行，含复现命令）：`audit/task2-backend-audit.md`
 - 探针：`%TEMP%\audit_probe.py`（8 探针）、`%TEMP%\audit_probe2.py`（7 探针），均 `python -B`，产物写 `%TEMP%`
-- demo 产物：`JuJing/bot-team/runs/demo-result-2026-10-19.json`、`demo-report-2026-10-19.json`
+- demo 产物：`bot-team/runs/demo-result-2026-10-19.json`、`demo-report-2026-10-19.json`
 - 共享任务板：task-1（UI，rev4 completed）、task-2（后端，rev3 completed）、task-3（模型，rev3 completed）、task-4（DSH 通路，rev3 completed）
 - 关键复现结果：all5 total=100.02 verdict=no_output；smoke 63.35 force_manual_review；finalize rejected→approved by attacker；fake sig→approved by null；cost 双计 net 2999.96；memory ids=[M2,M1]；tape beats=0 exit0

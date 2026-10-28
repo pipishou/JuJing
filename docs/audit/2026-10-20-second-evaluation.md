@@ -7,7 +7,7 @@
 
 - 原文：<https://mp.weixin.qq.com/s/GFKEw4vjTJZUUR8SCddIKQ>，卡兹克《我花了5天时间，对公司进行了一场AI化改造。》（虚实传媒，AI 行业媒介/MCN，30 余人）。
 - 取证方式：微信正文被风控（captcha），用移动端 UA 直取 HTML 后本地解码提取正文（正文 5709 字，存 `_tmp_article.txt`）；**评论区由 JS 动态加载，未能取到**——若评论里有具体反例/诉求，需用户贴关键几条。
-- 项目现状：截至本批 `B8–B12` 全绿（A13–A16 + A1–A12 回归），代码在 `JuJing/bot-team`（HEAD `4390ebe`，v0.12.0 文档口径）。
+- 项目现状：截至本批 `B8–B12` 全绿（A13–A16 + A1–A12 回归），代码在 `bot-team`（HEAD `4390ebe`，v0.12.0 文档口径）。
 - 历史输入复用：M1/M1.5 验收与审计（`audit/`）、架构 v1（`JuJing/docs/BOT_TEAM_ARCHITECTURE_2026-10-19.md`）、`m00240` 标品目标、`m00496` octop+DSH 结合。
 
 ## 1. 文章要点（事实层，非评论）
@@ -109,7 +109,7 @@
 
 - 原文正文：`D:\work\产品类\个人产品\bot-2\_tmp_article.txt`（提取脚本 `_tmp_fetch_article.py`）
 - 转载可读版：<https://www.c114.com.cn/expo/15/a1307169.html>
-- 项目现状：`JuJing/bot-team`（HEAD `4390ebe`，v0.12.0）；验收 `audit/M1.5-acceptance-2026-10-19.md`；架构 `JuJing/docs/BOT_TEAM_ARCHITECTURE_2026-10-19.md`
+- 项目现状：`bot-team`（HEAD `4390ebe`，v0.12.0）；验收 `audit/M1.5-acceptance-2026-10-19.md`；架构 `JuJing/docs/BOT_TEAM_ARCHITECTURE_2026-10-19.md`
 - 本批验收（B8–B12）：A13–A16 + 回归 GREEN（verifier 报告 2026-10-20）
 
 ## 12. 评论证据与方案修订 v1.1（2026-10-20，用户补 4 条高价值评论 m01188–m01191）
