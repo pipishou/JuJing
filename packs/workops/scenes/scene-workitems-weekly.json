@@ -1,0 +1,89 @@
+{
+  "spec_version": "scene.v1",
+  "scene_id": "scene-workitems-weekly",
+  "pack_id": "workops",
+  "version": 1,
+  "origin": "preset",
+  "title": "工作任务周度盘点",
+  "question": "这周我的工作事项里，哪几件在真实推进，哪几件该砍、该延、该升级？",
+  "metric": {
+    "id": "overdue_rate",
+    "name": "逾期率",
+    "unit": "%",
+    "grain": "weekly",
+    "direction": "higher_worse",
+    "current_value": null,
+    "control_line": {
+      "method": "target",
+      "params": {
+        "target_pct": "pack.thresholds.overdue_target_pct"
+      }
+    }
+  },
+  "entity_scope": {
+    "field": "item_owner",
+    "values": [
+      "本人"
+    ]
+  },
+  "factors_ref": {
+    "pack_field": "factors",
+    "version": 1
+  },
+  "actions": [
+    {
+      "id": "reprioritize",
+      "label": "重排优先级",
+      "cost_anchor_key": "reprioritize",
+      "reversible": true
+    },
+    {
+      "id": "defer",
+      "label": "延期并改承诺日期",
+      "cost_anchor_key": "defer",
+      "reversible": true
+    },
+    {
+      "id": "drop_scope",
+      "label": "砍掉或降级范围",
+      "cost_anchor_key": "drop_scope",
+      "reversible": true
+    },
+    {
+      "id": "escalate",
+      "label": "升级给上级定夺",
+      "cost_anchor_key": "escalate",
+      "reversible": true
+    }
+  ],
+  "guardrails": {
+    "max_per_month": "pack.scene_guardrails.max_per_month",
+    "hard_rules": []
+  },
+  "data_requirements": [
+    {
+      "field": "workitems_snapshot",
+      "required": true,
+      "quality": "snapshot"
+    },
+    {
+      "field": "item_owner",
+      "required": true,
+      "quality": "snapshot"
+    },
+    {
+      "field": "item_due_date",
+      "required": true,
+      "quality": "snapshot"
+    }
+  ],
+  "scorecard": {
+    "scale": 100,
+    "dims_ref": "pack.scorecard_six_dim",
+    "hard_guardrails_ref": "pack.scorecard_hard_guardrails"
+  },
+  "output_contract_ref": "delivery-card.schema",
+  "generated_by": "preset:workops",
+  "generated_at": "2026-10-28T00:00:00+08:00",
+  "evidence_refs": []
+}

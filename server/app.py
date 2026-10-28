@@ -1008,6 +1008,13 @@ def create_task(cfg, body):
     tdir.mkdir(parents=True, exist_ok=True)
     task = intake
     task["task_id"] = task_id
+    # 班组归属单一事实源：intake 显式给了就用；否则用行业包声明的 crew_id
+    # （workops → c-workops-review），最后才由 _crew_view 按 card_kind 兜底。
+    # 不这样补，非制造业包建的单会显示成「补料率归因」班组。
+    if not (task.get("crew_id") or (task.get("intake") or {}).get("crew_id")):
+        pack_crew = str((_pack_doc(cfg) or {}).get("crew_id") or "").strip()
+        if pack_crew:
+            task["crew_id"] = pack_crew
     task.setdefault("created_at", now_iso())
     task.setdefault("runner", str(body.get("runner") or "fixture"))
     write_json_atomic(tdir / "task.json", task)
@@ -1892,13 +1899,29 @@ SCENE_ORIGINS = ("preset", "discovered", "user_prompt")
 SCENE_CONTROL_METHODS = ("mean_2sigma", "target", "cusum")
 SCENE_MAX_PROMPT = 2000
 
+# 未设 BOT_PACK 时读哪个行业包目录（与 core/pack.py 的 DEFAULT_PACK_ID 同名）
+DEFAULT_PACK_DIR = "manufacturing"
+
 
 def _scene_contract_error(code, reason):
     return {"code": code, "reason": reason}
 
 
+def _pack_path(cfg):
+    """行业包路径：env BOT_PACK（完整 pack.json 路径）优先，否则 packs/manufacturing。
+
+    与 core/pack.py:pack_path 同口径——上一版这里写死 packs/manufacturing，导致
+    BOT_PACK 指到 workops 时 server 仍读制造业包（health/scenes/场景校验全部错位，
+    新行业包根本没法上线）。
+    """
+    env = os.environ.get("BOT_PACK", "").strip()
+    if env:
+        return Path(env)
+    return Path(cfg.root) / "packs" / DEFAULT_PACK_DIR / "pack.json"
+
+
 def _pack_doc(cfg):
-    doc = read_json(cfg.root / "packs" / "manufacturing" / "pack.json")
+    doc = read_json(_pack_path(cfg))
     return doc if isinstance(doc, dict) else {}
 
 
@@ -3267,9 +3290,7 @@ def post_gate(cfg, task_id, body):
 # 查询端点
 # --------------------------------------------------------------------------- #
 def health(cfg):
-    pack = read_json(cfg.root / "packs" / "manufacturing" / "pack.json") or {}
-    if not isinstance(pack, dict):
-        pack = {}
+    pack = _pack_doc(cfg)
     return {
         "ok": True,
         "service": "bot-team-local",

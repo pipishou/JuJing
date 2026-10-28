@@ -114,3 +114,24 @@ crews:
         days: 7
         steps: [host, content-operator]
         text: 复查前 3 秒留存与转发；不达标先改标题与首帧
+  - id: c-workops-review
+    name: 工作任务盘点
+    card_kind: attribution
+    purpose: 自己或团队的工作事项周度盘点：哪些在真实推进，哪些该砍/该延/该升级
+    want: 最新一版工作事项清单（企微文档导出 CSV/XLSX 或本地表）
+    needs: 清单快照、负责人与截止日、阻塞原因列
+    steps:
+      - agent: consulting-analyst
+        what: 读清单快照，算逾期率/在办数/阻塞数与数据缺口
+      - agent: ai-attribution-expert
+        what: 排他性判断：区分「外部依赖阻塞」与「自己在拖」，finding 不超过 2 条
+      - agent: report-recorder
+        what: 落报告与四卡，登记决策日志与证据 sha256
+      - agent: host
+        what: 收敛成三到五条可执行建议，交本人签字
+    end:
+      kind: file
+      followup:
+        days: 7
+        steps: [host]
+        text: 用同一份清单快照复算逾期率，核对砍/延/升级是否执行

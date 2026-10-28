@@ -17,7 +17,7 @@ import json
 import re
 import shutil
 import sys
-from datetime import date, timedelta
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -64,7 +64,13 @@ def main():
     report = json.loads(Path(args.report).read_text(encoding="utf-8-sig"))
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    day = report.get("generated_at") or date.today().isoformat()
+    # generated_at 常带时分与 +08:00（真实报告），直接 date.fromisoformat 会炸。
+    # 统一归一成 YYYY-MM-DD：四卡里的 day/compact/review_due 都只用日期。
+    raw_day = str(report.get("generated_at") or date.today().isoformat())
+    try:
+        day = datetime.fromisoformat(raw_day.replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        day = date.today().isoformat()
     compact = day.replace("-", "")
     task_id = (args.task_id or report.get("task_id") or None) or None
     id_root = _ids_root(outdir)

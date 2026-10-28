@@ -17,8 +17,11 @@ _ROOT = Path(__file__).resolve().parent.parent
 
 REQUIRED_KEYS = ("pack_id", "version", "industry", "thresholds", "roi_anchors",
                  "irreversible_actions", "six_dims", "crew_id")
-REQUIRED_THRESHOLDS = ("refill_baseline_pct", "refill_target_pct",
-                       "cell_null_rate_manual", "t30_window_days")
+# 只把跨行业真正通用的阈值列为必填。refill_baseline_pct / refill_target_pct 是
+# 制造业补料率口径，workops（工作任务管理）这类行业包没有该指标；历史上被误当
+# 通用必填，逼得新 pack 塞两个 null 才能加载。消费方（assemble_report:241、
+# discover_recheck:50）本就对 None / 缺键做了处理，故降级为可选。
+REQUIRED_THRESHOLDS = ("cell_null_rate_manual", "t30_window_days")
 
 
 class PackError(RuntimeError):
