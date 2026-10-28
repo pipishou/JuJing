@@ -6,7 +6,7 @@
 ## 启动
 
 ```powershell
-# 在仓库根 JuJing/bot-team 下
+# 在仓库根 bot-team 下
 & "D:\work\产品类\个人产品\bot-2\venv\Scripts\python.exe" -B server/app.py
 
 # 换端口 / 指定仓库根 / 指定签字身份白名单

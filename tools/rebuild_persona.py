@@ -27,7 +27,7 @@ import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent          # JuJing/bot-team
+ROOT = Path(__file__).resolve().parent.parent          # bot-team
 # 仓库是源（可提交/换电脑不丢）；.octop/expert_market 是 Octop 运行时副本。
 # 默认读仓库副本，部署到运行副本用 tools/sync_expert_pack.py --to-runtime。
 REPO_PACK = ROOT / "packs" / "expert_market" / "manufacturing-advisory-board"

@@ -1,7 +1,7 @@
 # 人格源 · 内容操盘手（manufacturing-content-operator-perspective）
 
 > 本目录是**人格层的唯一事实源**。agents/content-operator.md 里的 PERSONA 块由
-> `JuJing/bot-team/tools/rebuild_persona.py` 从 `distill/SKILL.md` 生成，**禁止手改 agent 文件里的 PERSONA 块**。
+> `bot-team/tools/rebuild_persona.py` 从 `distill/SKILL.md` 生成，**禁止手改 agent 文件里的 PERSONA 块**。
 
 ## 源
 

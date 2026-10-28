@@ -31,7 +31,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent          # JuJing/bot-team
+ROOT = Path(__file__).resolve().parent.parent          # bot-team
 REQUIRED = ("goal", "finding", "cannot_attribute", "recommendation", "decision_log_entry")
 REQUIRED_ATTRIBUTION = REQUIRED + ("scorecard",)
 # 非归因卡不套归因字段：content 的交付物是 content_plan，review 的交付物是回看结果。

@@ -23,7 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent  # JuJing/bot-team
+ROOT = Path(__file__).resolve().parent.parent  # bot-team
 BOT2 = ROOT.parents[1]
 OCTOP_HOME = BOT2 / ".octop"
 DB = OCTOP_HOME / "octop.db"

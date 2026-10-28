@@ -1,7 +1,7 @@
 # 人格源 · 乔布斯（steve-jobs-perspective）
 
 > 本目录是**人格层的唯一事实源**。agents/jobs.md 里的 PERSONA 块由
-> `JuJing/bot-team/tools/rebuild_persona.py` 从这里生成，**禁止手改 agent 文件里的 PERSONA 块**。
+> `bot-team/tools/rebuild_persona.py` 从这里生成，**禁止手改 agent 文件里的 PERSONA 块**。
 
 ## 源
 
