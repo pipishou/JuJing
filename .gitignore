@@ -34,3 +34,6 @@ node_modules/
 Thumbs.db
 .DS_Store
 bot-team/server/services/*.log
+
+# bot-team 已拆分为独立仓（2026-10-28），本仓不再跟踪
+/bot-team/
