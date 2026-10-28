@@ -17,6 +17,8 @@ if (-not (Test-Path $py)) {
 Set-Location $bt
 $env:BOT_ROOT = $bt
 $env:BOT_PORT = '8787'
+# 第一个工作项=工作任务管理；换包只改这一行（值必须是 pack.json 的完整路径）。
+if (-not $env:BOT_PACK) { $env:BOT_PACK = Join-Path $bt 'packs\workops\pack.json' }
 try {
     & $py (Join-Path $bt 'server\app.py') --port 8787 2>&1 | Add-Content -Path $log -Encoding UTF8
     "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] ui exited code=$LASTEXITCODE" | Out-File -FilePath $log -Append -Encoding utf8
