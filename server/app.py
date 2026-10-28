@@ -245,6 +245,165 @@ def import_core(cfg, name):
                        f"契约见 audit/M1.5-build-spec.md §2")
 
 
+def import_tool(cfg, name):
+    """导入 tools/<name>.py（工作事项账本等）；缺失时 500 但不静默降级。"""
+    tools_dir = str(Path(cfg.root) / "tools")
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+    try:
+        return importlib.import_module(name)
+    except Exception as exc:  # noqa: BLE001
+        raise ApiError(500, f"tools.{name} 不可用：{exc}")
+
+
+TOOL_USER_ERRORS = ("StoreError", "IngestError", "XlsxError", "SignerConfigError")
+
+
+def _as_user_error(exc):
+    """tools 层的用户输入错误（账本/清单/白名单）统一 400，不吐 500。"""
+    if type(exc).__name__ in TOOL_USER_ERRORS:
+        return ApiError(400, str(exc))
+    return None
+
+
+def workitems_path(cfg):
+    env = os.environ.get("BOT_WORKITEMS_FILE")
+    if env:
+        return Path(env)
+    return Path(cfg.root) / "runtime" / "workitems" / "current.json"
+
+
+def workitems_view(cfg, as_of=None):
+    """工作事项账本视图：事项 + 汇总 + 账本元信息（前端一屏搞定）。"""
+    ws = import_tool(cfg, "workitems_store")
+    path = workitems_path(cfg)
+    store = ws.load(path)
+    from datetime import date as _date
+    day = _date.fromisoformat(as_of) if as_of else None
+    return {
+        "ok": True,
+        "revision": store.get("revision", 0),
+        "updated_at": store.get("updated_at"),
+        "source": store.get("source") or {"kind": "empty"},
+        "path": str(path),
+        "status_labels": ws.STATUS_LABEL,
+        "status_order": list(ws.STATUS_ORDER),
+        "summary": ws.summary(store, day),
+        "items": store.get("items", []),
+    }
+
+
+def workitems_mutate(cfg, body):
+    """唯一写入入口：add / update / delete 三种动作。"""
+    try:
+        return _workitems_mutate(cfg, body)
+    except ApiError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise _as_user_error(exc) or exc
+
+
+def _workitems_mutate(cfg, body):
+    ws = import_tool(cfg, "workitems_store")
+    path = workitems_path(cfg)
+    store = ws.load(path)
+    action = str(body.get("action") or "update").strip().lower()
+    by = str(body.get("by") or cfg.owner or "老板")
+    if action == "add":
+        store, item = ws.add_item(store, body.get("item") or body, by=by)
+    elif action == "update":
+        item_id = str(body.get("id") or "").strip()
+        if not item_id:
+            raise ApiError(400, "update 需要 id")
+        patch = body.get("patch")
+        if not isinstance(patch, dict):
+            patch = {k: v for k, v in body.items() if k not in ("action", "id", "by")}
+        store, item = ws.update_item(store, item_id, patch, by=by)
+    elif action == "delete":
+        item_id = str(body.get("id") or "").strip()
+        if not item_id:
+            raise ApiError(400, "delete 需要 id")
+        store, item = ws.delete_item(store, item_id)
+    else:
+        raise ApiError(400, f"未知动作：{action}（add/update/delete）")
+    ws.save(store, path)
+    return {"ok": True, "action": action, "revision": store.get("revision"),
+            "item": item, "summary": ws.summary(store)}
+
+
+def workitems_import(cfg, body):
+    """从 xlsx/csv 导入（本地路径）；幂等合并，重复导入不翻倍。"""
+    try:
+        return _workitems_import(cfg, body)
+    except ApiError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise _as_user_error(exc) or exc
+
+
+def _workitems_import(cfg, body):
+    ws = import_tool(cfg, "workitems_store")
+    imp = import_tool(cfg, "import_workitems")
+    src = str(body.get("path") or "").strip()
+    if not src:
+        raise ApiError(400, "需要 path（服务器本机可读的 xlsx/csv 路径）")
+    src_path = Path(src)
+    if not src_path.exists():
+        raise ApiError(400, f"文件不存在：{src}")
+    rows, sheet_name = imp.read_rows(src_path, body.get("sheet"))
+    items = ws.parse_sheet(rows)
+    if not items:
+        raise ApiError(400, "没解析出事项（检查表头是否含 问题点描述/责任人/计划完成时间/状态）")
+    path = workitems_path(cfg)
+    store = ws.load(path)
+    source = {"kind": "import", "file": str(src_path), "sheet": sheet_name,
+              "sha256": ws.sha256_file(src_path), "size": src_path.stat().st_size,
+              "imported_at": ws._now(), "imported_by": str(body.get("by") or "导入")}
+    store, stats = ws.merge_items(store, items, by=str(body.get("by") or "导入"), source=source)
+    ws.save(store, path)
+    return {"ok": True, "sheet": sheet_name, "stats": stats,
+            "revision": store.get("revision"), "summary": ws.summary(store)}
+
+
+def workitems_csv(cfg):
+    """导出 CSV（utf-8-sig，Excel 双击不乱码）。"""
+    ws = import_tool(cfg, "workitems_store")
+    store = ws.load(workitems_path(cfg))
+    import io
+    import csv as _csv
+    buf = io.StringIO()
+    _csv.writer(buf).writerows(ws.export_rows(store))
+    return RawBody(buf.getvalue(), "text/csv; charset=utf-8")
+
+
+def workitems_sources(cfg):
+    """列出可导入的本机清单文件（默认看企微/本地导出目录）。"""
+    env_dir = os.environ.get("BOT_WORKITEMS_DIR")
+    directory = Path(env_dir) if env_dir else Path(r"D:/work/文档类/企业管理部/工作事项")
+    files = []
+    if directory.is_dir():
+        for child in sorted(directory.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if child.suffix.lower() not in (".xlsx", ".csv"):
+                continue
+            stat = child.stat()
+            files.append({
+                "name": child.name,
+                "path": str(child),
+                "size": stat.st_size,
+                "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            })
+    current = None
+    try:
+        ws = import_tool(cfg, "workitems_store")
+        store = ws.load(workitems_path(cfg))
+        src = store.get("source") or {}
+        current = src.get("file")
+    except Exception:  # noqa: BLE001
+        current = None
+    return {"ok": True, "dir": str(directory), "dir_exists": directory.is_dir(),
+            "files": files, "current": current}
+
+
 def emit_telemetry(cfg, name, props):
     """埋点不得中断业务：遥测导入/校验/落盘失败一律吞掉，绝不让 HTTP 变 500。"""
     try:
@@ -3370,6 +3529,25 @@ def route_api(cfg, method, path, query, body):
         if method != "GET":
             raise ApiError(405, "method not allowed")
         return 200, packs(cfg)
+    if path == "/api/workitems":
+        if method == "GET":
+            as_of = str((query.get("as_of") or [""])[0]).strip() or None
+            return 200, workitems_view(cfg, as_of)
+        if method == "POST":
+            return 200, workitems_mutate(cfg, body)
+        raise ApiError(405, "method not allowed")
+    if path == "/api/workitems/import":
+        if method != "POST":
+            raise ApiError(405, "method not allowed")
+        return 200, workitems_import(cfg, body)
+    if path == "/api/workitems/sources":
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return 200, workitems_sources(cfg)
+    if path in ("/api/workitems/export.csv", "/api/workitems/export"):
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return 200, workitems_csv(cfg)
     if path == "/api/team":
         if method != "GET":
             raise ApiError(405, "method not allowed")
