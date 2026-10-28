@@ -5,15 +5,17 @@
 判据（任一 FAIL → 非零退出）：
   1. finding：0–2 条，每条 factor/confidence/evidence 齐，evidence 非空
   2. cannot_attribute：非空
-  3. scorecard：六维键齐；--require-real 时必须是数值 0-5（旧口径）或 0-100（B16 百分制），
-     且 total 0-100 / verdict ∈ {output,force_manual_review,reference_only,no_output}
+  3. card_kind（C-1）：缺省 attribution；attribution 要求 scorecard 六维键齐；
+     review/content 各自强制面复用 core.gates 辅助函数（content_plan_errors /
+     review_errors / scorecard_errors），不在本文件复制第二份规则
   4. recommendation：非空，每条 action/roi(cost,avoided,anchor)/irreversibility 齐
   5. decision_log_entry：id/actor/context/advice/expected_result/verification_plan 齐
   6. 若 any irreversibility=irreversible → security_gate 必须非空
   7. --require-real（M1 可信门，A2）：
      is_demo=false、task_id 非空、data_refs 不含 demo/、
      core.gates.real_report_errors 全绿（占位/缺证据/refs 不存在或 sha 不符/
-     scorecard.total 与 verdict 缺失或与独立计算不一致）
+     scorecard.total 与 verdict 缺失或与独立计算不一致；content/review 卡强制
+     对应 content_plan / observed_outcome）
 """
 import json
 import sys
@@ -22,6 +24,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from core import gates as _gates  # noqa: E402
+from core import report_contract as _rc  # noqa: E402
 
 SIX = ["data_completeness", "timeliness", "significance", "exclusivity", "history", "human_ai_consistency"]
 FAIL = []
@@ -54,6 +59,14 @@ def main():
         return 2
     r = json.loads(p.read_text(encoding="utf-8-sig"))
 
+    # C-1：卡型缺省 attribution；未知值 → FAIL（不静默）
+    try:
+        kind = _rc.card_kind(r)
+        kind_error = None
+    except ValueError as exc:
+        kind = None
+        kind_error = str(exc)
+
     finding = r.get("finding") or []
     check("finding 0-2 条", 0 <= len(finding) <= 2, str(len(finding)))
     if len(finding) == 0:
@@ -68,27 +81,31 @@ def main():
     check("cannot_attribute 非空", isinstance(ca, list) and len(ca) > 0)
 
     sc = r.get("scorecard") or {}
-    for k in SIX:
-        check(f"scorecard {k}", k in sc)
-    if require_real:
+    if kind == "attribution":
         for k in SIX:
-            v = sc.get(k)
-            if isinstance(v, dict):
-                v = v.get("score")
-            # B16：旧 0-5 口径与 100 分制新口径都接受（代码按 ≤5 / >5 自动识别）
-            ok = (isinstance(v, (int, float)) and not isinstance(v, bool)
-                  and 0 <= float(v) <= 100)
-            check(f"real scorecard {k} numeric 0-5/0-100", ok, repr(v))
+            check(f"scorecard {k}", k in sc)
+    elif kind is None:
+        check("card_kind 合法", False, kind_error or "")
+    if require_real:
+        check("real card_kind 合法", kind is not None, kind_error or "")
+        # C-1：六维/total/verdict 只在 attribution 强制；非 attribution 卡给了完整
+        # 六维才做分值校验（允许自评）。判定统一复用 core.gates.scorecard_errors。
+        sc_errors = []
+        if kind == "attribution" or (isinstance(r.get("scorecard"), dict)
+                                     and all(k in r["scorecard"] for k in SIX)):
+            sc_errors = _gates.scorecard_errors(r.get("scorecard") or {},
+                                               require_total=(kind == "attribution"))
+        check(f"real scorecard 六维/total/verdict（card_kind={kind}）",
+              not sc_errors, "；".join(str(e) for e in sc_errors)[:300])
+        if kind == "content":
+            cp_errors = _gates.content_plan_errors(r.get("content_plan"))
+            check("real content_plan 齐全（angle/structure/titles/channel/review_metrics/labels）",
+                  not cp_errors, "；".join(cp_errors)[:300])
+        elif kind == "review":
+            rv_errors = _gates.review_errors(r)
+            check("real review.observed_outcome 非空", not rv_errors, "；".join(rv_errors)[:300])
         check("real is_demo=false", r.get("is_demo") is False)
         check("real task_id", bool(r.get("task_id")))
-        # B16：100 分制总分 + 档位必须落地且域内
-        total = sc.get("total")
-        check("real scorecard.total numeric 0-100",
-              isinstance(total, (int, float)) and not isinstance(total, bool) and 0 <= float(total) <= 100,
-              repr(total))
-        check("real scorecard.verdict",
-              sc.get("verdict") in ("output", "force_manual_review", "reference_only", "no_output"),
-              repr(sc.get("verdict")))
         # M1.5 §3 B4 硬化：data_refs 可能在顶层与 decision_log_entry 两处，两处都要查 demo/
         top_refs = r.get("data_refs")
         dl_refs = (r.get("decision_log_entry") or {}).get("data_refs")
@@ -98,12 +115,10 @@ def main():
             check(f"real {where} 无 demo/",
                   isinstance(refs, list) and all("demo/" not in str(x) for x in refs), str(refs))
         try:
-            from core import gates as _gates
-
             errs = _gates.real_report_errors(r, base)
         except Exception as exc:  # noqa: BLE001
             errs = [f"可信门执行异常：{exc}"]
-        check("real 可信门（占位/证据/溯源/total-verdict）", not errs, "；".join(str(e) for e in errs)[:500])
+        check("real 可信门（占位/证据/溯源/total-verdict/卡型）", not errs, "；".join(str(e) for e in errs)[:500])
 
     rec = r.get("recommendation") or []
     check("recommendation 非空", len(rec) > 0)
@@ -112,7 +127,8 @@ def main():
         check(f"rec[{i}] action", bool(x.get("action")))
         roi = x.get("roi") or {}
         for k in ("cost", "avoided", "anchor"):
-            check(f"rec[{i}] roi.{k}", bool(roi.get(k)))
+            # 0 是有效值（¥0 复核/对照试跑真存在），不能用 bool() —— 与 core.report_contract.is_empty 同口径
+            check(f"rec[{i}] roi.{k}", not _rc.is_empty(roi.get(k)))
         irr = x.get("irreversibility")
         check(f"rec[{i}] irreversibility", irr in ("reversible", "irreversible"), str(irr))
         irreversible = irreversible or irr == "irreversible"

@@ -65,11 +65,109 @@ def _iter_strings(value):
             yield from _iter_strings(item)
 
 
+def scorecard_errors(sc, require_total=True):
+    """六维评分卡判据（attribution 强制 total/verdict 与独立计算一致；自评卡只验分值）。"""
+    errors = []
+    for dim in report_contract.SIX_DIMS:
+        value = sc.get(dim)
+        if isinstance(value, dict):
+            score = value.get("score")
+            evidence = value.get("evidence")
+            if not isinstance(score, (int, float)) or isinstance(score, bool):
+                errors.append(f"scorecard.{dim} 分数必须是数值 0-5，收到 {score!r}")
+            else:
+                try:
+                    report_contract.to_score(score)
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"scorecard.{dim}: {exc}")
+            if is_placeholder_evidence(evidence):
+                errors.append(f"scorecard.{dim}.evidence 含占位/缺证据: {str(evidence)[:40]!r}")
+        else:
+            try:
+                report_contract.to_score(value)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"scorecard.{dim}: {exc}")
+    if require_total:
+        try:
+            errors.extend(report_contract.consistency_errors(sc))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"scorecard 校验异常: {exc}")
+    return errors
+
+
+def _nonempty_text(value):
+    return isinstance(value, str) and value.strip() != ""
+
+
+def content_plan_errors(content_plan):
+    """content 卡强制字段：投稿计划（C-1 契约，选题判断/结构/标题/渠道/复盘/标签）。"""
+    if not isinstance(content_plan, dict):
+        return ["content 卡缺少 content_plan（对象）：选题判断/结构/标题/渠道/复盘/标签必须齐全"]
+    errors = []
+    if not _nonempty_text(content_plan.get("angle")):
+        errors.append("content_plan.angle 必须是非空字符串（选题判断）")
+    structure = content_plan.get("structure")
+    if not isinstance(structure, list) or not structure:
+        errors.append("content_plan.structure 必须是非空 list（逐段用途）")
+    titles = content_plan.get("titles")
+    if not isinstance(titles, list):
+        errors.append("content_plan.titles 必须是 list（5–10 条标题候选）")
+    else:
+        bad = [i for i, t in enumerate(titles) if not _nonempty_text(t)]
+        if bad:
+            errors.append(f"content_plan.titles[{bad[0]}] 必须是非空字符串（标题候选）")
+        if not (5 <= len(titles) <= 10):
+            errors.append(f"content_plan.titles 需 5–10 条，收到 {len(titles)} 条")
+    if not _nonempty_text(content_plan.get("channel")):
+        errors.append("content_plan.channel 必须是非空字符串（渠道+首帧）")
+    metrics = content_plan.get("review_metrics")
+    if not isinstance(metrics, list) or not metrics:
+        errors.append("content_plan.review_metrics 必须是非空 list（48h 复盘口径）")
+    labels = content_plan.get("labels")
+    if not isinstance(labels, list) or not labels:
+        errors.append("content_plan.labels 必须是非空 list（标签）")
+    return errors
+
+
+def _observed_ok(value):
+    """T+7 实测值是否已填（0 是有效值；空串/占位/空容器不算）。"""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, str):
+        return value.strip() != "" and not is_placeholder_evidence(value)
+    if isinstance(value, (list, dict, tuple)):
+        return len(value) > 0
+    return False
+
+
+def review_errors(report):
+    """review 卡强制字段：复盘必须含非空 observed_outcome（review.* 或顶层 outcome.*）。"""
+    observed = None
+    review = report.get("review")
+    if isinstance(review, dict):
+        observed = review.get("observed_outcome")
+    if not _observed_ok(observed):
+        outcome = report.get("outcome")
+        if isinstance(outcome, dict):
+            observed = outcome.get("observed_outcome")
+    if _observed_ok(observed):
+        return []
+    return ["review 卡缺少非空 observed_outcome（review.observed_outcome 或顶层 outcome.observed_outcome，T+7 实测）"]
+
+
 def real_report_errors(report, base):
     """返回真实报告必须满足的判据错误列表（空=通过）。"""
     errors = []
     if not isinstance(report, dict):
         return ["report 必须是 JSON 对象"]
+    # C-1：卡型决定强制面。未知 card_kind 只报错、不静默按 attribution 处理。
+    try:
+        kind = report_contract.card_kind(report)
+    except ValueError as exc:
+        errors.append(str(exc))
+        kind = None
     if report.get("is_demo") is not False:
         errors.append("real 报告 is_demo 必须为 false")
     if not report.get("task_id"):
@@ -100,32 +198,14 @@ def real_report_errors(report, base):
         errors.append("cannot_attribute 不能为空")
 
     sc = report.get("scorecard")
-    if not isinstance(sc, dict):
-        errors.append("scorecard 必须是对象")
-    else:
-        for dim in report_contract.SIX_DIMS:
-            value = sc.get(dim)
-            if isinstance(value, dict):
-                score = value.get("score")
-                evidence = value.get("evidence")
-                if not isinstance(score, (int, float)) or isinstance(score, bool):
-                    errors.append(f"scorecard.{dim} 分数必须是数值 0-5，收到 {score!r}")
-                else:
-                    try:
-                        report_contract.to_score(score)
-                    except Exception as exc:  # noqa: BLE001
-                        errors.append(f"scorecard.{dim}: {exc}")
-                if is_placeholder_evidence(evidence):
-                    errors.append(f"scorecard.{dim}.evidence 含占位/缺证据: {str(evidence)[:40]!r}")
-            else:
-                try:
-                    report_contract.to_score(value)
-                except Exception as exc:  # noqa: BLE001
-                    errors.append(f"scorecard.{dim}: {exc}")
-        try:
-            errors.extend(report_contract.consistency_errors(sc))
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"scorecard 校验异常: {exc}")
+    if kind == "attribution":
+        if not isinstance(sc, dict):
+            errors.append("scorecard 必须是对象")
+        else:
+            errors.extend(scorecard_errors(sc, require_total=True))
+    elif isinstance(sc, dict) and all(dim in sc for dim in report_contract.SIX_DIMS):
+        # 非 attribution 卡允许自评：给了完整六维就验分值，不强制 total/verdict
+        errors.extend(scorecard_errors(sc, require_total=False))
 
     rec = report.get("recommendation") or []
     if not isinstance(rec, list) or not rec:
@@ -145,6 +225,12 @@ def real_report_errors(report, base):
                 errors.append(f"recommendation[{i}].irreversibility 非法: {item.get('irreversibility')!r}")
 
     dl = report.get("decision_log_entry") or {}
+
+    # C-1：review/content 卡各自的强制面（六维只在 attribution 强制，见上）
+    if kind == "content":
+        errors.extend(content_plan_errors(report.get("content_plan")))
+    elif kind == "review":
+        errors.extend(review_errors(report))
 
     # data_refs 可能在顶层（§2.5）或 decision_log_entry 内（旧格式）：两处都校验，
     # 任意一处指向不存在/被篡改的文件都必须拒绝（A2）。
@@ -211,6 +297,12 @@ def report_shape_errors(report):
     if sgr is not None and not isinstance(sgr, bool):
         errors.append(f"security_gate_requested 不是 bool（实际 {type(sgr).__name__}）："
                       "按「声称需要安全门」处理，fail-closed 拒绝 approved")
+    # C-1：未知卡型一律报错（不得静默按 attribution 处理）
+    ck = report.get("card_kind")
+    if ck is not None and not isinstance(ck, str):
+        errors.append(f"card_kind 不是字符串（实际 {type(ck).__name__}）：未知卡型，fail-closed 拒绝 approved")
+    elif isinstance(ck, str) and ck.strip() and ck.strip() not in report_contract.CARD_KINDS:
+        errors.append(f"未知 card_kind: {ck.strip()!r}（允许 {list(report_contract.CARD_KINDS)}）")
     return errors
 
 

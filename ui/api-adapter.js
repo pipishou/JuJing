@@ -41,6 +41,8 @@
     signed: '已交付', failed: '失败', rejected: '已退回'
   };
   var KIND_LABEL = { user: '用户', speak: '发言', tool: '工具', think: '思考', status: '状态', artifact: '产物' };
+  // task-15 / C-2：交付卡卡型（宽松读取，缺省 attribution；未知值原样透出，渲染端兜底）
+  var CARD_KIND_LABEL = { attribution: '归因卡', review: '回看卡', content: '内容卡' };
 
   var state = {
     live: false,
@@ -251,6 +253,12 @@
   }
 
   // ---------------------------------------------------------------- model --
+  function cardKindOf(report, detail) {
+    var raw = (report && report.card_kind) || (detail && detail.card_kind) || '';
+    var kind = String(raw || '').trim();
+    return kind || 'attribution';
+  }
+
   function buildModel(detail) {
     var report = (detail && detail.report) || null;
     var status = (detail && detail.status) || {};
@@ -269,7 +277,13 @@
         scene: (detail && detail.scene) || null,
         loop: (detail && detail.loop) || null,
         outcome: (detail && detail.outcome) || null,
-        outcomePending: detail ? detail.outcome_pending !== false : true
+        outcomePending: detail ? detail.outcome_pending !== false : true,
+        // task-15 / C-2：卡型三分支 + 本卡班组 + content_plan（供 P2 决策卡渲染）
+        cardKind: cardKindOf(null, detail),
+        cardLabel: CARD_KIND_LABEL[cardKindOf(null, detail)] || cardKindOf(null, detail),
+        crew: (detail && detail.crew) || null,
+        contentPlan: (detail && detail.content_plan) || null,
+        review: (detail && detail.review) || null
       };
     }
     var recommendation = report.recommendation || [];
@@ -306,7 +320,15 @@
       scene: (detail && detail.scene) || null,
       loop: (detail && detail.loop) || null,
       outcome: (detail && detail.outcome) || null,
-      outcomePending: detail ? detail.outcome_pending !== false : true
+      outcomePending: detail ? detail.outcome_pending !== false : true,
+      // task-15 / C-2：卡型三分支 + 本卡班组 + content_plan（供 P2 决策卡渲染）
+      cardKind: cardKindOf(report, detail),
+      cardLabel: CARD_KIND_LABEL[cardKindOf(report, detail)] || cardKindOf(report, detail),
+      crew: (detail && detail.crew) || null,
+      contentPlan: (report.content_plan && typeof report.content_plan === 'object')
+        ? report.content_plan : ((detail && detail.content_plan) || null),
+      review: (report.review && typeof report.review === 'object')
+        ? report.review : ((detail && detail.review) || null)
     };
   }
 

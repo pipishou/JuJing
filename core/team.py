@@ -34,6 +34,11 @@ SPRITE_BY_ID = {
     "cost-steward": "cost",
 }
 
+# 交付卡卡型（C-1 / task-15）：班组在 YAML 里声明，服务端与 UI 据此分支渲染。
+# 只做宽松校验（未知值进 warnings/invalid），不静默改写业务语义。
+CREW_CARD_KINDS = ("attribution", "review", "content")
+DEFAULT_CARD_KIND = "attribution"
+
 EMPLOYEE_FIELDS = ("id", "name", "layer", "category", "state", "summary", "role_file", "skills", "sample")
 YAML_FILES = ("team/employees.yaml", "team/crews.yaml", "team/shelf.yaml", "team/roster.yaml")
 
@@ -182,6 +187,16 @@ def _crews(raw, emp_ids, warnings, invalid):
             invalid.append({"kind": "crew_missing_id", "index": i})
             continue
         crew_id = str(item.get("id"))
+        raw_kind = item.get("card_kind")
+        card_kind = str(raw_kind or "").strip()
+        if not card_kind:
+            # 缺省＝attribution（与报告契约缺省一致）：向后兼容未声明 card_kind 的老班组/第三方包，
+            # 不进 warnings/invalid；只有「写了但不认识」才算错（不静默）。
+            card_kind = DEFAULT_CARD_KIND
+        elif card_kind not in CREW_CARD_KINDS:
+            warnings.append(f"班组 {crew_id} card_kind={card_kind!r} 未知（允许 {list(CREW_CARD_KINDS)}），按 {DEFAULT_CARD_KIND} 兜底")
+            invalid.append({"kind": "crew_card_kind", "crew": crew_id, "card_kind": card_kind})
+            card_kind = DEFAULT_CARD_KIND
         steps = []
         for j, step in enumerate(item.get("steps") or []):
             if not isinstance(step, dict):
@@ -198,6 +213,7 @@ def _crews(raw, emp_ids, warnings, invalid):
         out.append({
             "id": crew_id,
             "name": str(item.get("name") or crew_id),
+            "card_kind": card_kind,
             "purpose": str(item.get("purpose") or ""),
             "want": str(item.get("want") or ""),
             "needs": str(item.get("needs") or ""),
@@ -206,6 +222,23 @@ def _crews(raw, emp_ids, warnings, invalid):
             "followup": followup if isinstance(followup, dict) else {},
         })
     return out
+
+
+def crew_for_kind(team, kind):
+    """该卡型的默认班组：team.crews 里按 YAML 顺序第一个匹配的；无则 None。
+
+    team 可以是 load_team() 的返回值，也可以是 {"crews": [...]} 片段；
+    传入 None/非对象一律返回 None（不抛，调用方按「无班组」降级）。
+    """
+    if not isinstance(team, dict):
+        return None
+    want = str(kind or "").strip()
+    if not want:
+        return None
+    for crew in team.get("crews") or []:
+        if isinstance(crew, dict) and str(crew.get("card_kind") or "").strip() == want:
+            return crew
+    return None
 
 
 def _shelf(raw):
