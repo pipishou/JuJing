@@ -19,7 +19,7 @@ from pathlib import Path
 DEFAULT_ROOT = Path(__file__).resolve().parent.parent
 
 # 像素角色短 key（与 ui/sprites.js 的 PAL 调色板一一对应）
-SPRITE_KEYS = ("host", "analyst", "attr", "biz", "qa", "data", "content", "cost")
+SPRITE_KEYS = ("host", "analyst", "attr", "biz", "qa", "data", "content", "cost", "media")
 
 # 长员工 id → 短精灵 key（修复 M1「长 slug 直接当 sprite key → 头像全灰」的错位）
 SPRITE_BY_ID = {
@@ -30,8 +30,7 @@ SPRITE_BY_ID = {
     "compliance-reviewer": "qa",
     "data-fetcher": "data",
     "report-recorder": "content",
-    # 未上架员工（employees.yaml 的 coming 段）：先占位，上架即用
-    "content-operator": "content",
+    "content-operator": "media",
     "cost-steward": "cost",
 }
 

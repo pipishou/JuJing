@@ -50,6 +50,15 @@ employees:
     role_file: team/roles/manufacturing-ops-expert.md
     skills: [direction-check, roi-anchors]
     sample: 保养 ¥500 < 换模 ¥800 + 停机 ¥1200
+  - id: content-operator
+    name: 内容操盘手
+    layer: L1
+    category: deliver
+    state: active
+    summary: 把真实经营事实做成可分发内容：选题判断、四段结构、标题候选、48 小时复盘口径
+    role_file: team/roles/content-operator.md
+    skills: [content-plan, title-variants]
+    sample: 换模 60 秒脚本（钩子/证据/判断/动作 + 5 个标题候选）
   - id: compliance-reviewer
     name: 合规质检
     layer: cross
@@ -79,9 +88,6 @@ employees:
     sample: DL 条目与回看清单
 
 coming:
-  - id: content-operator
-    name: 内容运营
-    reason: 能力包（SKILL.md）尚未写，不上架（空壳员工=欺诈）
   - id: cost-steward
     name: 成本管家
     reason: 依赖 usage 数据源未接，不上架（死按钮比没按钮伤害大）

@@ -1,0 +1,40 @@
+# A-4 CRP 约束推理 — 封闭世界假设 + 强制不确定性
+# [KNOWN] 来源：产品引擎 P0 设计决策（强制诚实机制）。
+
+version: "0.1.0"
+
+closed_world_hypothesis:
+  description: |
+    归因搜索限定在 A-1 因素枚举表内。枚举表漏因素时 Agent 会"知道"
+    （表现为高不确定性分数）但不会主动提——除非用户问或走降级路径。
+  trigger: |
+    当观察到异常但枚举表内所有因素都被排除 → 不能输出"不知道"，
+    必须输出 cannot_attribute + 建议补充枚举表。
+  output_tag: "[UNKNOWN_FACTOR]"
+
+mandatory_slots:
+  - slot: cannot_attribute
+    description: |
+      必须非空。即使结论是高置信度归因，也要写出"我们不能 100% 排除 XXX"。
+      允许的取值模板：
+      - "高置信度归因，但不能排除测量仪器漂移（未独立校准）"
+      - "候选因素≥2，无法区分主次 → 反事实推断"
+      - "空值率 12%，关键数据缺失 → 降级人工"
+      - "因素枚举表无匹配项 → [UNKNOWN_FACTOR]"
+    hard_rule: "AI 不能幻觉不确定性——必须基于数据/方法论生成"
+
+  - slot: confidence_band
+    description: "A/B/C 三档置信度（A=≥80 / B=50-80 / C=<50）"
+
+  - slot: evidence_list
+    description: "3-5 条最有力证据（带数字，无数字的证据不算）"
+
+uncertainty_propagation:
+  when_data_quality_bad: "cannot_attribute 必须显式提及数据缺陷"
+  when_multiple_candidates: "走反事实推断——列出假设 + 各自验证方法"
+  when_historical_low: "降 confidence_band，说明历史支撑不足"
+
+forbidden_outputs:
+  - "我非常确定这就是原因"  ← 违反强制不确定性
+  - "数据看起来没问题"     ← 未检查数据完整性时禁止
+  - "这个因素没变化但还是可能导致异常" ← 违反排除法

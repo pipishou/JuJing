@@ -1,0 +1,70 @@
+{
+  "id": "manufacturing-business-team",
+  "label": {
+    "zh": "制造业经营助手团队",
+    "en": "Manufacturing Business Consulting Team"
+  },
+  "description": {
+    "zh": "离散制造业异常归因专家团队。L0感知→L1归因→L2建议 三层流水线。内置排除法六步、六维评分卡、CRP约束推理。",
+    "en": "Discrete manufacturing anomaly attribution team. L0→L1→L2 three-layer pipeline."
+  },
+  "prompt_files": [
+    "SOUL.md"
+  ],
+  "icon_name": "factory",
+  "color": "#10B981",
+  "welcome_message": {
+    "zh": "我是制造业经营助手团队。给我一条异常（如「B产线补料率7天从5.1%爬到7.2%」），我组织三层流水线归因。",
+    "en": "Manufacturing Business Team. Give me an anomaly, I'll run L0→L1→L2 pipeline."
+  },
+  "quick_prompts": [
+    {
+      "title": {
+        "zh": "补料率异常归因",
+        "en": "Feedrate anomaly"
+      },
+      "description": {
+        "zh": "B产线补料率7天5.1%→7.2%",
+        "en": "Line B feedrate 5.1%→7.2% in 7d"
+      },
+      "prompt": {
+        "zh": "B产线补料率连续7天从5.1%爬到7.2%，帮我归因。",
+        "en": "Line B feedrate 5.1%→7.2% in 7d. Attribute."
+      },
+      "color": "#d1fae5",
+      "icon_name": "factory"
+    },
+    {
+      "title": {
+        "zh": "空值率降级",
+        "en": "Partial data degrade"
+      },
+      "description": {
+        "zh": "前3天数据缺失15%",
+        "en": "First 3 days missing (15% null)"
+      },
+      "prompt": {
+        "zh": "补料率爬了，但前3天缺失（空值率15%），诚实归因。",
+        "en": "Feedrate up but days 1-3 missing (15% null). Attribute honestly."
+      },
+      "color": "#fee2e2",
+      "icon_name": "alert-triangle"
+    },
+    {
+      "title": {
+        "zh": "ROI算账",
+        "en": "ROI calc"
+      },
+      "description": {
+        "zh": "换模具¥800 停机¥1200/h",
+        "en": "Mold ¥800 downtime ¥1200/h"
+      },
+      "prompt": {
+        "zh": "换模具¥800，补料率预计降1.5%，按停机¥1200/h算ROI。",
+        "en": "Mold ¥800, expect 1.5% reduction. Calc ROI at ¥1200/h."
+      },
+      "color": "#fef3c7",
+      "icon_name": "calculator"
+    }
+  ]
+}

@@ -71,6 +71,23 @@ window.TEAM_DATA = {
       "hireable": true
     },
     {
+      "id": "content-operator",
+      "name": "内容操盘手",
+      "role": "L1 · 交付岗",
+      "layer": "L1",
+      "cat": "deliver",
+      "state": "",
+      "stateText": "在岗",
+      "init": "content-operator",
+      "tags": [
+        "content-plan",
+        "title-variants"
+      ],
+      "sample": "换模 60 秒脚本（钩子/证据/判断/动作 + 5 个标题候选）",
+      "summary": "把真实经营事实做成可分发内容：选题判断、四段结构、标题候选、48 小时复盘口径",
+      "hireable": true
+    },
+    {
       "id": "compliance-reviewer",
       "name": "合规质检",
       "role": "cross · 质量岗",
@@ -117,22 +134,6 @@ window.TEAM_DATA = {
       ],
       "sample": "DL 条目与回看清单",
       "summary": "决策日志、交付卡归档、T+7 回看催办",
-      "hireable": false
-    },
-    {
-      "id": "content-operator",
-      "name": "内容运营",
-      "role": "coming · 待上架",
-      "layer": "-",
-      "cat": "coming",
-      "state": "coming",
-      "stateText": "待上架",
-      "init": "content-operator",
-      "tags": [
-        "能力包缺失"
-      ],
-      "sample": "能力包未写",
-      "summary": "能力包（SKILL.md）尚未写，不上架（空壳员工=欺诈）",
       "hireable": false
     },
     {
@@ -237,6 +238,34 @@ window.TEAM_DATA = {
         {
           "agent": "host",
           "what": "过/打回（打回必须改变交付物）"
+        }
+      ],
+      "followup_days": 7
+    },
+    {
+      "id": "c-content-publish",
+      "name": "内容选题与产出",
+      "purpose": "把一条真实经营事实做成可分发内容（视频号/公众号），产出可直接拍的方案",
+      "steps": [
+        {
+          "agent": "consulting-analyst",
+          "what": "取数对账，给出可引用的数字与时间窗，标出涉密项"
+        },
+        {
+          "agent": "manufacturing-ops-expert",
+          "what": "校验事实方向与算账口径，指出不能外发的商业信息"
+        },
+        {
+          "agent": "content-operator",
+          "what": "选题判断＋四段结构＋标题候选＋48h 复盘阈值"
+        },
+        {
+          "agent": "compliance-reviewer",
+          "what": "合规复核（夸大词/客户信息/功效边界）"
+        },
+        {
+          "agent": "host",
+          "what": "收敛成可拍内容方案与发布单"
         }
       ],
       "followup_days": 7

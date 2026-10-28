@@ -15,6 +15,8 @@
 环境
   ADVISORY_PACK  覆盖 pack 路径（默认 <bot-2>/.octop/expert_market/manufacturing-advisory-board）
   NUWA_ROOT      覆盖女娲 examples 路径（默认见 ROLES 表）
+  ROLES 的 example 若以 @pack: 开头，则读包内重蒸稿（<pack>/<rel>/SKILL.md），
+  不受女娲上游更新影响——重蒸产物跟包一起走。
 """
 from __future__ import annotations
 
@@ -26,16 +28,28 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent          # JuJing/bot-team
-DEFAULT_PACK = ROOT.parents[1] / ".octop" / "expert_market" / "manufacturing-advisory-board"
+# 仓库是源（可提交/换电脑不丢）；.octop/expert_market 是 Octop 运行时副本。
+# 默认读仓库副本，部署到运行副本用 tools/sync_expert_pack.py --to-runtime。
+REPO_PACK = ROOT / "packs" / "expert_market" / "manufacturing-advisory-board"
+RUNTIME_PACK = ROOT.parents[1] / ".octop" / "expert_market" / "manufacturing-advisory-board"
+DEFAULT_PACK = REPO_PACK if (REPO_PACK / "agents").is_dir() else RUNTIME_PACK
 DEFAULT_NUWA = Path(r"C:\Users\kf-41\Desktop\个人内容\skill\nuwa-skill-main\nuwa-skill-main\examples")
 
 sys.path.insert(0, str(ROOT))
 from core import telemetry  # noqa: E402
 
 # role -> (agent 文件, persona 目录, 女娲 example 目录名)
+# example 支持两种写法：
+#   "<name>"        → 女娲 examples/<name>/SKILL.md（上游原版，未重蒸）
+#   "@pack:<rel>"   → 包内 <rel>/SKILL.md（本仓库重蒸稿，跟包一起走，不被女娲更新覆盖）
 ROLES = {
-    "karpathy": ("agents/karpathy.md", "persona/andrej-karpathy", "andrej-karpathy-perspective"),
+    "karpathy": ("agents/karpathy.md", "persona/andrej-karpathy", "@pack:persona/andrej-karpathy/distill"),
     "jobs": ("agents/jobs.md", "persona/steve-jobs", "steve-jobs-perspective"),
+    "content-operator": (
+        "agents/content-operator.md",
+        "persona/manufacturing-content-operator",
+        "@pack:persona/manufacturing-content-operator/distill",
+    ),
 }
 
 START_RE = re.compile(r"<!--\s*PERSONA:START(?P<attrs>[^>]*)-->")
@@ -77,8 +91,15 @@ def extract_section_items(text: str, head_re: re.Pattern, item_re: re.Pattern) -
     return items
 
 
+def source_skill(example: str) -> Path:
+    """@pack: 前缀 → 包内重蒸稿；否则 → 女娲 examples 原版。"""
+    if example.startswith("@pack:"):
+        return pack_dir() / example[len("@pack:") :] / "SKILL.md"
+    return nuwa_root() / example / "SKILL.md"
+
+
 def build_block(role: str, persona_rel: str, example: str) -> str:
-    src_skill = nuwa_root() / example / "SKILL.md"
+    src_skill = source_skill(example)
     voice_path = pack_dir() / persona_rel / "VOICE.md"
     if not src_skill.exists():
         raise FileNotFoundError(f"女娲源不存在：{src_skill}（用 NUWA_ROOT 覆盖）")
@@ -104,11 +125,11 @@ def build_block(role: str, persona_rel: str, example: str) -> str:
         f"> 认知来自女娲蒸馏包 `{example}`；风格来自 `{persona_rel}/VOICE.md`。",
         "> 重刷：`python tools/rebuild_persona.py --apply`（只换人格层，职责层与输出契约不动）。",
         "",
-        "**心智模型（6）**",
+        f"**心智模型（{len(models)}）**",
         "",
         "\n".join(f"{i}. {m}" for i, m in enumerate(models, 1)),
         "",
-        "**决策启发式（8）**",
+        f"**决策启发式（{len(heurs)}）**",
         "",
         "\n".join(f"{i}. {h}" for i, h in enumerate(heurs, 1)),
         "",
