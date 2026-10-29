@@ -111,6 +111,11 @@ def config(provider: str | None = None) -> dict:
     if name == "opencode":
         # opencode-go 要求带会话头做路由；缺了直接 400 MissingSessionID
         headers["x-opencode-session"] = os.environ.get("BOT_LLM_SESSION") or f"bot-team-{os.getpid()}-{int(time.time())}"
+
+    # 思考强度：BOT_LLM_REASONING（low|medium|high|none），实测 opencode-go 接受 reasoning_effort
+    reasoning = (_lookup("BOT_LLM_REASONING", file_env) or "").strip().lower() or None
+    if reasoning in ("none", "off", "0", "false"):
+        reasoning = None
     return {
         "provider": name,
         "base": base,
@@ -118,6 +123,7 @@ def config(provider: str | None = None) -> dict:
         "key": key,
         "key_source": key_source,
         "headers": headers,
+        "reasoning": reasoning,
     }
 
 
@@ -154,9 +160,10 @@ def chat(
     model: str | None = None,
     temperature: float = 0.3,
     max_tokens: int | None = None,
-    timeout: int = 120,
+    timeout: int = 180,
+    reasoning: str | None = None,
 ) -> dict:
-    """发一次 chat/completions，返回 {content, model, usage, elapsed_ms}。"""
+    """发一次 chat/completions，返回 {content, model, usage, elapsed_ms, reasoning}。"""
     cfg = config(provider)
     payload: dict = {
         "model": model or cfg["model"],
@@ -164,6 +171,9 @@ def chat(
         "temperature": temperature,
         "stream": False,
     }
+    effort = reasoning if reasoning is not None else cfg.get("reasoning")
+    if effort:
+        payload["reasoning_effort"] = effort
     if max_tokens:
         payload["max_tokens"] = max_tokens
     started = time.time()
@@ -179,22 +189,40 @@ def chat(
         "usage": data.get("usage") or {},
         "elapsed_ms": elapsed_ms,
         "provider": cfg["provider"],
+        "reasoning": effort,
     }
 
 
 def healthcheck(provider: str | None = None) -> dict:
+    """验通：优先 GET /models（便宜），失败则退一次最小 chat（真实路径）。
+
+    /models 在 opencode-go 上偶发超时（实测过一次），不能因此报「通道坏了」。
+    """
     cfg = config(provider)
     started = time.time()
-    ids = models(cfg["provider"])
-    return {
-        "ok": True,
+    base = {
         "provider": cfg["provider"],
         "base": cfg["base"],
         "model": cfg["model"],
         "key_source": cfg["key_source"],
-        "models": len(ids),
-        "elapsed_ms": int((time.time() - started) * 1000),
+        "reasoning": cfg.get("reasoning"),
     }
+    try:
+        ids = models(cfg["provider"])
+        base.update({"ok": True, "mode": "models", "models": len(ids),
+                     "elapsed_ms": int((time.time() - started) * 1000)})
+        return base
+    except LLMError as exc:
+        models_error = str(exc)[:200]
+    try:
+        out = chat([{"role": "user", "content": "只回一个字：好"}], provider=cfg["provider"], max_tokens=16, timeout=120)
+        base.update({"ok": True, "mode": "chat", "models": None, "models_error": models_error,
+                     "reply": (out.get("content") or "")[:20],
+                     "elapsed_ms": int((time.time() - started) * 1000)})
+        return base
+    except LLMError as exc:
+        base.update({"ok": False, "mode": "none", "error": str(exc)[:300], "models_error": models_error})
+        return base
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -214,8 +242,9 @@ def main(argv: list[str] | None = None) -> int:
             out = chat([{"role": "user", "content": args.prompt}], provider=args.provider, model=args.model)
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return 0
-        print(json.dumps(healthcheck(args.provider), ensure_ascii=False, indent=2))
-        return 0
+        result = healthcheck(args.provider)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result.get("ok") else 2
     except LLMError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         return 2
