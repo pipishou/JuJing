@@ -170,6 +170,29 @@ _o4 = (_p4.stdout + _p4.stderr).decode('utf-8', 'replace')
 case('F24 demo 总分不一致被抓', 'scorecard 一致性' in _o4 and 'FAIL' in _o4, _o4[-200:])
 _tmpf.unlink(missing_ok=True)
 
+# F29a: points 被删也不能绕过总分复算
+_r5 = copy.deepcopy(base); _r5["scorecard"].pop("points", None); _r5["scorecard"]["total"] = 46.68
+_no_seal = {k: v for k, v in _r5.items() if k not in ("artifact_sha256", "seal")}
+art.seal(_no_seal, 'probe', 'f29')
+_tmpf2 = ROOT / 'runs' / '_f29_probe.json'
+_tmpf2.write_text(json.dumps(_no_seal, ensure_ascii=False, indent=2), encoding='utf-8')
+_p5 = subprocess.run([sys.executable, '-X', 'utf8', str(ROOT / 'tests/validate_report.py'), str(_tmpf2)],
+                     capture_output=True)
+_o5 = (_p5.stdout + _p5.stderr).decode('utf-8', 'replace')
+case('F29a 删 points 仍复算总分', 'scorecard 一致性' in _o5 and 'FAIL' in _o5, _o5[-200:])
+_tmpf2.unlink(missing_ok=True)
+
+# F29d: is_demo 非 False（None）在 finalize 也要拒
+_r6 = copy.deepcopy(base); _r6["is_demo"] = None
+_reasons6 = gates.check_finalize({"status": "proposed", "task_id": _r6.get("task_id")}, _r6,
+                                 {"signer": "kf41", "report_sha256": "x"}, allowlist=("kf41",), gate_confirmed=True)
+case('F29d is_demo=None 也拒签', any('demo' in r.lower() or '不可签' in r for r in _reasons6), _reasons6)
+
+# F29c: 054 口径与 repaired_at
+case('F29b dle.attribution_method 单源', (base.get("decision_log_entry") or {}).get("attribution_method") == "exclusion",
+     (base.get("decision_log_entry") or {}).get("attribution_method"))
+case('F29c seal 有 repaired_at', bool((base.get("seal") or {}).get("repaired_at")), list((base.get("seal") or {})))
+
 bad = [n for n, ok, _ in CASES if not ok]
 print(f"test_f6_f11: {len(CASES) - len(bad)}/{len(CASES)} 通过" + ('' if not bad else ' | 失败: ' + '; '.join(bad)))
 raise SystemExit(0 if not bad else 1)

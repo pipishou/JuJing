@@ -89,7 +89,7 @@ def main():
         check("card_kind 合法", False, kind_error or "")
 
     # F24: engine recompute must run for demo reports too
-    if isinstance(sc, dict) and sc.get("points"):
+    if isinstance(sc, dict) and sc and ("artifact_sha256" in r or require_real):
         try:
             _sc_errs = _gates.scorecard_errors(sc)
         except Exception as _exc:  # noqa: BLE001
@@ -149,6 +149,14 @@ def main():
                       all(e.get("data_quality_grade") == "inference_only" for e in _evs),
                       str([e.get("data_quality_grade") for e in _evs]))
         _cl = _loop / "closure.json"
+        if _cl.is_file() and isinstance(sc, dict) and sc.get("total") is not None:
+            try:
+                _c2 = json.loads(_cl.read_text(encoding="utf-8-sig"))
+                check("closure.total 与 report.total 等值",
+                      _c2.get("total") in (None, sc.get("total")),
+                      f"closure={_c2.get('total')!r} report={sc.get('total')!r}")
+            except Exception as _exc:  # noqa: BLE001
+                check("closure.json 可解析（total 对照）", False, str(_exc))
         if _cl.is_file():
             try:
                 _c = json.loads(_cl.read_text(encoding="utf-8-sig"))

@@ -40,9 +40,12 @@ def main():
             print("[seal] 拒绝：交付门未过：\n  - " + "\n  - ".join(errs), file=sys.stderr)
             return 1
     import os as _os
+    from datetime import datetime, timezone
+    report["seal"] = report.get("seal") or {}
     sha = art.seal(report, args.tool, args.note,
                    by=_os.environ.get("USERNAME") or _os.environ.get("USER") or "unknown",
                    command=" ".join(sys.argv))
+    report["seal"]["repaired_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"[seal] ok {path} artifact_sha256={sha[:16]}… note={args.note}")
     return 0

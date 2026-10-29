@@ -458,7 +458,7 @@ def check_finalize(decision, report, signature, allowlist=(), gate_confirmed=Fal
         reasons.append(f"报告自判不可签/无停止范围（sign_scope={_ss!r}, verdict={_vl!r}, scorecard={_sc.get('verdict')!r}）：不得 approved")
 
     # 1) demo 不得走真实交付
-    if report.get("is_demo") is True or signature.get("is_demo") is True:
+    if report.get("is_demo") is not False or signature.get("is_demo") is True:
         reasons.append("demo 报告/签名不得走真实交付（is_demo=true）")
 
     # 2) decision 状态机：只有 proposed 能变成 approved
