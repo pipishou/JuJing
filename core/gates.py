@@ -173,7 +173,7 @@ def _load_pack_doc(report, base):
     pid = p.get("pack_id") if isinstance(p, dict) else (p if isinstance(p, str) else None)
     pid = str(pid).strip() if pid else ""
     if not pid:
-        return None
+        raise ValueError("pack 缺失或 pack_id 为空：无法确定不可逆动作表（fail-closed）")
     path = Path(base) / "packs" / pid / "pack.json"
     try:
         return json.loads(path.read_text(encoding="utf-8-sig"))
@@ -425,7 +425,7 @@ def report_claims_security_gate(report):
     return False
 
 
-def check_finalize(decision, report, signature, allowlist=(), gate_confirmed=False):
+def check_finalize(decision, report, signature, allowlist=(), gate_confirmed=False, base=None):
     """签字收口门：返回拒绝原因列表；空列表=可 approved。"""
     # 0) 形状校验优先：畸形结构直接 fail-closed，不进入任何字段判定（task-13）
     shape_errors = report_shape_errors(report)
@@ -434,6 +434,21 @@ def check_finalize(decision, report, signature, allowlist=(), gate_confirmed=Fal
     reasons = []
     decision = decision if isinstance(decision, dict) else {}
     signature = signature if isinstance(signature, dict) else {}
+
+    # F18: signature-time action binding (block forged security_gate.action)
+    _base = base or str(Path(__file__).resolve().parents[1])
+    try:
+        _pk = _load_pack_doc(report, _base)
+    except Exception as _exc:  # noqa: BLE001
+        reasons.append(f"pack unparsable: {_exc} (finalize fail-closed)")
+        _pk = None
+    if _pk is not None:
+        from .pack import is_irreversible as _is_irr3
+        for _g in (report.get("security_gate"), (decision or {}).get("security_gate")):
+            if isinstance(_g, dict) and (_g.get("action") or _g.get("confirmed_by")):
+                _act = str(_g.get("action") or "").strip()
+                if not _act or not _is_irr3(_pk, _act):
+                    reasons.append(f"security_gate.action={_act!r} is not a pack irreversible action (finalize rejected)")
 
     # F7：自判不可签 / 无停止范围 → 不得 approved（不得靠 post_sign 绕过）
     _vl = str(report.get("verdict_one_line") or "")

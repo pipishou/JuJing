@@ -39,6 +39,7 @@ def main():
     today = date.fromisoformat(args.today)
     root = Path(args.root)
     due = []
+    legacy = []
     seen = set()
     for clo in root.rglob("closure.json"):
         d = clo.parent
@@ -52,10 +53,15 @@ def main():
         # F11：demo 报告不进真实回看队列
         rep = d.parent / "report.json"
         try:
-            if rep.is_file() and readj(rep).get("is_demo") is True:
-                continue
+            _rj = readj(rep) if rep.is_file() else {}
         except Exception:
-            pass
+            _rj = {}
+        # F22: demo never enters real queue; legacy/test runs lacking contract fields are quarantined
+        if _rj.get("is_demo") is True:
+            continue
+        if not all(k in _rj for k in ("verdict_one_line", "sign_scope", "evidence_tier")):
+            legacy.append(de.get("id") or str(d))
+            continue
         if c.get("verdict") != "unverified":
             continue
         # F11：同一决策多份 loop 只计一次
@@ -72,6 +78,10 @@ def main():
                 "due": c.get("due"), "expected": de.get("expected_outcome"),
                 "task_dir": str(d), "review_days": 7,
             })
+    _legacy_u = list(dict.fromkeys(legacy))
+    if _legacy_u:
+        print(f"[review_due] quarantined {len(_legacy_u)} legacy/test run(s) missing contract fields: "
+              + ", ".join(map(str, _legacy_u[:8])))
     due.sort(key=lambda x: (x.get("due") or "", x.get("decision_id") or ""))
     if not due:
         print(json.dumps({"ok": True, "due": 0, "message": "no review due"}, ensure_ascii=False))

@@ -103,6 +103,37 @@ out = (p.stdout + p.stderr).decode('utf-8', 'replace')
 case('F11 demo 不进队列', 'T-20261028-054' not in out, out[:200])
 case('F11 决策去重', out.count('D-20261020-001') <= 1, out.count('D-20261020-001'))
 
+# F18：签字前复跑动作绑定——伪造 gate.action 不得放行
+_r = copy.deepcopy(base)
+_r["security_gate"] = {"status": "confirmed", "action": "调整排班", "confirmed_by": "kf41"}
+_dec = {"status": "proposed", "task_id": _r.get("task_id"),
+        "security_gate": {"status": "confirmed", "action": "调整排班", "confirmed_by": "kf41"}}
+_reasons = gates.check_finalize(_dec, _r, {"signer": "kf41", "report_sha256": "x"},
+                                allowlist=("kf41",), gate_confirmed=True)
+case('F18 伪造 gate.action 签字被拒',
+     any('不可逆' in x or 'pack' in x for x in _reasons), _reasons)
+
+# F19：pack 四形状（缺失/None/list/空 pack_id）必须 fail-closed
+for shape, label in ((None, '缺失'), ([], 'list'), ({"pack_id": ""}, '空 pack_id')):
+    _r2 = copy.deepcopy(base)
+    _r2["pack"] = shape
+    _r2["security_gate"] = {"status": "pending_user_confirmation", "action": "调整排班"}
+    _e2 = gates.real_report_errors(_r2, ROOT)
+    case(f'F19 pack {label} 不静默跳过', any(('pack' in e or '不可逆' in e) for e in _e2), _e2)
+
+# F22：缺契约字段的遗留/测试 run（含"可删"）不得进真实回看队列
+import tempfile, shutil
+_tmp = Path(tempfile.mkdtemp(prefix='rd_'))
+(_tmp / 'x/loop').mkdir(parents=True)
+(_tmp / 'x/report.json').write_text(json.dumps({"task_id": "T-LEGACY", "is_demo": None}), encoding='utf-8')
+(_tmp / 'x/loop/decision.json').write_text(json.dumps({"id": "D-LEGACY", "question": "UI 端到端实跑（可删）"}), encoding='utf-8')
+(_tmp / 'x/loop/closure.json').write_text(json.dumps({"verdict": "unverified", "due": "2026-11-02"}), encoding='utf-8')
+_p2 = subprocess.run([sys.executable, '-X', 'utf8', str(ROOT / 'tools/review_due.py'), '--root', str(_tmp), '--today', '2026-11-04'],
+                     capture_output=True)
+_out2 = (_p2.stdout + _p2.stderr).decode('utf-8', 'replace')
+case('F22 legacy/可删 run 隔离', '| D-LEGACY |' not in _out2 and 'quarantined' in _out2, _out2[:200])
+shutil.rmtree(_tmp, ignore_errors=True)
+
 bad = [n for n, ok, _ in CASES if not ok]
 print(f"test_f6_f11: {len(CASES) - len(bad)}/{len(CASES)} 通过" + ('' if not bad else ' | 失败: ' + '; '.join(bad)))
 raise SystemExit(0 if not bad else 1)
