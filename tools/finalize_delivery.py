@@ -251,6 +251,10 @@ def main():
         apply_gate_view(report, gate_view)
         reasons += gates.check_finalize(dec, report, sig, allowlist=allowlist,
                                         gate_confirmed=bool(gate_view))
+        # F28: confirmed action must equal reported action
+        _mm = gates.gate_action_mismatch(gate_doc, report)
+        if _mm:
+            reasons.append(_mm)
     if reasons:
         print(json.dumps({"ok": False, "status": "rejected", "reasons": reasons,
                           "gate_file": str(gate_file),

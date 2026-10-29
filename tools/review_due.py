@@ -57,7 +57,8 @@ def main():
         except Exception:
             _rj = {}
         # F22: demo never enters real queue; legacy/test runs lacking contract fields are quarantined
-        if _rj.get("is_demo") is True:
+        if _rj.get("is_demo") is not False:
+            legacy.append(de.get("id") or str(d))
             continue
         if not all(k in _rj for k in ("verdict_one_line", "sign_scope", "evidence_tier")):
             legacy.append(de.get("id") or str(d))

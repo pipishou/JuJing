@@ -457,8 +457,8 @@
       : '不可归因：证据不足（cannot_attribute ' + (report.cannot_attribute || []).length + ' 条），建议先补数据'));
     beats.push(makeBeat('biz', 's4', rec.action ? rec.action : 'ROI 锚点：' + ((rec.roi && rec.roi.anchor) || '—')));
     var _v1 = report.verdict_one_line || score.verdict || '待复核';
-    var _scopeMap = {approve:'可签', no_stop:'不签字·只呈请', approve_B1:'仅批 B1', approve_B2:'仅批 B2'};
-  var _ss = report.sign_scope ? (' · 签范围 ' + (_scopeMap[report.sign_scope] || report.sign_scope)) : '';
+    var _scopeMap = {approve:'可签', no_stop:'不签字（仅呈请）', other:'待定', approve_B1:'仅批 B1', approve_B2:'仅批 B2'};
+  var _ss = (report.sign_scope && report.sign_scope !== 'no_stop' && report.sign_scope !== 'other') ? (' · 签范围 ' + (_scopeMap[report.sign_scope] || report.sign_scope)) : '';
     beats.push(makeBeat('host', 's5', _v1 + _ss + ' · 交付卡 ' + (log.id || '—') + '；下一步：' + (log.expected_result || 'T+7 回看')));
     return beats;
   }

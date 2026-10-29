@@ -134,6 +134,42 @@ _out2 = (_p2.stdout + _p2.stderr).decode('utf-8', 'replace')
 case('F22 legacy/可删 run 隔离', '| D-LEGACY |' not in _out2 and 'quarantined' in _out2, _out2[:200])
 shutil.rmtree(_tmp, ignore_errors=True)
 
+# F25: is_demo non-boolean truthy ("true"/1) must quarantine
+import tempfile, shutil as _sh
+_tmp2 = Path(tempfile.mkdtemp(prefix='rd2_'))
+for _v, _name in ((("true"), 'str'), (1, 'int')):
+    _d = _tmp2 / _name
+    (_d / 'loop').mkdir(parents=True)
+    (_d / 'report.json').write_text(json.dumps({"task_id": "T-" + _name, "is_demo": _v,
+                                                "verdict_one_line": "x", "sign_scope": "no_stop",
+                                                "evidence_tier": "inference_only"}), encoding='utf-8')
+    (_d / 'loop/decision.json').write_text(json.dumps({"id": "D-" + _name, "question": "q"}), encoding='utf-8')
+    (_d / 'loop/closure.json').write_text(json.dumps({"verdict": "unverified", "due": "2026-11-02"}), encoding='utf-8')
+_p3 = subprocess.run([sys.executable, '-X', 'utf8', str(ROOT / 'tools/review_due.py'), '--root', str(_tmp2), '--today', '2026-11-04'],
+                     capture_output=True)
+_o3 = (_p3.stdout + _p3.stderr).decode('utf-8', 'replace')
+case('F25 is_demo 非布尔真值 隔离', '| D-str |' not in _o3 and '| D-int |' not in _o3, _o3[:200])
+_sh.rmtree(_tmp2, ignore_errors=True)
+
+# F28: gate action vs report action mismatch detected
+case('F28 确认/执行动作不一致被拒',
+     bool(gates.gate_action_mismatch({"action": "mold_change"}, {"security_gate": {"action": "line_stop"}})),
+     'no mismatch detected')
+case('F28 一致时通过',
+     gates.gate_action_mismatch({"action": "line_stop"}, {"security_gate": {"action": "line_stop"}}) is None,
+     'false positive')
+
+# F24: demo 报告总分错误必须被 validate 抓到
+_r4 = copy.deepcopy(base)
+_r4["scorecard"]["total"] = 46.68
+_tmpf = ROOT / 'runs' / '_f24_probe.json'
+_tmpf.write_text(json.dumps(_r4, ensure_ascii=False, indent=2), encoding='utf-8')
+_p4 = subprocess.run([sys.executable, '-X', 'utf8', str(ROOT / 'tests/validate_report.py'), str(_tmpf)],
+                     capture_output=True)
+_o4 = (_p4.stdout + _p4.stderr).decode('utf-8', 'replace')
+case('F24 demo 总分不一致被抓', 'scorecard 一致性' in _o4 and 'FAIL' in _o4, _o4[-200:])
+_tmpf.unlink(missing_ok=True)
+
 bad = [n for n, ok, _ in CASES if not ok]
 print(f"test_f6_f11: {len(CASES) - len(bad)}/{len(CASES)} 通过" + ('' if not bad else ' | 失败: ' + '; '.join(bad)))
 raise SystemExit(0 if not bad else 1)

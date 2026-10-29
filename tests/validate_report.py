@@ -87,6 +87,14 @@ def main():
             check(f"scorecard {k}", k in sc)
     elif kind is None:
         check("card_kind 合法", False, kind_error or "")
+
+    # F24: engine recompute must run for demo reports too
+    if isinstance(sc, dict) and sc.get("points"):
+        try:
+            _sc_errs = _gates.scorecard_errors(sc)
+        except Exception as _exc:  # noqa: BLE001
+            _sc_errs = [str(_exc)]
+        check("scorecard 一致性（引擎复算, demo 也验）", not _sc_errs, str(_sc_errs)[:200])
     # F13：三字段不再可整段跳过——一律必填；仅 --allow-legacy 显式放行无封存的历史件
     _vl = r.get("verdict_one_line")
     if allow_legacy and "artifact_sha256" not in r:

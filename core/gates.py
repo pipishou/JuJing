@@ -518,3 +518,12 @@ if __name__ == "__main__":
     for err in real_report_errors(doc, "."):
         print("[FAIL]", err)
     print("RESULT:", "PASS" if not real_report_errors(doc, ".") else "FAIL")
+
+
+def gate_action_mismatch(gate_doc, report):
+    """F28: confirmed gate action must equal the action the report will execute."""
+    ga = str((gate_doc or {}).get("action") or "").strip()
+    ra = str((report.get("security_gate") or {}).get("action") or "").strip()
+    if ga and ra and ga != ra:
+        return f"gate.json action={ga!r} != report action={ra!r} (confirm/execute mismatch)"
+    return None
