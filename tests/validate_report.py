@@ -41,6 +41,7 @@ def check(name, ok, detail=""):
 def main():
     raw = sys.argv[1:]
     require_real = "--require-real" in raw
+    allow_legacy = "--allow-legacy" in raw
     base = ROOT
     if "--base" in raw:
         idx = raw.index("--base")
@@ -48,7 +49,7 @@ def main():
             print("usage: validate_report.py <report.json> [--require-real] [--base <dir>]")
             return 2
         base = Path(raw[idx + 1]).resolve()
-    drop = {"--require-real", "--base"}
+    drop = {"--require-real", "--base", "--allow-legacy"}
     args = [a for i, a in enumerate(raw) if a not in drop and not (i > 0 and raw[i - 1] == "--base")]
     if len(args) != 1:
         print("usage: validate_report.py <report.json> [--require-real] [--base <dir>]")
@@ -86,11 +87,13 @@ def main():
             check(f"scorecard {k}", k in sc)
     elif kind is None:
         check("card_kind 合法", False, kind_error or "")
-    # F1/F5：交付层三字段（demo 报告也验；老报告无字段时跳过）
-    if any(k in r for k in ("verdict_one_line", "sign_scope", "evidence_tier")):
-        check("verdict_one_line 非空且≤30字",
-              isinstance(r.get("verdict_one_line"), str) and 0 < len(r.get("verdict_one_line") or "") <= 30,
-              str(r.get("verdict_one_line")))
+    # F13：三字段不再可整段跳过——一律必填；仅 --allow-legacy 显式放行无封存的历史件
+    _vl = r.get("verdict_one_line")
+    if allow_legacy and "artifact_sha256" not in r:
+        print("[WARN] legacy 报告（无 artifact_sha256）：三字段按 --allow-legacy 跳过")
+    else:
+        check("verdict_one_line 非空且≤30字（去空白后）",
+              isinstance(_vl, str) and 0 < len(_vl.strip()) <= 30, repr(_vl))
         check("sign_scope 合法",
               r.get("sign_scope") in ("approve", "no_stop", "approve_B1", "approve_B2", "other"),
               str(r.get("sign_scope")))
@@ -108,6 +111,42 @@ def main():
         except Exception as _exc:  # noqa: BLE001
             _ok_seal, _seal_why = False, f"封存校验异常: {_exc}"
         check("artifact_sha256 与内容一致", _ok_seal, _seal_why)
+        _seal = r.get("seal") or {}
+        check("seal 记人/命令", bool(_seal.get("by") or _seal.get("command")),
+              f"by={_seal.get('by')!r} command={_seal.get('command')!r}")
+
+    # F14：loop 证据合同（封存件或 real 报告必须可解析；单源不得记 A/B）
+    if "artifact_sha256" in r or require_real:
+        _loop = p.parent / "loop"
+        _evf = _loop / "evidence.jsonl"
+        if _evf.is_file():
+            _evs = []
+            for _ln in _evf.read_text(encoding="utf-8").splitlines():
+                if _ln.strip():
+                    try:
+                        _evs.append(json.loads(_ln))
+                    except Exception:  # noqa: BLE001
+                        check("loop evidence JSON 可解析", False, _ln[:80])
+            _urls = [str((e.get("source") or {}).get("url") or "") for e in _evs]
+            for _i, _u in enumerate(_urls):
+                check(f"loop evidence[{_i}] url 可解析",
+                      _u.startswith(("http://", "https://", "file://")) and ("sha256=" in _u or _u.startswith("http")),
+                      _u[:100])
+            if _urls and len(set(_urls)) == 1:
+                check("loop 单源不得记 A/B",
+                      all(e.get("grade") in ("C", "D") for e in _evs),
+                      str([e.get("grade") for e in _evs]))
+            if r.get("evidence_tier") == "inference_only":
+                check("loop inference_only 档位一致",
+                      all(e.get("data_quality_grade") == "inference_only" for e in _evs),
+                      str([e.get("data_quality_grade") for e in _evs]))
+        _cl = _loop / "closure.json"
+        if _cl.is_file():
+            try:
+                _c = json.loads(_cl.read_text(encoding="utf-8-sig"))
+                check("closure.evidence_ids 非空", bool(_c.get("evidence_ids")), str(_c.get("evidence_ids")))
+            except Exception as _exc:  # noqa: BLE001
+                check("closure.json 可解析", False, str(_exc))
 
     # F9：证据合同——单源推演不得记 measured；url 必须可解析
     _tier = r.get("evidence_tier")

@@ -3241,6 +3241,23 @@ def _tail_first_line(text, fallback):
     return fallback
 
 
+def sign_block_reason(report_doc, status_doc, body):
+    """F12：签字入口唯一判定（行为级单测直接调用）。返回拒绝原因；None=允许签字。
+
+    规则：blocked 一律拒；不可签报告仅允许 is_demo=true 且显式 allow_unverified_demo（练签）。
+    """
+    if isinstance(status_doc, dict) and str(status_doc.get("state") or "") == "blocked":
+        return (f"任务状态 blocked（{status_doc.get('step') or 'gate'}）：G2.5 不可签，"
+                "不得进入签字链；先修复并复跑门")
+    demo = isinstance(report_doc, dict) and report_doc.get("is_demo") is True
+    allow = bool((body or {}).get("allow_unverified_demo")) and demo
+    if isinstance(report_doc, dict) and not allow:
+        _vl = str(report_doc.get("verdict_one_line") or "")
+        if report_doc.get("sign_scope") == "no_stop" or "不可签" in _vl:
+            return f"报告自判不可签（verdict={_vl[:40]!r}, sign_scope=no_stop）：不得签字；先修复或人工复核"
+    return None
+
+
 def post_sign(cfg, task_id, body):
     if not isinstance(body, dict):
         body = {}
@@ -3257,11 +3274,10 @@ def post_sign(cfg, task_id, body):
     cmd = [find_python(cfg), "-B", str(tool), str(report), "--signer", signer, "--out", str(out)]
     # fixture/演示报告允许「练签」，但 core.gates 仍会拒其 finalize（is_demo 不得真实交付）
     report_doc = read_json(report) or {}
-    # F7：自判不可签的产物不得进入签字链（demo 练习须显式 allow_unverified_demo）
-    if isinstance(report_doc, dict) and not body.get("allow_unverified_demo"):
-        _vl = str(report_doc.get("verdict_one_line") or "")
-        if report_doc.get("sign_scope") == "no_stop" or "不可签" in _vl:
-            raise ApiError(409, f"报告自判不可签（verdict={_vl!r}, sign_scope=no_stop）：不得签字；先修复或人工复核")
+    status_doc = read_json(tdir / "status.json") or {}
+    _block = sign_block_reason(report_doc, status_doc, body)
+    if _block:
+        raise ApiError(409, _block)
     if isinstance(report_doc, dict) and report_doc.get("is_demo") is True:
         cmd.append("--allow-demo")
     # 顺序提示（不阻断）：securityGate 确认会回写 report.json（core/gate.py::_apply_to_report），

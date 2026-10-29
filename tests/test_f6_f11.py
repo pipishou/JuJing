@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """F6–F11 负向/正向断言（不依赖 UI 运行）。"""
 import copy
+import types
 import importlib.util
 import json
 import subprocess
@@ -36,9 +37,41 @@ r['sign_scope'] = 'no_stop'
 reasons = gates.check_finalize({'status': 'proposed', 'task_id': r.get('task_id')}, r, {'signer': 'kf41', 'report_sha256': 'x'})
 case('F7 no_stop 拒 approved', any('不可签' in x or 'no_stop' in x for x in reasons), reasons)
 
-# F7：签字入口显式拒收
-app = (ROOT / 'server/app.py').read_text(encoding='utf-8')
-case('F7 post_sign 有拦截', 'allow_unverified_demo' in app and '不得签字' in app, '')
+# F12/F7：签字入口行为级（直接调用 post_sign 用的判定函数）
+_nl = types.ModuleType('notify_lark')
+for _n in ('notify_signed', 'notify', 'send', 'notify_gate'):
+    setattr(_nl, _n, lambda *a, **k: None)
+sys.modules.setdefault('notify_lark', _nl)
+from server.app import sign_block_reason  # noqa: E402
+
+_ns = {'sign_scope': 'no_stop', 'verdict_one_line': '不可签·待人工复核：x', 'is_demo': True}
+case('F12 blocked 一律拒', sign_block_reason(_ns, {'state': 'blocked'}, {}) is not None, '')
+case('F12 不可签无旗拒', sign_block_reason(_ns, {'state': 'ready'}, {}) is not None, '')
+case('F12 非 demo 带旗仍拒',
+     sign_block_reason({**_ns, 'is_demo': False}, {'state': 'ready'}, {'allow_unverified_demo': True}) is not None, '')
+case('F12 demo 带旗允许练签',
+     sign_block_reason(_ns, {'state': 'ready'}, {'allow_unverified_demo': True}) is None, '')
+
+# F13：pack 为字符串时仍须校验 gate.action（异常不得被吞）
+_r = copy.deepcopy(base)
+_r["security_gate"] = {"status": "pending_user_confirmation", "action": "调整排班"}
+_errs = gates.real_report_errors(_r, ROOT)
+case('F13 pack=str 仍校验 gate.action',
+     any('不是 pack 不可逆动作' in e for e in _errs), _errs)
+
+# F13：validate CLI 严格三字段（不可 any() 跳过）
+_legacy = copy.deepcopy(base)
+for _f in ('verdict_one_line', 'sign_scope', 'evidence_tier', 'artifact_sha256', 'seal'):
+    _legacy.pop(_f, None)
+_lt = ROOT / 'runs' / '_f13_legacy_probe.json'
+_lt.write_text(json.dumps(_legacy, ensure_ascii=False, indent=2), encoding='utf-8')
+_p = subprocess.run([sys.executable, '-X', 'utf8', str(ROOT / 'tests/validate_report.py'), str(_lt)], capture_output=True)
+_o = (_p.stdout + _p.stderr).decode('utf-8', 'replace')
+case('F13 三字段全缺即 FAIL', _p.returncode != 0 and 'FAIL' in _o, _o[-160:])
+_p2 = subprocess.run([sys.executable, '-X', 'utf8', str(ROOT / 'tests/validate_report.py'), str(_lt), '--allow-legacy'], capture_output=True)
+_o2 = (_p2.stdout + _p2.stderr).decode('utf-8', 'replace')
+case('F13 legacy 显式放行', _p2.returncode == 0 and 'WARN' in _o2, _o2[-160:])
+_lt.unlink(missing_ok=True)
 
 # F6：UI 渲染裁决字段
 adapter = (ROOT / 'ui/api-adapter.js').read_text(encoding='utf-8')

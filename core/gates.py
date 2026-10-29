@@ -167,6 +167,20 @@ def review_errors(report):
     return ["review 卡缺少非空 observed_outcome（review.observed_outcome 或顶层 outcome.observed_outcome，T+7 实测）"]
 
 
+def _load_pack_doc(report, base):
+    """F13：pack 允许 dict（{"pack_id":...}）或 str（"manufacturing"）；解析失败 raise（fail-closed）。"""
+    p = report.get("pack")
+    pid = p.get("pack_id") if isinstance(p, dict) else (p if isinstance(p, str) else None)
+    pid = str(pid).strip() if pid else ""
+    if not pid:
+        return None
+    path = Path(base) / "packs" / pid / "pack.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"pack={pid!r} 无法加载（{exc}）") from exc
+
+
 def real_report_errors(report, base):
     """返回真实报告必须满足的判据错误列表（空=通过）。"""
     errors = []
@@ -246,12 +260,10 @@ def real_report_errors(report, base):
                 errors.append(f"recommendation[{i}].irreversibility 非法: {item.get('irreversibility')!r}")
             if item.get("irreversibility") == "irreversible":
                 # F2：不可逆标注必须与行业包动作表一致，防「挂错对象」骗过安全门
-                _pk = None
                 try:
-                    _pkid = (report.get("pack") or {}).get("pack_id")
-                    if _pkid:
-                        _pk = json.loads((Path(base) / "packs" / _pkid / "pack.json").read_text(encoding="utf-8-sig"))
-                except Exception:  # noqa: BLE001
+                    _pk = _load_pack_doc(report, base)
+                except ValueError as _exc:
+                    errors.append(f"recommendation[{i}] {_exc}")
                     _pk = None
                 if _pk is not None:
                     from .pack import is_irreversible as _is_irr
@@ -276,12 +288,10 @@ def real_report_errors(report, base):
         if not _act:
             errors.append("security_gate 缺 action：安全门必须绑定到具体不可逆动作（不得只写状态）")
         else:
-            _pk2 = None
             try:
-                _pkid2 = (report.get("pack") or {}).get("pack_id")
-                if _pkid2:
-                    _pk2 = json.loads((Path(base) / "packs" / _pkid2 / "pack.json").read_text(encoding="utf-8-sig"))
-            except Exception:  # noqa: BLE001
+                _pk2 = _load_pack_doc(report, base)
+            except ValueError as _exc2:
+                errors.append(f"security_gate {_exc2}")
                 _pk2 = None
             if _pk2 is not None:
                 from .pack import is_irreversible as _is_irr2

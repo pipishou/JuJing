@@ -410,7 +410,10 @@ def main():
         from core import artifact as _artifact
     except Exception:  # noqa: BLE001
         import artifact as _artifact
-    _artifact.seal(report, "assemble_report.py", "pipeline")
+    import os as _os
+    _artifact.seal(report, "assemble_report.py", "pipeline",
+                   by=_os.environ.get("USERNAME") or _os.environ.get("USER") or "unknown",
+                   command="assemble_report.py")
 
     try:
         atomic_write_json(args.out, report)

@@ -19,9 +19,15 @@ def compute(report):
     return hashlib.sha256(canonical(report).encode("utf-8")).hexdigest()
 
 
-def seal(report, tool, note=""):
+def seal(report, tool, note="", by=None, command=None):
     report["artifact_sha256"] = compute(report)
-    report["seal"] = {"tool": tool, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "note": note}
+    report["seal"] = {
+        "tool": tool,
+        "by": by or "",
+        "command": command or "",
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "note": note,
+    }
     return report["artifact_sha256"]
 
 

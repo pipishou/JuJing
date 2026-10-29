@@ -103,6 +103,13 @@ def main():
     refs = (report.get("decision_log_entry") or {}).get("data_refs") or []
     refs = report.get("data_refs") or refs
     findings = report.get("finding") or []
+    _ref = refs[0] if refs else None
+    _url = ("file://" + str(_ref.get("path")) + "#sha256=" + str(_ref.get("sha256"))
+            if isinstance(_ref, dict) else "file://report")
+    _shas = {str((x or {}).get("sha256") or "") for x in refs} if refs else set()
+    _single = len(_shas) <= 1
+    _grade = "C" if _single else "B"
+    _dq = "inference_only" if report.get("evidence_tier") == "inference_only" else "measured"
     evidence = []
     for fi, f in enumerate(findings):
         for ei, quote in enumerate(f.get("evidence") or []):
@@ -110,11 +117,11 @@ def main():
             evidence.append({
                 "id": eid,
                 "query": f"报告证据：{f.get('factor')}",
-                "source": {"url": f"data://{refs[0] if refs else 'report'}", "title": f.get("factor", "data evidence")},
+                "source": {"url": _url, "title": f.get("factor", "data evidence")},
                 "quote": str(quote)[:200],
                 "score": 1.0,
-                "grade": "B",
-                "data_quality_grade": "A",
+                "grade": _grade,
+                "data_quality_grade": _dq,
                 "freshness_days": 30,
                 "retrieved_at": day,
                 "stance": "supports",
@@ -189,7 +196,7 @@ def main():
         "due": decision["review_due"],
         "actual_outcome": "待回填",
         "metric_result": {"metric": decision["metric"], "expected": decision["expected_outcome"], "actual": "", "delta": ""},
-        "evidence_ids": [],
+        "evidence_ids": [e["id"] for e in evidence],
         "verdict": "unverified",
         "lessons": ["待回填"],
         "action": "keep",
