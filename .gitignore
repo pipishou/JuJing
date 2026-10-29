@@ -39,3 +39,9 @@ node_modules/
 # 系统
 Thumbs.db
 .DS_Store
+
+# LLM 通道密钥（B1）
+.env.local
+
+# 但示例文件要入库
+!.env.example
