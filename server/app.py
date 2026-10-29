@@ -3541,6 +3541,60 @@ def _since_param(query):
 # --------------------------------------------------------------------------- #
 # HTTP
 # --------------------------------------------------------------------------- #
+# ---- MVP E3：团长对话（3 轮 / 90s / 分歧即停；只给建议，不替人执行） ----
+DIALOG_ROUTE_RE = re.compile(r"^/api/dialog/([^/]+)$")
+
+
+def dialog_module():
+    return importlib.import_module("core.dialog")
+
+
+def dialog_items(cfg):
+    """把工作事项账本投影成对话上下文（读不到就是空，不阻断对话）。"""
+    try:
+        ws = import_tool(cfg, "workitems_store")
+        store = ws.load(workitems_path(cfg))
+    except Exception:  # noqa: BLE001 - 账本缺失不该让对话 500
+        return []
+    out = []
+    for it in store.get("items") or []:
+        out.append({
+            "id": it.get("id"), "title": it.get("title"), "owner": it.get("owner"),
+            "status": it.get("status"), "due": it.get("due"), "duedate": it.get("duedate") or {},
+        })
+    return out
+
+
+def dialog_post(cfg, body):
+    body = body or {}
+    message = str(body.get("message") or "").strip()
+    if not message:
+        raise ApiError(400, "message 不能为空")
+    dg = dialog_module()
+    root = Path(cfg.root)
+    dialog_id = str(body.get("dialog_id") or "").strip()
+    if dialog_id:
+        dialog = dg.load(dialog_id, root=root)
+    else:
+        dialog = dg.open_dialog(actor=str(body.get("actor") or cfg.owner), root=root)
+    return dg.turn(dialog, message, items=dialog_items(cfg), root=root)
+
+
+def dialog_get(cfg, dialog_id):
+    dg = dialog_module()
+    return dg.view(dg.load(dialog_id, root=Path(cfg.root)))
+
+
+def dialog_list(cfg):
+    dg = dialog_module()
+    rows = dg.list_dialogs(root=Path(cfg.root), limit=20)
+    return {"ok": True, "dialogs": [
+        {"dialog_id": d.get("dialog_id"), "status": d.get("status"), "rounds": d.get("rounds"),
+         "opened_at": d.get("opened_at"),
+         "last": ((d.get("messages") or [{}])[-1] or {}).get("content", "")[:120]}
+        for d in rows]}
+
+
 def route_api(cfg, method, path, query, body):
     if path == "/api/health":
         if method != "GET":
@@ -3593,6 +3647,19 @@ def route_api(cfg, method, path, query, body):
         if method != "GET":
             raise ApiError(405, "method not allowed")
         return 200, decisions_view(cfg, query)
+    if path == "/api/dialogs":
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return 200, dialog_list(cfg)
+    if path == "/api/dialog":
+        if method != "POST":
+            raise ApiError(405, "method not allowed")
+        return 200, dialog_post(cfg, body)
+    dmatch = DIALOG_ROUTE_RE.match(path)
+    if dmatch:
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return 200, dialog_get(cfg, unquote(dmatch.group(1)))
 
     match = TASK_ROUTE_RE.match(path)
     if not match:
@@ -3864,6 +3931,22 @@ class BotHandler(BaseHTTPRequestHandler):
             self.wfile.write(data)
 
 
+def port_in_use(host, port, timeout=1.5):
+    """探测端口上是否已有服务在答——Windows 上 allow_reuse_address 会让两个进程
+    同时绑同一端口，后起的静默遮蔽前者（踩过：改动不生效、事件写进别的目录）。"""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        if sock.connect_ex((host, port)) != 0:
+            return None
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f"http://{host}:{port}/api/health", timeout=timeout) as resp:
+            return f"已有一个 bot-team 服务在跑（HTTP {resp.status}）"
+    except Exception:  # noqa: BLE001 - 端口占用但不是我们的服务
+        return "端口已被其他程序占用"
+
+
 class BotHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -3899,6 +3982,10 @@ def main(argv=None):
         log(f"[warn] ui/ 不存在: {cfg.ui}")
     if not (cfg.root / "tools").is_dir():
         log("[warn] tools/ 不存在：B1 后端未落盘时 /run 会返回 503")
+    taken = port_in_use(args.host, args.port)
+    if taken:
+        log(f"拒绝启动：{args.host}:{args.port} {taken}；换 --port 8788，或先停掉旧进程")
+        return 3
     try:
         httpd = BotHTTPServer((args.host, args.port), cfg)
     except OSError as exc:
