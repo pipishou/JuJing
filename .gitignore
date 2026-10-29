@@ -37,3 +37,7 @@ bot-team/server/services/*.log
 
 # bot-team 已拆分为独立仓（2026-10-28），本仓不再跟踪
 /bot-team/
+
+# 审计过程临时件（脚本产物、会话转储）
+docs/audit/_*/
+docs/audit/_tmp_*
