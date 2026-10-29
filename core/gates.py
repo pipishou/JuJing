@@ -19,10 +19,18 @@
 只依赖 stdlib。
 """
 import json
+import re
+from pathlib import Path
 
 from . import provenance, report_contract
 
 PLACEHOLDER_TOKENS = ("demo 占位", "demo占位", "占位", "placeholder", "…", "待补充", "待核实")
+# F4（G2.5 判例 J-04/K-06）：代数占位。`2.1X`/`3Y` 这类「数字+未知量」不是正式占位词，
+# 却在报告里冒充具体数值；单靠 token 表永远漏，按形状兜住。
+_PLACEHOLDER_VALUE_RE = re.compile(r"(?<![A-Za-z0-9])\d+(?:\.\d+)?\s*[XYZ](?![A-Za-z0-9])")
+
+# F5：证据档位。real 门只收实测/混合；纯推理档（advisory 推演、模型自答）不得走 real。
+EVIDENCE_TIERS = ("measured", "mixed", "inference_only")
 
 # 零宽字符（ZWSP/ZWNJ/ZWJ/WORD JOINER/BOM/SOFT HYPHEN/MONGOLIAN VOWEL SEPARATOR）：
 # 用来伪装「占\u200b位」绕过占位检测，判据前必须先剔掉（M1 遗留硬化）
@@ -51,7 +59,9 @@ def is_placeholder_evidence(text):
     if not s:
         return True
     low = s.lower()
-    return any(tok.lower() in low for tok in PLACEHOLDER_TOKENS)
+    if any(tok.lower() in low for tok in PLACEHOLDER_TOKENS):
+        return True
+    return bool(_PLACEHOLDER_VALUE_RE.search(s))
 
 
 def _iter_strings(value):
@@ -170,6 +180,10 @@ def real_report_errors(report, base):
         kind = None
     if report.get("is_demo") is not False:
         errors.append("real 报告 is_demo 必须为 false")
+    # F5：纯推理档不得走 real 门（legacy 报告无该字段时放行，避免历史批次全红）
+    tier = report.get("evidence_tier")
+    if tier is not None and tier not in ("measured", "mixed"):
+        errors.append(f"real 报告 evidence_tier={tier!r}：纯推理/演示证据不得走 real 门（须 measured/mixed）")
     if not report.get("task_id"):
         errors.append("real 报告 task_id 不能为空")
 
@@ -185,6 +199,13 @@ def real_report_errors(report, base):
                 errors.append(f"finding[{i}] 缺 factor")
             if f.get("confidence") in (None, ""):
                 errors.append(f"finding[{i}] 缺 confidence")
+            else:
+                try:
+                    _conf = float(str(f.get("confidence")).strip())
+                except ValueError:
+                    _conf = None
+                if report.get("evidence_tier") == "inference_only" and _conf is not None and _conf > 0.40:
+                    errors.append(f"finding[{i}] confidence={_conf:.2f} 超出 inference_only 档上限 0.40（纯推理证据不得给实测级置信度）")
             ev = f.get("evidence") or []
             if not ev:
                 errors.append(f"finding[{i}] 缺证据 evidence")
@@ -223,8 +244,49 @@ def real_report_errors(report, base):
                     errors.append(f"recommendation[{i}].roi.{key} 含占位/空值: {str(roi.get(key))[:40]!r}")
             if item.get("irreversibility") not in ("reversible", "irreversible"):
                 errors.append(f"recommendation[{i}].irreversibility 非法: {item.get('irreversibility')!r}")
+            if item.get("irreversibility") == "irreversible":
+                # F2：不可逆标注必须与行业包动作表一致，防「挂错对象」骗过安全门
+                _pk = None
+                try:
+                    _pkid = (report.get("pack") or {}).get("pack_id")
+                    if _pkid:
+                        _pk = json.loads((Path(base) / "packs" / _pkid / "pack.json").read_text(encoding="utf-8-sig"))
+                except Exception:  # noqa: BLE001
+                    _pk = None
+                if _pk is not None:
+                    from .pack import is_irreversible as _is_irr
+                    if not _is_irr(_pk, item.get("action") or ""):
+                        errors.append(f"recommendation[{i}].irreversibility=irreversible 但 action 不在 pack.irreversible_actions（不可逆标注错挂）：{str(item.get('action'))[:40]!r}")
+
+    # F8：裁决三字段必填——不得靠「字段不存在」跳过整段门
+    for _k, _ok, _why in (
+        ("verdict_one_line", isinstance(report.get("verdict_one_line"), str) and 0 < len(report.get("verdict_one_line") or "") <= 30, "非空且≤30字"),
+        ("sign_scope", report.get("sign_scope") in ("approve", "no_stop", "approve_B1", "approve_B2", "other"), "枚举 approve/no_stop/…"),
+        ("evidence_tier", report.get("evidence_tier") in ("measured", "mixed", "inference_only"), "枚举 measured/mixed/inference_only"),
+    ):
+        if not _ok:
+            errors.append(f"{_k} 缺失或非法（{_why}）：交付层裁决字段不得跳过")
 
     dl = report.get("decision_log_entry") or {}
+
+    # F2（G2.5 判例 J-04）：不可逆动作必须被点名——gate 存在时 action 必须在 pack 不可逆表里
+    _sg = report.get("security_gate")
+    if isinstance(_sg, dict) and (_sg.get("status") or _sg.get("confirmed_by") or _sg.get("action")):
+        _act = str(_sg.get("action") or "").strip()
+        if not _act:
+            errors.append("security_gate 缺 action：安全门必须绑定到具体不可逆动作（不得只写状态）")
+        else:
+            _pk2 = None
+            try:
+                _pkid2 = (report.get("pack") or {}).get("pack_id")
+                if _pkid2:
+                    _pk2 = json.loads((Path(base) / "packs" / _pkid2 / "pack.json").read_text(encoding="utf-8-sig"))
+            except Exception:  # noqa: BLE001
+                _pk2 = None
+            if _pk2 is not None:
+                from .pack import is_irreversible as _is_irr2
+                if not _is_irr2(_pk2, _act):
+                    errors.append(f"security_gate.action={_act!r} 不是 pack 不可逆动作（安全门挂错对象）")
 
     # C-1：review/content 卡各自的强制面（六维只在 attribution 强制，见上）
     if kind == "content":
@@ -362,6 +424,13 @@ def check_finalize(decision, report, signature, allowlist=(), gate_confirmed=Fal
     reasons = []
     decision = decision if isinstance(decision, dict) else {}
     signature = signature if isinstance(signature, dict) else {}
+
+    # F7：自判不可签 / 无停止范围 → 不得 approved（不得靠 post_sign 绕过）
+    _vl = str(report.get("verdict_one_line") or "")
+    _ss = report.get("sign_scope")
+    _sc = report.get("scorecard") if isinstance(report.get("scorecard"), dict) else {}
+    if _ss == "no_stop" or "不可签" in _vl or _sc.get("verdict") == "force_manual_review":
+        reasons.append(f"报告自判不可签/无停止范围（sign_scope={_ss!r}, verdict={_vl!r}, scorecard={_sc.get('verdict')!r}）：不得 approved")
 
     # 1) demo 不得走真实交付
     if report.get("is_demo") is True or signature.get("is_demo") is True:

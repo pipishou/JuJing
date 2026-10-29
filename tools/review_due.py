@@ -39,6 +39,7 @@ def main():
     today = date.fromisoformat(args.today)
     root = Path(args.root)
     due = []
+    seen = set()
     for clo in root.rglob("closure.json"):
         d = clo.parent
         dec = d / "decision.json"
@@ -48,8 +49,19 @@ def main():
             c, de = readj(clo), readj(dec)
         except Exception:
             continue
+        # F11：demo 报告不进真实回看队列
+        rep = d.parent / "report.json"
+        try:
+            if rep.is_file() and readj(rep).get("is_demo") is True:
+                continue
+        except Exception:
+            pass
         if c.get("verdict") != "unverified":
             continue
+        # F11：同一决策多份 loop 只计一次
+        if de.get("id") in seen:
+            continue
+        seen.add(de.get("id"))
         try:
             due_date = date.fromisoformat(c.get("due") or "")
         except ValueError:

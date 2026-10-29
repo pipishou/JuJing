@@ -456,7 +456,9 @@
       ? '主因：' + (first.factor || '—') + '（置信 ' + (first.confidence == null ? '—' : first.confidence) + '）；cannot_attribute ' + (report.cannot_attribute || []).length + ' 条'
       : '不可归因：证据不足（cannot_attribute ' + (report.cannot_attribute || []).length + ' 条），建议先补数据'));
     beats.push(makeBeat('biz', 's4', rec.action ? rec.action : 'ROI 锚点：' + ((rec.roi && rec.roi.anchor) || '—')));
-    beats.push(makeBeat('host', 's5', '交付卡 ' + (log.id || '—') + ' · ' + (score.verdict || '待复核') + '；下一步：' + (log.expected_result || 'T+7 回看')));
+    var _v1 = report.verdict_one_line || score.verdict || '待复核';
+    var _ss = report.sign_scope ? (' · 签范围 ' + report.sign_scope) : '';
+    beats.push(makeBeat('host', 's5', _v1 + _ss + ' · 交付卡 ' + (log.id || '—') + '；下一步：' + (log.expected_result || 'T+7 回看')));
     return beats;
   }
 

@@ -341,10 +341,21 @@ def main():
         if not report_contract.is_empty(_value):
             dec_extension[_key] = _value
 
+    # F1/J-03：首屏判据——一句话裁决 + 签字范围（不可签就明确 no_stop）
+    _verdict = scorecard.get("verdict")
+    _label = {"output": "可签", "force_manual_review": "不可签·待人工复核",
+              "reference_only": "不可签·仅参考", "no_output": "不可签·待排查"}.get(_verdict, "不可签")
+    _top = (finding[0].get("factor") if finding else "本轮无法归因")
+    verdict_one_line = f"{_label}：{_top}"[:30]
+    sign_scope = "approve" if _verdict == "output" else "no_stop"
+
     report = {
         "schema": "manufacturing-ops-report/0.1",
         "generated_at": run_day.isoformat(),
         "is_demo": not real,
+        "evidence_tier": "measured" if real else "inference_only",
+        "verdict_one_line": verdict_one_line,
+        "sign_scope": sign_scope,
         "task_id": task_id,
         "goal": goal,
         "pack": {
@@ -394,6 +405,13 @@ def main():
             return fail("real 报告可信门未通过：\n  - " + "\n  - ".join(errors))
 
     # 9) 原子落盘
+    # F10/K-07：落盘前封存，手改后哈希失配（validate/finalize 拒收）
+    try:
+        from core import artifact as _artifact
+    except Exception:  # noqa: BLE001
+        import artifact as _artifact
+    _artifact.seal(report, "assemble_report.py", "pipeline")
+
     try:
         atomic_write_json(args.out, report)
     except OSError as exc:
@@ -403,6 +421,16 @@ def main():
                f"report written: {args.out} (is_demo={report['is_demo']}, total={scorecard['total']}, verdict={scorecard['verdict']})",
                kind="artifact",
                meta={"report": str(args.out), "is_demo": report["is_demo"], "total": scorecard["total"]})
+
+    # F1/J-05：不可签的产物不得停在待签状态（裁决与状态机一致）
+    _status_path = Path(args.out).parent / "status.json"
+    if _verdict != "output" and _status_path.is_file():
+        try:
+            _st = json.loads(_status_path.read_text(encoding="utf-8-sig"))
+            _st.update({"state": "blocked", "step": "blocked_g25", "updated_at": run_day.isoformat()})
+            atomic_write_json(_status_path, _st)
+        except Exception:  # noqa: BLE001 —— 状态落盘失败不阻断报告
+            pass
 
     # 10) 四卡（analysis/goal/evidence/decision）落盘
     if args.records_dir:

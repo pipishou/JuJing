@@ -86,6 +86,40 @@ def main():
             check(f"scorecard {k}", k in sc)
     elif kind is None:
         check("card_kind 合法", False, kind_error or "")
+    # F1/F5：交付层三字段（demo 报告也验；老报告无字段时跳过）
+    if any(k in r for k in ("verdict_one_line", "sign_scope", "evidence_tier")):
+        check("verdict_one_line 非空且≤30字",
+              isinstance(r.get("verdict_one_line"), str) and 0 < len(r.get("verdict_one_line") or "") <= 30,
+              str(r.get("verdict_one_line")))
+        check("sign_scope 合法",
+              r.get("sign_scope") in ("approve", "no_stop", "approve_B1", "approve_B2", "other"),
+              str(r.get("sign_scope")))
+        check("evidence_tier 合法",
+              r.get("evidence_tier") in ("measured", "mixed", "inference_only"),
+              str(r.get("evidence_tier")))
+
+    # F10/K-07：封存校验（有字段必验；real 报告必须有）
+    if "artifact_sha256" in r or (require_real and r.get("is_demo") is not True):
+        try:
+            import importlib.util as _iu
+            _spec = _iu.spec_from_file_location("artifact_mod", str(ROOT / "core" / "artifact.py"))
+            _art = _iu.module_from_spec(_spec); _spec.loader.exec_module(_art)
+            _ok_seal, _seal_why = _art.verify(r)
+        except Exception as _exc:  # noqa: BLE001
+            _ok_seal, _seal_why = False, f"封存校验异常: {_exc}"
+        check("artifact_sha256 与内容一致", _ok_seal, _seal_why)
+
+    # F9：证据合同——单源推演不得记 measured；url 必须可解析
+    _tier = r.get("evidence_tier")
+    for _i, _e in enumerate(r.get("evidence") or []):
+        if not isinstance(_e, dict):
+            continue
+        if _tier == "inference_only" and _e.get("tier") == "measured":
+            check(f"evidence[{_i}] tier 与 evidence_tier 冲突", False, "inference_only 报告不得含 measured 证据")
+        _u = _e.get("url")
+        if _u and not str(_u).startswith(("http://", "https://")):
+            check(f"evidence[{_i}] url 不可解析", False, str(_u))
+
     if require_real:
         check("real card_kind 合法", kind is not None, kind_error or "")
         # C-1：六维/total/verdict 只在 attribution 强制；非 attribution 卡给了完整
