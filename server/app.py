@@ -3623,6 +3623,14 @@ def route_api(cfg, method, path, query, body):
         if method != "GET":
             raise ApiError(405, "method not allowed")
         return 200, workitems_csv(cfg)
+    if path == "/api/reminders":
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return 200, reminders_view(cfg)
+    if path == "/api/reminders/judge":
+        if method != "POST":
+            raise ApiError(405, "method not allowed")
+        return 200, reminders_judge(cfg, body)
     if path == "/api/team":
         if method != "GET":
             raise ApiError(405, "method not allowed")
@@ -4004,6 +4012,51 @@ def main(argv=None):
     finally:
         httpd.server_close()
     return 0
+
+
+def _core(cfg, name):
+    """导入 core/<name>.py（core 是包，需把仓库根放进 sys.path）。"""
+    root = str(Path(cfg.root))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    return importlib.import_module(f"core.{name}")
+
+
+def events_path(cfg):
+    env = os.environ.get("BOT_EVENTS_FILE")
+    if env:
+        return Path(env)
+    return Path(cfg.root) / "runtime" / "events.jsonl"
+
+
+def reminders_view(cfg, *, emit=True):
+    """今日提醒：事件侧判断 + 账本到期兜底；首次读取时落 issued 事件（每日每事项一次）。"""
+    rf = _core(cfg, "reminder_feed")
+    el = _core(cfg, "eventlog")
+    path = events_path(cfg)
+    store = import_tool(cfg, "workitems_store").load(workitems_path(cfg))
+    events = el.iter_events(path)
+    feed = rf.feed(events, store)
+    if emit and feed["to_emit"]:
+        rf.emit_issued(feed["to_emit"], path=path, actor="lead")
+        events = el.iter_events(path)
+        feed = rf.feed(events, store)
+    feed["stats"] = rf.stats(events)
+    feed["events_file"] = str(path)
+    return feed
+
+
+def reminders_judge(cfg, body):
+    rf = _core(cfg, "reminder_feed")
+    item_id = str(body.get("item_id") or "").strip()
+    verdict = str(body.get("verdict") or "").strip()
+    by = str(body.get("by") or cfg.owner or "owner")
+    try:
+        ev = rf.judge(item_id, verdict, path=events_path(cfg), actor=by, note=str(body.get("note") or ""))
+    except ValueError as exc:
+        raise ApiError(400, str(exc))
+    return {"ok": True, "event": ev["event"], "item_id": item_id, "verdict": verdict, "by": by}
+
 
 
 if __name__ == "__main__":

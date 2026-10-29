@@ -207,7 +207,7 @@ def turn(
     raw = ""
     try:
         result = chat([{"role": "system", "content": prompt}] + history,
-                      temperature=0.2, timeout=call_timeout, max_tokens=900)
+                      temperature=0.2, timeout=call_timeout, max_tokens=1200)
         if isinstance(result, dict):
             raw = str(result.get("content") or result.get("text") or "")
         else:
@@ -217,6 +217,14 @@ def turn(
         raw = f"（模型通道异常：{type(exc).__name__}）"
 
     parsed = _extract_json(raw) or {}
+    if not parsed:
+        # 输出被 max_tokens 截断时整段 JSON 解析不了：至少把 reply 抢救出来，别把 JSON 原文甩给用户
+        m = re.search(r'"reply"\s*:\s*"([^"]*)"', raw, re.S)
+        if m:
+            try:
+                parsed = {"reply": json.loads('"' + m.group(1) + '"')}
+            except ValueError:
+                parsed = {"reply": m.group(1)}
     reply = (parsed.get("reply") or raw or "").strip() or "（这次没生成内容）"
     decision = parsed.get("decision") if isinstance(parsed.get("decision"), dict) else None
     unresolved = parsed.get("unresolved") if isinstance(parsed.get("unresolved"), list) else []

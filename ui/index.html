@@ -461,6 +461,46 @@
   .wi-toast.on{opacity:1;transform:none}
   .wi-toast.bad{background:#b91c1c}
   @media (max-width:1100px){#view-workitems{padding:14px 12px 50px}.wi-table td.title{min-width:150px}}
+  /* ---------- 团长对话 / 今日提醒 ---------- */
+  .view{display:none}
+  body[data-view="talk"] #view-talk{display:block}
+  #view-talk{display:none;padding:22px 26px 60px}
+  .talk-wrap{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:18px;align-items:start}
+  .talk-pane{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .talk-pane h2{font:600 14px/1.4 var(--font);margin:0 0 4px}
+  .talk-pane .sub{font-size:11px;color:var(--ink-3);margin:0 0 10px}
+  .talk-rem{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px;background:#fff}
+  .talk-rem.primary{border-left:3px solid #b45309}
+  .talk-rem-h{display:flex;gap:8px;align-items:center;justify-content:space-between}
+  .talk-rem-h b{font-size:12.5px;font-weight:600}
+  .talk-tag{font-size:10px;padding:1px 6px;border-radius:999px;background:#fef3c7;color:#92400e;white-space:nowrap}
+  .talk-rem-m{font-size:11px;color:var(--ink-3);margin:4px 0 8px;font-family:var(--mono)}
+  .talk-rem-b{display:flex;gap:6px;flex-wrap:wrap}
+  .talk-btn{font:inherit;font-size:11.5px;padding:3px 9px;border-radius:7px;border:1px solid var(--line);background:#fff;cursor:pointer;color:var(--ink-2)}
+  .talk-btn.ok{border-color:#a7f3d0;color:#047857;background:#ecfdf5}
+  .talk-btn.no{border-color:#fecaca;color:#b91c1c;background:#fef2f2}
+  .talk-btn.snooze{color:var(--ink-3)}
+  .talk-btn:disabled{opacity:.5;cursor:default}
+  .talk-rem-done{font-size:11px;color:#047857}
+  .talk-more summary{cursor:pointer;font-size:11.5px;color:var(--ink-3);padding:4px 0}
+  .talk-empty{padding:18px;text-align:center;color:var(--ink-3);font-size:12px;line-height:1.7}
+  .talk-thread{height:min(56vh,520px);overflow:auto;padding:4px 2px 8px;display:flex;flex-direction:column;gap:10px}
+  .talk-msg{max-width:86%}
+  .talk-msg.user{align-self:flex-end;text-align:right}
+  .talk-who{font-size:10px;color:var(--faint);margin-bottom:3px;font-family:var(--mono)}
+  .talk-body{display:inline-block;text-align:left;font-size:12.5px;line-height:1.75;padding:9px 12px;border-radius:10px;background:#fff;border:1px solid var(--line)}
+  .talk-msg.user .talk-body{background:#111827;color:#fff;border-color:#111827}
+  .talk-status{margin-top:6px;font-size:11px;color:#047857}
+  .talk-bar{display:flex;gap:8px;margin-top:10px}
+  .talk-bar textarea{flex:1;font:inherit;font-size:12.5px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;resize:vertical;min-height:44px;background:#fff;color:var(--ink-1)}
+  .talk-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .talk-act{font:inherit;font-size:11.5px;padding:4px 10px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer;color:var(--ink-2)}
+  .talk-act.primary{background:var(--teal);border-color:var(--teal);color:#fff}
+  .talk-toast{position:fixed;right:20px;bottom:20px;background:#111827;color:#fff;padding:9px 14px;border-radius:10px;font-size:12px;opacity:0;transform:translateY(8px);transition:.18s;z-index:99}
+  .talk-toast.on{opacity:1;transform:none}
+  .talk-toast.bad{background:#b91c1c}
+  @media (max-width:1100px){#view-talk{padding:14px 12px 50px}.talk-wrap{grid-template-columns:1fr}}
+
   #view-stage .side{display:none}
   #view-stage,#view-workbench,#view-wall{min-height:100vh}
 
@@ -558,7 +598,8 @@
       <div><b>AI 员工事务所</b><span>经营决策台 · 统一入口</span></div>
     </div>
     <nav class="rail-nav">
-      <a href="#workitems" data-view="workitems" class="on"><span class="idx">01</span>工作事项台</a>
+      <a href="#talk" data-view="talk" class="on"><span class="idx">00</span>团长对话</a>
+      <a href="#workitems" data-view="workitems"><span class="idx">01</span>工作事项台</a>
       <a href="#console" data-view="console"><span class="idx">02</span>决策台</a>
       <a href="#workbench" data-view="workbench"><span class="idx">03</span>任务工作台</a>
       <a href="#stage" data-view="stage"><span class="idx">04</span>执行舞台</a>
@@ -569,6 +610,36 @@
   <div class="workarea">
 <!-- ================= 视图 01 · B15 经营决策台（P0 / P1 / P2，场景驱动，零场景常量） ================= -->
 <!-- ================= 视图 00 · 工作事项台（唯一更新入口） ================= -->
+<section id="view-talk">
+  <div class="talk-head wi-head" style="margin-bottom:14px">
+    <div>
+      <h1>团长对话</h1>
+      <p>它先说，你点头或者驳它。每次对话最多 3 轮、90 秒内收敛，分歧时它直接给 A/B 二选一。</p>
+    </div>
+  </div>
+  <div class="talk-wrap">
+    <div class="talk-pane">
+      <h2>今日提醒</h2>
+      <p class="sub" id="talkRemsMeta">读取中…</p>
+      <div id="talkRems"><div class="talk-empty">读取中…</div></div>
+    </div>
+    <div class="talk-pane">
+      <h2>和团长说事</h2>
+      <p class="sub">回车发送，Shift+回车换行。收敛后自动开新对话。</p>
+      <div class="talk-thread" id="talkThread"></div>
+      <div class="talk-bar">
+        <textarea id="talkInput" placeholder="例：今天先干什么？/ 补料率这周又上去了，帮我看是谁的问题"></textarea>
+        <button class="talk-act primary" id="talkSend">发送</button>
+      </div>
+      <div class="talk-actions">
+        <button class="talk-act" id="talkKick">让团长先说</button>
+        <button class="talk-act" id="talkRefresh">刷新提醒</button>
+        <button class="talk-act" id="talkReset">开新对话</button>
+      </div>
+    </div>
+  </div>
+  <div class="talk-toast" id="talkToast"></div>
+</section>
 <section id="view-workitems">
   <div class="wi-head">
     <div>
@@ -1151,6 +1222,7 @@
 <script src="sprites.js"></script>
 <script src="api-adapter.js"></script>
 <script src="workbench.js?v=20261026"></script>
+<script src="talk.js?v=20261029"></script>
 <script>
   /* =========================================================================
      AI 员工事务所 · 工作台 v0.7.1（M1.5：多任务 + 事件流 + 接单 + 审批门 + 团队真数据）
@@ -2645,19 +2717,20 @@
     try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); }
   }
   /* ------------------------------------------------------------ 四视图路由（#console / #workbench / #stage / #wall） */
-  const VIEWS = ['workitems', 'console', 'workbench', 'stage', 'wall'];
+  const VIEWS = ['talk', 'workitems', 'console', 'workbench', 'stage', 'wall'];
   function viewFromHash() {
     const h = String(location.hash || '').replace(/^#/, '');
-    return VIEWS.indexOf(h) >= 0 ? h : 'workitems';
+    return VIEWS.indexOf(h) >= 0 ? h : 'talk';
   }
   function showView(name) {
-    const v = VIEWS.indexOf(name) >= 0 ? name : 'workitems';
+    const v = VIEWS.indexOf(name) >= 0 ? name : 'talk';
     document.body.dataset.view = v;
     document.querySelectorAll('.rail-nav a').forEach(function (a) {
       a.classList.toggle('on', a.getAttribute('data-view') === v);
     });
     if (v === 'console') { try { renderP0(); } catch (e) { /* 场景台静默回退 */ } }
     if (v === 'workitems') { try { wiLoad(); } catch (e) { /* 工作事项台静默回退 */ } }
+    if (v === 'talk') { try { window.TalkView && window.TalkView.mount(); } catch (e) { /* 对话视图静默回退 */ } }
     if (v === 'wall') { try { wallRefresh(); } catch (e) { /* 交付墙静默回退 */ } }
     if (v === 'workbench') { try { decorateWorkbenchDemos(); } catch (e) { /* 忽略 */ } }
   }
