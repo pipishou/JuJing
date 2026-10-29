@@ -29,13 +29,14 @@ def main():
     ap.add_argument("--note", default="")
     ap.add_argument("--tool", default="seal_report.py")
     ap.add_argument("--force", action="store_true", help="demo 报告跳过交付门")
+    ap.add_argument("--base", default=str(ROOT), help="解析 data_refs 的基准目录（默认仓根）")
     args = ap.parse_args()
     path = Path(args.report)
     report = json.loads(path.read_text(encoding="utf-8-sig"))
     from core import gates, artifact as art
     is_demo = report.get("is_demo") is True
     if not is_demo and not args.force:
-        errs = gates.real_report_errors(report, ROOT)
+        errs = gates.real_report_errors(report, Path(args.base))
         if errs:
             print("[seal] 拒绝：交付门未过：\n  - " + "\n  - ".join(errs), file=sys.stderr)
             return 1

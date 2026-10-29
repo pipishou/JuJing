@@ -68,9 +68,23 @@ def main():
         kind = None
         kind_error = str(exc)
 
+    weekly = (kind == "weekly")
+    if weekly:
+        # 周汇总卡：查周期/计数/样本口径，不套归因卡形状
+        period = r.get("period") or {}
+        metrics = r.get("metrics")
+        check("weekly period.start/end", bool(period.get("start")) and bool(period.get("end")), str(period))
+        check("weekly metrics 是对象", isinstance(metrics, dict))
+        for _k in ("reminders_issued", "judged_ok", "judged_not_ok", "items_changed", "overdue_now"):
+            check(f"weekly metrics.{_k}", isinstance((metrics or {}).get(_k), int) and (metrics or {}).get(_k) >= 0,
+                  str((metrics or {}).get(_k)))
+        _sample = int((metrics or {}).get("judged_ok") or 0) + int((metrics or {}).get("judged_not_ok") or 0)
+        _rate = (metrics or {}).get("hit_rate")
+        check("weekly hit_rate 样本门（<8 不得给数）", _rate is None or _sample >= 8, f"sample={_sample} rate={_rate}")
+
     finding = r.get("finding") or []
     check("finding 0-2 条", 0 <= len(finding) <= 2, str(len(finding)))
-    if len(finding) == 0:
+    if len(finding) == 0 and not weekly:
         check("no_finding 需 cannot_attribute 非空", isinstance(r.get("cannot_attribute"), list) and len(r["cannot_attribute"]) > 0)
     for i, f in enumerate(finding):
         check(f"finding[{i}] factor", bool(f.get("factor")))
@@ -79,7 +93,8 @@ def main():
         check(f"finding[{i}] evidence 非空", isinstance(ev, list) and len(ev) > 0)
 
     ca = r.get("cannot_attribute") or []
-    check("cannot_attribute 非空", isinstance(ca, list) and len(ca) > 0)
+    if not weekly:
+        check("cannot_attribute 非空", isinstance(ca, list) and len(ca) > 0)
 
     sc = r.get("scorecard") or {}
     if kind == "attribution":
@@ -160,7 +175,8 @@ def main():
         if _cl.is_file():
             try:
                 _c = json.loads(_cl.read_text(encoding="utf-8-sig"))
-                check("closure.evidence_ids 非空", bool(_c.get("evidence_ids")), str(_c.get("evidence_ids")))
+                if not weekly:
+                    check("closure.evidence_ids 非空", bool(_c.get("evidence_ids")), str(_c.get("evidence_ids")))
             except Exception as _exc:  # noqa: BLE001
                 check("closure.json 可解析", False, str(_exc))
 
@@ -210,7 +226,8 @@ def main():
         check("real 可信门（占位/证据/溯源/total-verdict/卡型）", not errs, "；".join(str(e) for e in errs)[:500])
 
     rec = r.get("recommendation") or []
-    check("recommendation 非空", len(rec) > 0)
+    if not weekly:
+        check("recommendation 非空", len(rec) > 0)
     irreversible = False
     for i, x in enumerate(rec):
         check(f"rec[{i}] action", bool(x.get("action")))

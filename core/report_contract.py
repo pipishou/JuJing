@@ -26,7 +26,7 @@ SIX_DIMS = ["data_completeness", "timeliness", "significance", "exclusivity",
 # C-1：交付卡三卡型。六维评分卡只对 attribution 生效；review/content 走各自
 # 强制字段（见 core.gates.content_plan_errors / review_errors）。
 # 报告顶层缺 card_kind 视为 attribution（向后兼容旧报告）；未知值一律报错不静默。
-CARD_KINDS = ("attribution", "review", "content")
+CARD_KINDS = ("attribution", "review", "content", "weekly")
 DEFAULT_CARD_KIND = "attribution"
 
 WEIGHT_EACH_DISPLAY = 16.67

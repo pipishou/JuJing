@@ -181,11 +181,81 @@ def _load_pack_doc(report, base):
         raise ValueError(f"pack={pid!r} 无法加载（{exc}）") from exc
 
 
+WEEKLY_METRIC_KEYS = ("reminders_issued", "judged_ok", "judged_not_ok", "items_changed", "overdue_now")
+
+
+def weekly_errors(report, base=None):
+    """周汇总卡（card_kind=weekly）的机器判据：周期、计数、样本口径、证据可溯源。"""
+    errors = []
+    period = report.get("period") or {}
+    start, end = str(period.get("start") or ""), str(period.get("end") or "")
+    if not start or not end:
+        errors.append("weekly 卡缺 period.start/period.end")
+    else:
+        try:
+            d1, d2 = __import__("datetime").date.fromisoformat(start[:10]), __import__("datetime").date.fromisoformat(end[:10])
+            if d2 < d1:
+                errors.append("weekly 卡 period.end 早于 period.start")
+        except ValueError:
+            errors.append("weekly 卡 period 必须是 ISO 日期")
+    metrics = report.get("metrics")
+    if not isinstance(metrics, dict):
+        errors.append("weekly 卡缺 metrics 对象")
+    else:
+        for key in WEEKLY_METRIC_KEYS:
+            if key not in metrics:
+                errors.append(f"weekly.metrics 缺 {key}")
+            elif not isinstance(metrics[key], int) or metrics[key] < 0:
+                errors.append(f"weekly.metrics.{key} 必须是非负整数")
+        rate = metrics.get("hit_rate")
+        judged = int(metrics.get("judged_ok") or 0) + int(metrics.get("judged_not_ok") or 0)
+        if rate is not None:
+            if judged < 8:
+                errors.append(f"weekly.metrics.hit_rate 在样本 <8 时不得给数（当前 {judged}）")
+            elif not (0.0 <= float(rate) <= 1.0):
+                errors.append("weekly.metrics.hit_rate 必须在 0–1 之间")
+    if not (report.get("decision_log_entry") or {}).get("actor"):
+        errors.append("weekly 卡缺 decision_log_entry.actor")
+    refs = report.get("data_refs") or []
+    if not refs:
+        errors.append("weekly 卡 data_refs 不能为空（证据必须可溯源）")
+    elif base is not None:
+        import hashlib
+        import pathlib as _p
+        root = _p.Path(base)
+        for i, ref in enumerate(refs):
+            if not isinstance(ref, dict) or not ref.get("path"):
+                errors.append(f"weekly.data_refs[{i}] 必须是 {{path, sha256}} 对象")
+                continue
+            fp = root / str(ref["path"])
+            if not fp.exists():
+                errors.append(f"weekly.data_refs[{i}] 文件不存在: {ref['path']}")
+                continue
+            if ref.get("sha256"):
+                actual = hashlib.sha256(fp.read_bytes()).hexdigest()
+                if actual != ref["sha256"]:
+                    errors.append(f"weekly.data_refs[{i}] sha256 不一致: {ref['path']}")
+    return errors
+
+
 def real_report_errors(report, base):
     """返回真实报告必须满足的判据错误列表（空=通过）。"""
     errors = []
     if not isinstance(report, dict):
         return ["report 必须是 JSON 对象"]
+    # 周汇总卡：走自己的判据，不套归因卡的 finding/cannot_attribute/ROI 形状
+    try:
+        _kind = report_contract.card_kind(report)
+    except (ValueError, AttributeError):
+        _kind = None
+    if _kind == "weekly":
+        if report.get("is_demo") is not False:
+            errors.append("real 报告 is_demo 必须为 false")
+        if not report.get("task_id"):
+            errors.append("real 报告 task_id 不能为空")
+        if not report.get("goal"):
+            errors.append("weekly 卡缺 goal")
+        return errors + weekly_errors(report, base)
     # C-1：卡型决定强制面。未知 card_kind 只报错、不静默按 attribution 处理。
     try:
         kind = report_contract.card_kind(report)

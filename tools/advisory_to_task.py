@@ -39,12 +39,14 @@ REQUIRED_ATTRIBUTION = REQUIRED + ("scorecard",)
 REQUIRED_BY_KIND = {
     "content": ("goal", "content_plan", "decision_log_entry"),
     "review": ("goal", "decision_log_entry"),
+    "weekly": ("goal", "period", "metrics", "decision_log_entry"),
 }
 DL_REQUIRED = ("context", "advice", "expected_result", "verification_plan")
 SIX = ("data_completeness", "timeliness", "significance", "exclusivity", "history", "human_ai_consistency")
 
 sys.path.insert(0, str(ROOT))
 from core import gates, ids, report_contract  # noqa: E402
+import core.report_contract as rc  # noqa: E402
 from core import pack as pack_mod  # noqa: E402
 
 
@@ -102,7 +104,8 @@ def check_input(doc: dict) -> None:
         rv_errors = gates.review_errors(doc)
         if rv_errors:
             raise BridgeError("；".join(rv_errors))
-    irreversible = [r.get("action") for r in doc["recommendation"] if r.get("irreversibility") == "irreversible"]
+    irreversible = [r.get("action") for r in (doc.get("recommendation") or [])
+                    if isinstance(r, dict) and r.get("irreversibility") == "irreversible"]
     if irreversible and not doc.get("security_gate"):
         raise BridgeError(
             "含不可逆建议但没有 security_gate（必须由人工确认后填入）：" + "；".join(str(a)[:40] for a in irreversible)
@@ -168,11 +171,12 @@ def build_report(doc: dict, task_id: str, task_dir: Path, pack: dict, refs: list
         "goal": doc["goal"],
         "pack": pack.get("pack_id") or pack.get("id") or "manufacturing",
         "roi_anchors": (pack.get("roi_anchors") or {}),
-        "finding": doc["finding"],
-        "cannot_attribute": doc["cannot_attribute"],
+        "finding": doc.get("finding") or [],
+        "cannot_attribute": doc.get("cannot_attribute") or [],
         "data_refs": refs,
-        "recommendation": doc["recommendation"],
-        "security_gate_requested": any(r.get("irreversibility") == "irreversible" for r in doc["recommendation"]),
+        "recommendation": doc.get("recommendation") or [],
+        "security_gate_requested": any(r.get("irreversibility") == "irreversible"
+                                       for r in (doc.get("recommendation") or [])),
         "decision_log_entry": decision_log,
         "role_coverage": doc.get("role_coverage") or ["karpathy", "manufacturing-ops-expert", "content-operator", "host"],
         "source": doc.get("source") or "advisory-report.v1",
@@ -180,6 +184,13 @@ def build_report(doc: dict, task_id: str, task_dir: Path, pack: dict, refs: list
     if scorecard is not None:
         report["scorecard"] = scorecard
     # C-1：content/review 卡专属强制字段原样透传（判定统一在 core.gates）
+    for _k in ("verdict_one_line", "sign_scope", "evidence_tier"):
+        if doc.get(_k) is not None:
+            report[_k] = doc[_k]
+    if kind == "weekly":
+        for key in ("period", "metrics", "weekly"):
+            if doc.get(key) is not None:
+                report[key] = doc[key]
     if kind == "content" and doc.get("content_plan") is not None:
         report["content_plan"] = doc["content_plan"]
     if kind == "review":
@@ -229,6 +240,17 @@ def write_loop(task_dir: Path, advisory_path: Path, task_id: str) -> tuple[bool,
 
 
 def selfcheck(task_dir: Path, base: Path) -> tuple[bool, str]:
+    """产出后自查。周卡此时还没签字（seal/artifact_sha256 由 sign 阶段补），
+    所以周卡只跑契约判据（gates），不跑要求封存的 M1.5 六件套。"""
+    try:
+        report = json.loads((task_dir / "report.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return False, f"report.json 不可读：{exc}"
+    if rc.card_kind(report) == "weekly":
+        errs = gates.real_report_errors(report, base)
+        if not errs:
+            return True, "RESULT: PASS（weekly 契约）"
+        return False, chr(10).join("[FAIL] " + e for e in errs[:8])
     proc = subprocess.run(
         [sys.executable, "-B", str(ROOT / "tests" / "validate_report.py"),
          str(task_dir / "report.json"), "--require-real", "--base", str(base)],
