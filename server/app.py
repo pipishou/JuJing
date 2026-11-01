@@ -10,6 +10,12 @@
     GET  /                                    302 → /ui/index.html（相对路径的同级 JS 必须在 /ui/ 下才解析得到）
     GET  /ui/<path>                           ui/ 静态资源
     GET  /api/health                          {ok, pack, version, owner, allow_signers, ...}
+    GET  /api/v1/attention/metrics            注意力基线（Slice 1，只读）：打断/票/WIP 峰值
+    GET  /api/v1/attention/today              今日最多 3 件 + WIP + 停泊 + 日报文案（Slice 2）
+    GET  /api/v1/attention/queue              完整队列（active/parked）
+    GET  /api/v1/attention/tickets            票列表；POST 开票（一问/2–3 选项/推荐/截止）
+    POST /api/v1/attention/tickets/<id>/decide|defer
+    POST /api/v1/workitems/<id>/park|resume   停泊/恢复（恢复受 WIP≤2 约束）
     GET  /api/packs                           已装行业包列表
     GET  /api/team                            core.team.load_team：employees/crews/shelf/roster/pack
     GET  /api/scenes                          场景种子（core.scene.load_seeds；未就绪回退 packs/<pack>/scenes/*.json）
@@ -86,6 +92,8 @@ TZ = timezone(timedelta(hours=8))
 VENV_PY = r"D:\work\产品类\个人产品\bot-2\venv\Scripts\python.exe"
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,95}$")
 TASK_ROUTE_RE = re.compile(r"^/api/tasks/([^/]+)(?:/([a-z][a-z-]*))?$")
+WORKITEM_ACTION_RE = re.compile(r"^/api/v1/workitems/([^/]+)/(park|resume)$")
+TICKET_ACTION_RE = re.compile(r"^/api/v1/attention/tickets/([^/]+)/(decide|defer)$")
 SIX_DIMS = ("data_completeness", "timeliness", "significance", "exclusivity", "history", "human_ai_consistency")
 DEFAULT_OWNER = "老板"
 DEFAULT_ALLOW_SIGNERS = "老板,boss"
@@ -311,6 +319,12 @@ def _workitems_mutate(cfg, body):
     by = str(body.get("by") or cfg.owner or "老板")
     if action == "add":
         store, item = ws.add_item(store, body.get("item") or body, by=by)
+        att = import_core(cfg, "attention")
+        if att.enforce_wip(item, store.get("items", []), actor=by):
+            att.append("attention_parked", {
+                "item_id": item.get("id"), "reason": "wip_full",
+                "resume_at": "", "wip_limit": att.WIP_LIMIT,
+            }, root=Path(cfg.root), actor=by)
     elif action == "update":
         item_id = str(body.get("id") or "").strip()
         if not item_id:
@@ -3488,6 +3502,15 @@ def health(cfg):
     }
 
 
+def attention_metrics(cfg, query):
+    """GET /api/v1/attention/metrics：只读基线，不写账本（Slice 1）。"""
+    days = _int_param(query, "days", 3)
+    if days < 1 or days > 90:
+        raise ApiError(400, f"非法 days={days}（必须在 1..90）")
+    module = import_core(cfg, "attention")
+    return module.metrics(root=Path(cfg.root), days=days)
+
+
 def packs(cfg):
     out = []
     packs_dir = cfg.root / "packs"
@@ -3595,7 +3618,145 @@ def dialog_list(cfg):
         for d in rows]}
 
 
+# ---------------------------------------------------------------- 注意力 Slice 2：今日 / 队列 / 停泊 / 票
+
+def _workitems(cfg):
+    return import_tool(cfg, "workitems_store")
+
+
+def _attention(cfg):
+    return import_core(cfg, "attention")
+
+
+def _tickets(cfg):
+    return import_core(cfg, "tickets")
+
+
+def _attention_user_error(exc):
+    status = 409 if "WIP" in str(exc) or "重复" in str(exc) else 400
+    return ApiError(status, str(exc))
+
+
+def attention_today(cfg, query):
+    ws = _workitems(cfg)
+    att = _attention(cfg)
+    store = ws.load(workitems_path(cfg))
+    data = att.today(store.get("items", []), limit=att.TODAY_LIMIT)
+    try:
+        data["tickets"] = _tickets(cfg).list_tickets(root=Path(cfg.root), status="open")
+    except Exception:  # noqa: BLE001 — 票模块异常不拖垮今日视图
+        data["tickets"] = []
+    return data
+
+
+def attention_queue(cfg):
+    ws = _workitems(cfg)
+    att = _attention(cfg)
+    store = ws.load(workitems_path(cfg))
+    data = att.queue(store.get("items", []))
+    try:
+        data["tickets"] = _tickets(cfg).list_tickets(root=Path(cfg.root))
+    except Exception:  # noqa: BLE001
+        data["tickets"] = []
+    return data
+
+
+def workitem_action(cfg, item_id, action, body):
+    ws = _workitems(cfg)
+    att = _attention(cfg)
+    store = ws.load(workitems_path(cfg))
+    _, item = ws.find_item(store, unquote(item_id))
+    body = body or {}
+    by = str(body.get("by") or cfg.owner or "owner")
+    if action == "park":
+        att.park(item, reason=str(body.get("reason") or "manual"),
+                 resume_at=str(body.get("resume_at") or ""), actor=by)
+        ws.save(store, workitems_path(cfg))
+        att.append("attention_parked", {
+            "item_id": item.get("id"), "reason": item["attention"].get("reason"),
+            "resume_at": item["attention"].get("resume_at"), "wip_limit": att.WIP_LIMIT,
+        }, root=Path(cfg.root), actor=by)
+    else:
+        try:
+            att.resume(item, store.get("items", []), actor=by)
+        except att.AttentionError as exc:
+            raise _attention_user_error(exc)
+        ws.save(store, workitems_path(cfg))
+        att.append("attention_resumed", {
+            "item_id": item.get("id"), "status": item.get("status"),
+        }, root=Path(cfg.root), actor=by)
+    return {"ok": True, "action": action, "item": item,
+            "wip": {"active": att.wip_count(store.get("items", [])),
+                    "limit": att.WIP_LIMIT, "slots_left": max(0, att.WIP_LIMIT - att.wip_count(store.get("items", []))) }}
+
+
+def tickets_list(cfg):
+    return {"ok": True, "tickets": _tickets(cfg).list_tickets(root=Path(cfg.root))}
+
+
+def ticket_open(cfg, body):
+    tk = _tickets(cfg)
+    body = body or {}
+    try:
+        ticket = tk.open_ticket(
+            body.get("question"), body.get("options"), body.get("recommendation"),
+            body.get("deadline"), work_item_id=str(body.get("work_item_id") or ""),
+            cost_min=body.get("cost_min") or 0,
+            actor=str(body.get("by") or cfg.owner or "owner"),
+            root=Path(cfg.root),
+        )
+    except tk.TicketError as exc:
+        raise _attention_user_error(exc)
+    return {"ok": True, "ticket": ticket}
+
+
+def ticket_action(cfg, ticket_id, action, body):
+    tk = _tickets(cfg)
+    body = body or {}
+    try:
+        if action == "decide":
+            ticket = tk.decide(unquote(ticket_id), body.get("choice"),
+                               note=str(body.get("note") or ""),
+                               root=Path(cfg.root),
+                               actor=str(body.get("by") or cfg.owner or "owner"))
+        else:
+            ticket = tk.defer(unquote(ticket_id), body.get("until"),
+                              root=Path(cfg.root),
+                              actor=str(body.get("by") or cfg.owner or "owner"))
+    except tk.TicketError as exc:
+        raise _attention_user_error(exc)
+    return {"ok": True, "action": action, "ticket": ticket}
+
+
 def route_api(cfg, method, path, query, body):
+    if path in ("/api/v1/attention/metrics", "/api/attention/metrics"):
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return 200, attention_metrics(cfg, query)
+    if path == "/api/v1/attention/today":
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return 200, attention_today(cfg, query)
+    if path == "/api/v1/attention/queue":
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return 200, attention_queue(cfg)
+    if path == "/api/v1/attention/tickets":
+        if method == "GET":
+            return 200, tickets_list(cfg)
+        if method == "POST":
+            return 201, ticket_open(cfg, body)
+        raise ApiError(405, "method not allowed")
+    wm = WORKITEM_ACTION_RE.match(path)
+    if wm:
+        if method != "POST":
+            raise ApiError(405, "method not allowed")
+        return 200, workitem_action(cfg, wm.group(1), wm.group(2), body)
+    tm = TICKET_ACTION_RE.match(path)
+    if tm:
+        if method != "POST":
+            raise ApiError(405, "method not allowed")
+        return 200, ticket_action(cfg, tm.group(1), tm.group(2), body)
     if path == "/api/health":
         if method != "GET":
             raise ApiError(405, "method not allowed")

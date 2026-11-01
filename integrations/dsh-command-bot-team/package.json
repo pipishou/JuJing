@@ -1,0 +1,11 @@
+{
+  "name": "dsh-command-bot-team",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "exports": "./index.js",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-commands": "0.2.0-rc.2"
+  }
+}

@@ -106,7 +106,8 @@ def main():
     _ref = refs[0] if refs else None
     _url = ("file://" + str(_ref.get("path")) + "#sha256=" + str(_ref.get("sha256"))
             if isinstance(_ref, dict) else "file://report")
-    _shas = {str((x or {}).get("sha256") or "") for x in refs} if refs else set()
+    _shas = {str((x.get("sha256") if isinstance(x, dict) else x) or "") for x in refs} if refs else set()
+    _shas.discard("")
     _single = len(_shas) <= 1
     _grade = "C" if _single else "B"
     _dq = "inference_only" if report.get("evidence_tier") == "inference_only" else "measured"
