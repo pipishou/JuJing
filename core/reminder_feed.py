@@ -40,6 +40,15 @@ def _today(now: _dt.datetime | None = None) -> str:
     return (now or _dt.datetime.now().astimezone()).date().isoformat()
 
 
+def _ts(now: _dt.datetime | None) -> str | None:
+    """写事件用的时间戳：注入了时钟就按注入的落，None 交给 eventlog 用墙钟。
+
+    为什么：feed() 的「当日」判定读事件 ts（`_ids_on`），如果写事件不受同一时钟
+    约束，测试无法复现「同日去重」，跨天行为也不可复演（不可测）。
+    """
+    return now.isoformat(timespec="seconds") if isinstance(now, _dt.datetime) else None
+
+
 def _parse_date(value) -> _dt.date | None:
     if isinstance(value, _dt.date) and not isinstance(value, _dt.datetime):
         return value
@@ -129,14 +138,19 @@ def feed(events: list[dict], items_doc, now: _dt.datetime | None = None) -> dict
     }
 
 
-def emit_issued(rows: list[dict], *, path=None, actor: str = "lead", dialog_id: str = "") -> list[dict]:
-    """把待发提醒写成事件（幂等交给调用方：rows 来自 feed().to_emit）。"""
+def emit_issued(rows: list[dict], *, path=None, actor: str = "lead", dialog_id: str = "",
+                now: _dt.datetime | None = None) -> list[dict]:
+    """把待发提醒写成事件（幂等交给调用方：rows 来自 feed().to_emit）。
+
+    now：注入时钟，必须与 feed(now=...) 用同一个，否则「同日已发」判定会漂移。
+    """
     written = []
     for row in rows:
         ev = eventlog.emit(
             "reminder_issued",
             actor=actor,
             dialog_id=dialog_id,
+            ts=_ts(now),
             payload={
                 "item_id": row["item_id"],
                 "kind": row.get("kind"),
@@ -152,8 +166,12 @@ def emit_issued(rows: list[dict], *, path=None, actor: str = "lead", dialog_id: 
     return written
 
 
-def judge(item_id: str, verdict: str, *, path=None, actor: str = "owner", note: str = "") -> dict:
-    """记录人对提醒的判定。verdict 非法直接抛 ValueError（fail-closed）。"""
+def judge(item_id: str, verdict: str, *, path=None, actor: str = "owner", note: str = "",
+          now: _dt.datetime | None = None) -> dict:
+    """记录人对提醒的判定。verdict 非法直接抛 ValueError（fail-closed）。
+
+    now：注入时钟（同 emit_issued），「判后当日抑制」按它落日期。
+    """
     verdict = (verdict or "").strip().lower()
     if verdict not in VERDICTS:
         raise ValueError(f"verdict 必须是 {'/'.join(VERDICTS)}（收到 {verdict!r}）")
@@ -162,6 +180,7 @@ def judge(item_id: str, verdict: str, *, path=None, actor: str = "owner", note: 
     return eventlog.emit(
         "reminder_judged",
         actor=actor,
+        ts=_ts(now),
         payload={"item_id": item_id, "verdict": verdict, "note": note},
         path=path,
     )

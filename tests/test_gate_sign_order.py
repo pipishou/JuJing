@@ -30,7 +30,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 IGNORE_COPY = shutil.ignore_patterns("runs", "__pycache__", "*.pyc", ".git", ".pytest_cache")
 SIGNER = "老板"
-WORKFLOW_RESULT = "demo-result-2026-10-19.json"
+WORKFLOW_RESULT = "workflow_result_irreversible.json"
+# 为什么不用 runs/demo-result-2026-10-19.json：录制结果里的六维评分卡是
+# 4/2/5/3/4/0（total 60 → force_manual_review → sign_scope=no_stop），按 F7/F12
+# 本来就该被 /sign 拒（不可签报告不得靠签字绕过），拿它跑顺序契约会一直撞 409。
+# 顺序契约要的是「报告本身可签（output）＋含未确认安全门」，故改用 m15 的不可逆录制结果
+# （账本 D-021/M15 夹具，评分卡 output，含 irreversible 建议 → gate pending）。
+# 「no_stop 必须拒签」由 tests/test_f6_f11.py::F12 锁，不在这里重复断。
+WORKFLOW_SRC = ROOT / "tests" / "fixtures" / "m15" / WORKFLOW_RESULT
 DEMO_FILES = ("material_refill_T.json", "material_refill_T30.json")
 
 
@@ -164,9 +171,9 @@ class Sandbox:
         self.repo = self.root / "repo"
         shutil.copytree(ROOT, self.repo, ignore=IGNORE_COPY)
         (self.repo / "runs").mkdir(parents=True, exist_ok=True)
-        src = ROOT / "runs" / WORKFLOW_RESULT
+        src = WORKFLOW_SRC
         if not src.is_file():
-            fail(f"缺少 {WORKFLOW_RESULT}（录制的 team-workflow 结果），无法构造不可逆报告")
+            fail(f"缺少 {src.relative_to(ROOT)}（录制的 team-workflow 结果），无法构造不可逆报告")
         shutil.copy2(src, self.repo / "runs" / WORKFLOW_RESULT)
 
     def cleanup(self):

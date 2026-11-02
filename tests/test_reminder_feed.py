@@ -66,7 +66,9 @@ def main() -> int:
         check("feed 是纯函数", a == b)
 
         # 4) 发事件 + 当日幂等
-        written = reminder_feed.emit_issued(f["to_emit"], path=path, actor="lead")
+        # 写事件与 feed 必须用同一个注入时钟（NOW）：否则事件落墙钟日期，
+        # 「同日」判定读到的是另一天 —— 这正是本测试要锁的跨天可复现性。
+        written = reminder_feed.emit_issued(f["to_emit"], path=path, actor="lead", now=NOW)
         check("emit_issued 写事件且带前缀", len(written) == 1 and written[0]["event"] == "bot_team_reminder_issued")
         events = eventlog.iter_events(path)
         f2 = reminder_feed.feed(events, doc, NOW)
@@ -78,14 +80,14 @@ def main() -> int:
         check("跨天后重新可发", len(f3["to_emit"]) == 1)
 
         # 6) 判定 ok / not_ok
-        reminder_feed.judge("WI-0001", "ok", path=path, actor="老板")
+        reminder_feed.judge("WI-0001", "ok", path=path, actor="老板", now=NOW)
         events = eventlog.iter_events(path)
         f4 = reminder_feed.feed(events, doc, NOW)
         check("判 ok 后当日不再发（已发过）", f4["to_emit"] == [])
         check("判 ok 不算抑制", f4["suppressed"] == [], str(f4["suppressed"]))
 
         doc2 = items(item(5, due="2026-10-25"))
-        reminder_feed.judge("WI-0005", "not_ok", path=path, actor="老板")
+        reminder_feed.judge("WI-0005", "not_ok", path=path, actor="老板", now=NOW)
         events = eventlog.iter_events(path)
         f5 = reminder_feed.feed(events, doc2, NOW)
         row5 = [r for r in f5["rows"] if r["item_id"] == "WI-0005"]
@@ -94,12 +96,12 @@ def main() -> int:
         # 7) 非法输入 fail-closed
         for bad in ("na", "", "yes"):
             try:
-                reminder_feed.judge("WI-0001", bad, path=path)
+                reminder_feed.judge("WI-0001", bad, path=path, now=NOW)
                 check(f"非法 verdict {bad!r} 被拒", False)
             except ValueError:
                 check(f"非法 verdict {bad!r} 被拒", True)
         try:
-            reminder_feed.judge("", "ok", path=path)
+            reminder_feed.judge("", "ok", path=path, now=NOW)
             check("空 item_id 被拒", False)
         except ValueError:
             check("空 item_id 被拒", True)
