@@ -16,6 +16,15 @@
 
 > 0.1 是关键：不做这一步，网页和提醒都还是旧逻辑。
 
+### 0.1 的两条路（不需要管理员也能用）
+
+| 路 | 做法 | 代价 | 状态 |
+|---|---|---|---|
+| 甲（干净） | **以管理员身份**开 PowerShell（Win+X → 终端(管理员)）→ `cd` 到 `JuJing\bot-team` → `powershell -ExecutionPolicy Bypass -File server\recover_ports.ps1 -Apply` | 一次点击 | 待你执行。普通终端会报 `ERROR -Apply requires an elevated prompt` |
+| 乙（免管理员，**已开**） | 双击/等待开机自启：`server\start_local.ps1` 在 **8790** 跑当前代码；已放入启动项 `%APPDATA%\...\Startup\bot-team-8790.cmd` | 端口是 8790，链接要改成 `http://127.0.0.1:8790/ui/index.html` | **现在可用**（实测 `/api/reminders` 返回真实提醒） |
+
+> 8787 被 pid 4176 的 **SYSTEM 孤儿 python** 占着，普通权限杀不掉，`jujing-botteam-ui` 服务状态是 `Stopped` —— 这就是必须走甲的原因。
+
 ---
 
 ## 1. 每天开机（30 秒）

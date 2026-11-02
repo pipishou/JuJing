@@ -64,8 +64,8 @@ function Get-PortOwner([int]$port) {
     return [pscustomobject]@{ Port = $port; Pid = $proc.Id; Name = $proc.ProcessName; Safe = $safe }
 }
 
-function Test-Health([int]$port) {
-    for ($i = 0; $i -lt 20; $i++) {
+function Test-Health([int]$port, [int]$tries = 20) {
+    for ($i = 0; $i -lt $tries; $i++) {
         try {
             $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 -Uri ("http://127.0.0.1:{0}/api/health" -f $port)
             if ($r.StatusCode -eq 200) { return $true }
@@ -141,7 +141,9 @@ foreach ($svc in $services) {
 }
 
 $health = @{}
-foreach ($p in $Ports) { $health[$p] = Test-Health $p }
+# 8088 要等 octop 起 agent（实测 ~30-60s），8787 也要 ~50s；窗口给足，避免误报 FAIL
+$triesByPort = @{ 8787 = 150; 8088 = 200 }
+foreach ($p in $Ports) { $t = if ($triesByPort.ContainsKey($p)) { $triesByPort[$p] } else { 20 }; $health[$p] = Test-Health $p $t }
 
 $ok = -not ($health.Values -contains $false)
 foreach ($p in $Ports) {
