@@ -516,11 +516,19 @@ def case_gates_hardening():
     task = "T-20261019-CORE-01"
     sig = {"signer": "老板", "report_sha256": "abc123", "task_id": task}
     # F13/F18：finalize 会用 report.pack 解析不可逆动作表，缺了即 fail-closed
-    base_report = {"task_id": task, "is_demo": False, "_sha256": "abc123", "pack": "manufacturing"}
+    # 可签报告必须带评分卡且档位为 output（F7 白名单，2026-11-02 起 fail-closed）
+    base_report = {"task_id": task, "is_demo": False, "_sha256": "abc123", "pack": "manufacturing",
+                   "scorecard": {"verdict": "output", "total": 86.67}}
     dec = {"status": "proposed", "task_id": task}
     check("合法链 check_finalize 空 reasons",
           gates.check_finalize(dec, dict(base_report), sig, allowlist=["老板"]) == [],
           gates.check_finalize(dec, dict(base_report), sig, allowlist=["老板"]))
+    for _bad in ("force_manual_review", "reference_only", "no_output", "", None):
+        _r = dict(base_report)
+        _r["scorecard"] = {"verdict": _bad}
+        _rr = gates.check_finalize(dec, _r, sig, allowlist=["老板"])
+        check(f"档位 {_bad!r} 不可签（F7 白名单）",
+              any("不得 approved" in x for x in _rr), _rr)
     r = gates.check_finalize(dec, dict(base_report), sig, allowlist=())
     check("空 allowlist → fail closed",
           any("allowlist 为空" in x for x in r) and any("fail closed" in x for x in r), r)

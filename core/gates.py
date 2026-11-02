@@ -500,6 +500,15 @@ def report_claims_security_gate(report):
     return False
 
 
+SIGNABLE_VERDICTS = ("output",)
+
+
+def signable_verdict(verdict) -> bool:
+    """评分卡档位是否允许签字定案（未知/缺失一律不可签，fail-closed）。"""
+    return str(verdict or "").strip() in SIGNABLE_VERDICTS
+
+
+
 def check_finalize(decision, report, signature, allowlist=(), gate_confirmed=False, base=None):
     """签字收口门：返回拒绝原因列表；空列表=可 approved。"""
     # 0) 形状校验优先：畸形结构直接 fail-closed，不进入任何字段判定（task-13）
@@ -527,11 +536,14 @@ def check_finalize(decision, report, signature, allowlist=(), gate_confirmed=Fal
                 if _act and not _is_irr3(_pk, _act):
                     reasons.append(f"security_gate.action={_act!r} is not a pack irreversible action (finalize rejected)")
 
-    # F7：自判不可签 / 无停止范围 → 不得 approved（不得靠 post_sign 绕过）
+    # 可签字的评分卡档位：只有 output（≥80 且无硬护栏）才允许走 approved。
+# 历史缺陷（2026-11-02 实测）：原判定只拦 force_manual_review，于是
+# no_output(33.33)/reference_only(43.33) 反而能 approved，而 60–79 被拒——门是反的。
+# F7：自判不可签 / 无停止范围 → 不得 approved（不得靠 post_sign 绕过）
     _vl = str(report.get("verdict_one_line") or "")
     _ss = report.get("sign_scope")
     _sc = report.get("scorecard") if isinstance(report.get("scorecard"), dict) else {}
-    if _ss == "no_stop" or "不可签" in _vl or _sc.get("verdict") == "force_manual_review":
+    if _ss == "no_stop" or "不可签" in _vl or not signable_verdict(_sc.get("verdict")):
         reasons.append(f"报告自判不可签/无停止范围（sign_scope={_ss!r}, verdict={_vl!r}, scorecard={_sc.get('verdict')!r}）：不得 approved")
 
     # 1) demo 不得走真实交付
