@@ -49,6 +49,7 @@
 | `GET /api/tasks/<id>/events?since=<n>`（`&stream=1` 为 SSE） | 事件增量 `{seq,ts,phase,role,agent,kind,line}`；SSE 断线按 `since` 续传，不重不丢 |
 | `POST /api/tasks/<id>/gate` | 审批门 `confirm`/`reject`（confirmer 须在 allow_signers）；写 `runs/<id>/gate.json`（`history` append-only）＋审计事件（`run.log`，kind=status/phase=gate） |
 | `POST /api/tasks/<id>/sign` · `POST /api/tasks/<id>/finalize` | 签字（`tools/sign_delivery.py` → sha256）与收口；无 gate 事实源 / 已被 reject / 伪造 gate.json 一律 409 |
+| `POST /api/tasks/<id>/review` | 人工复核（甲方案：**只放行、不改分**）。body `reviewed_by`/`reason`(≥10字)/`decisions`[{`finding_id`¦`recommendation_id`,`verdict`:accept¦reject¦modify,`note`}]；reviewed_by 须在 allow_signers；写 `runs/<id>/review.json`（`schema=review.v1`，钉 `report_sha256`，`history` append-only ≤20，原样保留 `original_verdict`）。报告档位非 `output` 时，`/sign` 与 `finalize` 凭它放行；`no_output`(<40) 与实测 `total`<40 一律不放行。复核**不改** report.json 字节/分数/`sign_scope`；securityGate confirm 会回写报告字节，故复核应在 confirm 之后做（报告一变旧复核即失效，需重做） |
 
 启动（在仓库根目录执行；**需 Python 3.12+**（PEP 701 f-string），系统 3.11 会 SyntaxError；解释器不写死到某台机器，`BOT_PY` 可指定，缺省按 venv → 当前解释器回退）：
 

@@ -34,12 +34,14 @@
     POST /api/tasks/<id>/data                 multipart/JSON 上传表格转 T/T30，或 {files:[...]} 追加数据文件
     POST /api/tasks/<id>/run                  body {runner:"fixture"|"external"|"dsh"}，立即 202
     POST /api/tasks/<id>/gate                 body {action:"confirm"|"reject",confirmer,comment}
+    POST /api/tasks/<id>/review               body {reviewed_by,reason,decisions[]} -> runs/<id>/review.json
+                                             （人工复核：只放行、不改分；报告需已 assembled）
     POST /api/tasks/<id>/sign                 body {signer} -> tools/sign_delivery.py -> {sha256,signer}
     POST /api/tasks/<id>/finalize             tools/finalize_delivery.py，不通过 409 + 原因
 
 身份与 runner（M1.5 spec §2.5/§2.7）：
-- `--owner`（默认 "老板"）、`--allow-signers`（默认 "老板,boss"）；/sign、/gate、/finalize 的
-  signer/confirmer 必须在白名单（不读环境变量兜底），响应均带 identity。
+- `--owner`（默认 "老板"）、`--allow-signers`（默认 "老板,boss"）；/sign、/gate、/finalize、/review 的
+  signer/confirmer/reviewed_by 必须在白名单（不读环境变量兜底），响应均带 identity。
 - runner=fixture（默认）：把 runs/demo-result-2026-10-19.json 复制成 outdir/result.json 再调
   run_task --demo，报告必须 is_demo=true，禁止冒充真实；external：等 outdir/result.json 出现
   （最长 600s）后跑真实链路；dsh：501（M2 实现）。
@@ -3255,10 +3257,38 @@ def _tail_first_line(text, fallback):
     return fallback
 
 
-def sign_block_reason(report_doc, status_doc, body):
+def _gates_module():
+    """core.gates 延迟导入：server 以脚本启动时仓库根尚未进 sys.path（Config 初始化后才进）。"""
+    from core import gates as _gates  # noqa: PLC0415 - 延迟导入避加载期 sys.path 竞态
+    return _gates
+
+
+def _review_block_detail(report_doc, review, allowlist, report_sha256):
+    """签字入口的复核判据（甲方案）：返回放行失败的具体原因；None=复核有效可放行。
+
+    与 core.gates.review_errors 同一套判据（单一事实源）。签字时还没有 signature.json，
+    但 sign_delivery 会把当前报告字节的 sha256 写进签名，因此这里用「当前报告 sha256」
+    作为等价签名指纹——复核钉在同一份报告字节上，签完自然与 signature.report_sha256 相等。
+    """
+    try:
+        gates_mod = _gates_module()
+    except Exception as exc:  # noqa: BLE001 - 复核不可用时 fail-closed
+        return f"core.gates 不可用，无法校验人工复核：{exc}"
+    _sc = report_doc.get("scorecard") if isinstance(report_doc.get("scorecard"), dict) else {}
+    if gates_mod.signable_verdict(_sc.get("verdict")):
+        return ("报告档位本身可签（output）却自判 no_stop/不可签："
+                "复核只放行非 output 档，不能豁免可签档的 no_stop；请先修复报告自判")
+    problems = gates_mod.review_errors(report_doc, {"report_sha256": str(report_sha256 or "")},
+                                       review, allowlist=allowlist)
+    return "；".join(problems) if problems else None
+
+
+def sign_block_reason(report_doc, status_doc, body, review=None, allowlist=(), report_sha256=""):
     """F12：签字入口唯一判定（行为级单测直接调用）。返回拒绝原因；None=允许签字。
 
-    规则：blocked 一律拒；不可签报告仅允许 is_demo=true 且显式 allow_unverified_demo（练签）。
+    规则：blocked 一律拒；不可签报告仅允许
+      (a) is_demo=true 且显式 allow_unverified_demo（练签），或
+      (b) 持有钉住当前报告 sha256 的人工复核记录（甲方案：复核只放行、不改分）。
     """
     if isinstance(status_doc, dict) and str(status_doc.get("state") or "") == "blocked":
         return (f"任务状态 blocked（{status_doc.get('step') or 'gate'}）：G2.5 不可签，"
@@ -3268,8 +3298,83 @@ def sign_block_reason(report_doc, status_doc, body):
     if isinstance(report_doc, dict) and not allow:
         _vl = str(report_doc.get("verdict_one_line") or "")
         if report_doc.get("sign_scope") == "no_stop" or "不可签" in _vl:
-            return f"报告自判不可签（verdict={_vl[:40]!r}, sign_scope=no_stop）：不得签字；先修复或人工复核"
+            _detail = _review_block_detail(report_doc, review, allowlist, report_sha256)
+            if _detail is None:
+                return None
+            return (f"报告自判不可签（verdict={_vl[:40]!r}, sign_scope=no_stop）："
+                    f"不得签字；{_detail}")
     return None
+
+
+def post_review(cfg, task_id, body):
+    """POST /api/tasks/<id>/review：写 runs/<id>/review.json（append-only 人工复核）。
+
+    甲方案：复核只放行、不改分——
+      - report.json 一个字节都不写（report_sha256 钉在复核时的报告字节上）；
+      - scorecard.total/verdict、sign_scope 原样保留（original_verdict 只记录）；
+      - 重复复核把旧记录追加进 history（最多 20 条）；
+      - no_output（<40 分）不接受复核（写入时就拦，门里也拦）。
+    """
+    if not isinstance(body, dict):
+        body = {}
+    gates_mod = import_core(cfg, "gates")
+    tdir = task_dir(cfg, task_id)
+    report_path = tdir / "report.json"
+    if not report_path.is_file():
+        raise ApiError(409, f"report.json 不存在，无法复核（先 POST /api/tasks/{task_id}/run）")
+    status_doc = read_status(tdir)
+    state = str(status_doc.get("state") or "")
+    if state not in gates_mod.REVIEWABLE_STATES:
+        raise ApiError(409, f"任务状态 {state or '未知'}：报告未 assembled，不能复核"
+                            f"（先 POST /api/tasks/{task_id}/run 跑到 assembled）")
+    report = read_json(report_path)
+    if not isinstance(report, dict):
+        raise ApiError(409, f"report.json 不是 JSON 对象: {task_id}")
+    sc = report.get("scorecard") if isinstance(report.get("scorecard"), dict) else {}
+    verdict = str(sc.get("verdict") or "").strip()
+    if not verdict:
+        raise ApiError(409, "报告缺少 scorecard.verdict：无法记录复核原档位（先重跑评分）")
+    reviewed_by = str(body.get("reviewed_by") or "").strip()
+    require_allowed(cfg, reviewed_by, "reviewed_by")
+    reason = str(body.get("reason") or "").strip()
+    decisions = body.get("decisions")
+    report_sha = sha256_file(report_path)
+    prev = gates_mod.load_review(tdir)
+    history = []
+    if isinstance(prev, dict):
+        history = [h for h in (prev.get("history") or []) if isinstance(h, dict)]
+        history.append({key: prev.get(key) for key in (
+            "schema", "task_id", "report_sha256", "reviewed_by", "reviewed_at",
+            "reason", "decisions", "original_verdict")})
+        history = history[-gates_mod.REVIEW_MAX_HISTORY:]
+    doc = {
+        "schema": gates_mod.REVIEW_SCHEMA,
+        "task_id": str(report.get("task_id") or task_id),
+        "report_sha256": report_sha,
+        "reviewed_by": reviewed_by,
+        "reviewed_at": now_iso(),
+        "reason": reason,
+        "decisions": decisions,
+        "original_verdict": verdict,
+        "history": history,
+    }
+    problems = gates_mod.review_field_errors(doc, allowlist=cfg.allow_signers)
+    if problems:
+        raise ApiError(400, "；".join(problems))
+    review_path = tdir / gates_mod.REVIEW_FILE
+    with cfg.task_lock(task_id):
+        write_json_atomic(review_path, doc)
+    return 200, {
+        "ok": True,
+        "task_id": task_id,
+        "path": str(review_path),
+        "review_file": str(review_path),
+        "report_sha256": report_sha,
+        "original_verdict": verdict,
+        "history_len": len(history),
+        "review": doc,
+        "identity": cfg.identity(),
+    }
 
 
 def post_sign(cfg, task_id, body):
@@ -3289,9 +3394,16 @@ def post_sign(cfg, task_id, body):
     # fixture/演示报告允许「练签」，但 core.gates 仍会拒其 finalize（is_demo 不得真实交付）
     report_doc = read_json(report) or {}
     status_doc = read_json(tdir / "status.json") or {}
-    _block = sign_block_reason(report_doc, status_doc, body)
+    gates_mod = import_core(cfg, "gates")
+    # 甲方案：不可签报告持有钉住当前报告字节的合法复核记录 → 允许签字（finalize 仍按复核放行）
+    review_doc = gates_mod.load_review(tdir)
+    report_sha = sha256_file(report)
+    _block = sign_block_reason(report_doc, status_doc, body, review=review_doc,
+                               allowlist=cfg.allow_signers, report_sha256=report_sha)
     if _block:
         raise ApiError(409, _block)
+    _sc = report_doc.get("scorecard") if isinstance(report_doc.get("scorecard"), dict) else {}
+    review_applied = review_doc is not None and not gates_mod.signable_verdict(_sc.get("verdict"))
     if isinstance(report_doc, dict) and report_doc.get("is_demo") is True:
         cmd.append("--allow-demo")
     # 顺序提示（不阻断）：securityGate 确认会回写 report.json（core/gate.py::_apply_to_report），
@@ -3300,7 +3412,6 @@ def post_sign(cfg, task_id, body):
     # （A6 契约：含未确认 securityGate 的真实报告允许签字，finalize 才按 fail-closed 拒收）。
     gate_pending = False
     if isinstance(report_doc, dict) and report_doc.get("is_demo") is not True:
-        gates_mod = import_core(cfg, "gates")
         if gates_mod.report_claims_security_gate(report_doc):
             gate_doc = import_core(cfg, "gate").read(tdir) or {}
             gate_pending = str(gate_doc.get("status") or "") != "confirmed"
@@ -3330,7 +3441,10 @@ def post_sign(cfg, task_id, body):
                      signature_sha256=sha256, signed_at=sig.get("signed_at"))
     payload = {"ok": True, "sha256": sha256, "signer": sig.get("signer") or signer,
                "signed_at": sig.get("signed_at"), "path": str(out),
-               "signature_file": str(out), "identity": cfg.identity()}
+               "signature_file": str(out), "identity": cfg.identity(),
+               # 甲方案：签字是否靠人工复核放行（复核只放行、不改分）
+               "review_file": str(tdir / gates_mod.REVIEW_FILE),
+               "review_applied": bool(review_applied)}
     emit_telemetry(cfg, "sign", {"task_id": task_id,
                                  "signer": str(payload["signer"]),
                                  "signature_hash": str(sha256)[:16]})
@@ -3855,6 +3969,10 @@ def route_api(cfg, method, path, query, body):
         if method != "POST":
             raise ApiError(405, "method not allowed")
         return post_gate(cfg, task_id, body)
+    if action == "review":
+        if method != "POST":
+            raise ApiError(405, "method not allowed")
+        return post_review(cfg, task_id, body)
     if action == "delivery":
         if method != "GET":
             raise ApiError(405, "method not allowed")

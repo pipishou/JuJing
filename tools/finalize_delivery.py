@@ -25,6 +25,9 @@ M1 修复（审计 P0-1：任意签名可 approved）：
        recommendation 非 list、security_gate_requested 非 bool）→ rc=2 单行
        JSON 错误且不写 decision；AttributeError/TypeError 不得冒泡。
        已删除无法真实生效的 --allow-legacy-gate 死开关（demo 链本就无条件拒绝）
+     · 甲方案（2026-11-02）：<报告目录>/review.json 的人工复核记录在 F7 里放行
+       「非 output 档」的报告（复核只放行、不改分；no_output 最差档仍拒）。
+       复核必须钉在签名时的 report sha256 上，且不修改 report.json 任何字节。
   - 任一条不满足 → 非 0 退出且**不修改** decision.json
   - 原子写回；approval.by == 传入 signer
 
@@ -247,6 +250,9 @@ def main():
         return 2
     report = dict(report)
     report["_sha256"] = actual
+    # 甲方案（2026-11-02）：人工复核记录是 append-only 独立文件，钉死在签名时的报告 sha256 上；
+    # 复核只放行、不改分，report.json 的字节与 scorecard 一个都不动。
+    review = gates.load_review(Path(args.report).parent)
     gate_file = (Path(args.gate_file) if args.gate_file
                  else Path(args.report).parent / gate_mod.GATE_FILE)
     gate_doc = gate_mod.read_file(gate_file)
@@ -261,11 +267,13 @@ def main():
             reasons.append(_mm)
         apply_gate_view(report, gate_view)
         reasons += gates.check_finalize(dec, report, sig, allowlist=allowlist,
-                                        gate_confirmed=bool(gate_view))
+                                        gate_confirmed=bool(gate_view), review=review)
     if reasons:
         print(json.dumps({"ok": False, "status": "rejected", "reasons": reasons,
                           "gate_file": str(gate_file),
                           "gate_status": (gate_doc or {}).get("status"),
+                          "review_file": str(Path(args.report).parent / gates.REVIEW_FILE),
+                          "review_present": review is not None,
                           "decision": dec.get("id")}, ensure_ascii=False, indent=2))
         return 2
 
@@ -294,7 +302,10 @@ def main():
         fsutil.atomic_write_json(status_file, sdoc)
 
     print(json.dumps({"ok": True, "decision": dec.get("id"), "status": "approved",
-                      "signer": sig.get("signer"), "signature_sha256": actual},
+                      "signer": sig.get("signer"), "signature_sha256": actual,
+                      "review_file": str(Path(args.report).parent / gates.REVIEW_FILE),
+                      "review_applied": bool(review) and not gates.signable_verdict(
+                          (report.get("scorecard") or {}).get("verdict"))},
                      ensure_ascii=False, indent=2))
     return 0
 

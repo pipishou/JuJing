@@ -152,8 +152,11 @@ def _observed_ok(value):
     return False
 
 
-def review_errors(report):
-    """review 卡强制字段：复盘必须含非空 observed_outcome（review.* 或顶层 outcome.*）。"""
+def review_card_errors(report):
+    """review 卡强制字段：复盘必须含非空 observed_outcome（review.* 或顶层 outcome.*）。
+
+    注意：这是「回看卡」的字段契约，与人工复核放行（review_errors / review.json）不是一回事。
+    """
     observed = None
     review = report.get("review")
     if isinstance(review, dict):
@@ -377,7 +380,7 @@ def real_report_errors(report, base):
     if kind == "content":
         errors.extend(content_plan_errors(report.get("content_plan")))
     elif kind == "review":
-        errors.extend(review_errors(report))
+        errors.extend(review_card_errors(report))
 
     # data_refs 可能在顶层（§2.5）或 decision_log_entry 内（旧格式）：两处都校验，
     # 任意一处指向不存在/被篡改的文件都必须拒绝（A2）。
@@ -508,9 +511,183 @@ def signable_verdict(verdict) -> bool:
     return str(verdict or "").strip() in SIGNABLE_VERDICTS
 
 
+# --------------------------------------------------------------------------- #
+# 人工复核（甲方案：复核只放行、不改分）
+#
+# 背景（2026-11-02 实测）：终审门改成白名单后，诚实的 46.67 分（force_manual_review）
+# 永远签不了，且全仓没有人工复核入口——产品在逼用户抬分造假。
+#
+# 甲方案：复核记录 runs/<task_id>/review.json 是 append-only 独立文件，
+#   - 不修改 report.json 任何字节、不改 scorecard.total/verdict、不改 sign_scope；
+#   - 报告原档位照旧（original_verdict 只记录），放行由门判断；
+#   - 复核钉死在签名时绑定的 report sha256 上（防「复核 A、签 B」）；
+#   - no_output（<40 分，最差档）一律不接受复核放行。
+# --------------------------------------------------------------------------- #
+REVIEW_SCHEMA = "review.v1"
+REVIEW_FILE = "review.json"
+REVIEW_MAX_HISTORY = 20
+REVIEW_DECISION_VERDICTS = ("accept", "reject", "modify")
+REVIEW_REASON_MIN_CHARS = 10
+# 允许提交复核的任务状态：报告已 assembled 之后（含已签字/已收口，用于重复复核留痕）。
+REVIEWABLE_STATES = ("assembled", "awaiting_sign", "signed")
 
-def check_finalize(decision, report, signature, allowlist=(), gate_confirmed=False, base=None):
-    """签字收口门：返回拒绝原因列表；空列表=可 approved。"""
+
+def load_review(task_dir):
+    """读 <task_dir>/review.json（append-only 人工复核记录）。
+
+    缺失/不可解析/顶层非对象一律返回 None（fail-closed：没有记录就是没有放行依据）。
+    """
+    path = Path(task_dir) / REVIEW_FILE
+    if not path.is_file():
+        return None
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:  # noqa: BLE001 - 坏文件按「无复核」处理，绝不 fail-open
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _iso_with_tz(text):
+    """reviewed_at 必须是带时区的 ISO 8601（无时区=无法判断先后，拒）。"""
+    from datetime import datetime
+    try:
+        dt = datetime.fromisoformat(str(text).strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    return dt.tzinfo is not None
+
+
+def _review_decision_errors(decisions):
+    errors = []
+    if not isinstance(decisions, list) or not decisions:
+        return ["review.decisions 必须是非空 list（逐条给出 finding/recommendation 的处置）"]
+    for i, item in enumerate(decisions):
+        if not isinstance(item, dict):
+            errors.append(f"review.decisions[{i}] 必须是对象")
+            continue
+        fid = str(item.get("finding_id") or item.get("recommendation_id") or "").strip()
+        if not fid:
+            errors.append(f"review.decisions[{i}] 缺 finding_id/recommendation_id（复核必须指向具体条目）")
+        verdict = str(item.get("verdict") or "").strip()
+        if verdict not in REVIEW_DECISION_VERDICTS:
+            errors.append(f"review.decisions[{i}].verdict={verdict!r} 非法（允许 {list(REVIEW_DECISION_VERDICTS)}）")
+        if not _nonempty_text(item.get("note")):
+            errors.append(f"review.decisions[{i}].note 必须是非空字符串（处置理由）")
+    return errors
+
+
+def review_field_errors(review, allowlist=None):
+    """复核记录自身的字段契约（写入前校验 + 放行前校验共用，纯函数）。
+
+    allowlist=None 表示不做白名单判定（仅结构校验）；给出白名单（含空）即 fail-closed。
+    """
+    if not isinstance(review, dict):
+        return ["review 必须是 JSON 对象（schema=review.v1）"]
+    errors = []
+    if str(review.get("schema") or "") != REVIEW_SCHEMA:
+        errors.append(f"review.schema={review.get('schema')!r} 非法（必须是 {REVIEW_SCHEMA}）")
+    if not _nonempty_text(review.get("task_id")):
+        errors.append("review.task_id 必须是非空字符串")
+    sha = str(review.get("report_sha256") or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", sha):
+        errors.append(f"review.report_sha256 必须是 64 位小写 sha256（收到 {sha[:16]!r}）：复核必须钉死在一份具体报告上")
+    rv_by = str(review.get("reviewed_by") or "").strip()
+    if not rv_by:
+        errors.append("review.reviewed_by 必须是非空字符串（谁复核的）")
+    elif allowlist is not None:
+        allow = [str(x).strip() for x in (allowlist or ()) if str(x).strip()]
+        if not allow:
+            errors.append("未配置 reviewed_by 白名单（allowlist 为空）：复核放行 fail closed")
+        elif rv_by not in set(allow):
+            errors.append(f"review.reviewed_by={rv_by!r} 不在白名单 {allow}（复核人须与签字人白名单同源）")
+    if not _iso_with_tz(review.get("reviewed_at")):
+        errors.append("review.reviewed_at 必须是带时区的 ISO 8601（如 2026-11-02T10:00:00+08:00）")
+    reason = str(review.get("reason") or "").strip()
+    if len(reason) < REVIEW_REASON_MIN_CHARS:
+        errors.append(f"review.reason 必须写明复核理由（≥{REVIEW_REASON_MIN_CHARS} 字，收到 {len(reason)} 字）")
+    errors.extend(_review_decision_errors(review.get("decisions")))
+    if not _nonempty_text(review.get("original_verdict")):
+        errors.append("review.original_verdict 必须记录复核时的评分卡档位（只记录，不许改分）")
+    history = review.get("history")
+    if not isinstance(history, list):
+        errors.append("review.history 必须是 list（append-only，重复复核保留旧记录）")
+    elif len(history) > REVIEW_MAX_HISTORY:
+        errors.append(f"review.history 最多保留 {REVIEW_MAX_HISTORY} 条，收到 {len(history)} 条")
+    elif any(not isinstance(h, dict) for h in history):
+        errors.append("review.history 每条必须是对象")
+    return errors
+
+
+def review_errors(report, signature, review, allowlist=()):
+    """人工复核放行判据（甲方案，纯函数）。空列表=可放行；否则维持原拒绝。
+
+    仅当 scorecard.verdict 不是 output 时由 F7 调用。必须同时满足：
+      a) 存在 review.json 且 schema=review.v1（字段契约齐全）；
+      b) review.report_sha256 == signature.report_sha256（同一份报告，防「复核 A 签 B」）；
+      c) reviewed_by 在签字人白名单内（与 signer 同源）；
+      d) reason 非空且 ≥10 字、decisions 非空（逐条处置）；
+      e) verdict != no_output（<40 分最差档一律不放行）；且 scorecard.total 不得 <40
+         （防「把 <40 的报告改标成 force_manual_review」，最差档按实测总分也拒）。
+    复核只放行、不改分：本函数不写任何字段，也不碰 report。
+    """
+    errors = []
+    if not isinstance(report, dict):
+        return ["report 顶层不是 JSON 对象：无法复核放行（fail-closed）"]
+    sc = report.get("scorecard") if isinstance(report.get("scorecard"), dict) else {}
+    verdict = str(sc.get("verdict") or "").strip()
+    if verdict == "no_output":
+        return [f"scorecard.verdict=no_output（<40 分，最差档）：一律不接受人工复核放行"
+                f"（复核只放行 force_manual_review/reference_only/未知档，不支持最差档）"]
+    try:
+        total_num = float(sc.get("total"))
+    except (TypeError, ValueError):
+        total_num = None
+    if total_num is not None and total_num < 40:
+        return [f"scorecard.total={total_num:g} 低于 40 分（最差档）：一律不接受人工复核放行"
+                f"（按实测总分拦，不论 scorecard.verdict={verdict or '缺失'} 标注为何）"]
+    if review is None:
+        return [f"缺少人工复核记录 {REVIEW_FILE}（schema={REVIEW_SCHEMA}）："
+                f"verdict={verdict or '缺失'} 不可签，需人工复核放行（复核只放行、不改分）"]
+    errors.extend(review_field_errors(review, allowlist=allowlist))
+    # 结构错误已能保证下面字段类型可用；仍用防御式取值，绝不让 AttributeError 冒泡
+    if not isinstance(review, dict):
+        return errors or ["review 必须是 JSON 对象"]
+    sig_sha = ""
+    if isinstance(signature, dict):
+        sig_sha = str(signature.get("report_sha256") or "").strip()
+    review_sha = str(review.get("report_sha256") or "").strip()
+    if not sig_sha:
+        errors.append("签名缺少 report_sha256：复核无法钉到具体报告（fail-closed）")
+    elif review_sha and review_sha != sig_sha:
+        errors.append(f"复核绑定的报告 sha256 与签名不一致（复核 {review_sha[:16]}… / 签名 {sig_sha[:16]}…）："
+                      "疑似「复核 A 签 B」，不放行；请对当前报告重新复核")
+    report_sha = str(report.get("_sha256") or "").strip()
+    if review_sha and report_sha and review_sha != report_sha:
+        errors.append(f"复核绑定的报告 sha256 与当前报告不一致（复核 {review_sha[:16]}… / 报告 {report_sha[:16]}…）："
+                      "报告已变，需重新复核")
+    if not verdict:
+        errors.append("报告缺少 scorecard.verdict：人工复核无法钉住档位（fail-closed）")
+    rv_task = str(review.get("task_id") or "").strip()
+    report_task = str(report.get("task_id") or "").strip()
+    if rv_task and report_task and rv_task != report_task:
+        errors.append(f"复核 task_id={rv_task!r} 与报告 task_id={report_task!r} 不一致（跨任务复核）")
+    original = str(review.get("original_verdict") or "").strip()
+    if verdict and original != verdict:
+        errors.append(f"复核记录原档位={original!r} 与当前 scorecard.verdict={verdict!r} 不一致："
+                      "报告档位已变，旧复核失效（需重新复核）")
+    return errors
+
+
+
+
+def check_finalize(decision, report, signature, allowlist=(), gate_confirmed=False, base=None,
+                   review=None):
+    """签字收口门：返回拒绝原因列表；空列表=可 approved。
+
+    review：runs/<task_id>/review.json 的人工复核记录（可由 gates.load_review 读入）。
+    甲方案：只有 scorecard.verdict 不是 output 时才查复核；复核通过则 F7 不报该项，
+    其余判据（签名/白名单/task_id/gate…）照旧。
+    """
     # 0) 形状校验优先：畸形结构直接 fail-closed，不进入任何字段判定（task-13）
     shape_errors = report_shape_errors(report)
     if shape_errors:
@@ -543,8 +720,21 @@ def check_finalize(decision, report, signature, allowlist=(), gate_confirmed=Fal
     _vl = str(report.get("verdict_one_line") or "")
     _ss = report.get("sign_scope")
     _sc = report.get("scorecard") if isinstance(report.get("scorecard"), dict) else {}
+    # 甲方案（2026-11-02）：档位不可签时先查人工复核（append-only review.json）。
+    # 复核通过 → F7 不报该项（放行只此一处，不改分、不改 sign_scope）；不通过 → 报缺什么。
+    _review_ok = False
+    _review_problems: list[str] = []
+    if not signable_verdict(_sc.get("verdict")):
+        _review_problems = review_errors(report, signature, review, allowlist=allowlist)
+        _review_ok = not _review_problems
     if _ss == "no_stop" or "不可签" in _vl or not signable_verdict(_sc.get("verdict")):
-        reasons.append(f"报告自判不可签/无停止范围（sign_scope={_ss!r}, verdict={_vl!r}, scorecard={_sc.get('verdict')!r}）：不得 approved")
+        if not _review_ok:
+            _detail = ("；".join(_review_problems) if _review_problems
+                       else f"需要人工复核记录（{REVIEW_FILE}，schema={REVIEW_SCHEMA}）")
+            reasons.append(
+                f"不可签（verdict={_sc.get('verdict')!r}, sign_scope={_ss!r}, "
+                f"verdict_one_line={_vl[:40]!r}）：不得 approved；{_detail}"
+            )
 
     # 1) demo 不得走真实交付
     if report.get("is_demo") is not False or signature.get("is_demo") is True:
