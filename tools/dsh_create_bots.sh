@@ -14,6 +14,11 @@ MEM="${BOT_MEMORY_DIR:-D:/work/产品类/个人产品/bot-2/bot-memory}"
 if [ ! -f "$DEEPSEEKBOT" ]; then echo "[FATAL] 找不到 CLI：$DEEPSEEKBOT"; exit 1; fi
 if [ ! -d "$MEM" ]; then echo "[FATAL] 找不到记忆仓：$MEM"; exit 1; fi
 
+# Tobs 的 persona 是提示词模板：只注册 provider/model 两个变量，
+# 任何 {{xxx}} 都会让整轮硬失败（botharness:persona 报 unknown prompt variable）。
+# 统一把 {{x}} 中和成【x】：保留语义，避免被当成未注册变量。
+neutralize() { sed -E 's/\{\{([^{}]{1,40})\}\}/【】/g'; }
+
 tobs() { "$NODE_BIN" "$DEEPSEEKBOT" "$@"; }
 
 LOG_DIR="$ROOT/runtime/logs"; mkdir -p "$LOG_DIR"; LOG="$LOG_DIR/create-bots-$(date +%Y%m%d-%H%M%S).log"; exec > >(tee -a "$LOG") 2>&1; echo "[log] $LOG"
@@ -35,7 +40,7 @@ make_bot() {
   if [ -n "$extra" ]; then
     { printf '%s\n\n' "$extra"; cat "$persona_file"; } | tobs "${args[@]}" --persona-stdin --core-memory "$MEM/$memory_dir/MEMORY.md"
   else
-    cat "$persona_file" | tobs "${args[@]}" --persona-stdin --core-memory "$MEM/$memory_dir/MEMORY.md"
+    cat "$persona_file" | neutralize | tobs "${args[@]}" --persona-stdin --core-memory "$MEM/$memory_dir/MEMORY.md"
   fi
   echo "[rc=$?] $name"
 }
