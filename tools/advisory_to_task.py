@@ -101,7 +101,7 @@ def check_input(doc: dict) -> None:
         if cp_errors:
             raise BridgeError("content_plan 不完整：" + "；".join(cp_errors))
     elif kind == "review":
-        rv_errors = gates.review_errors(doc)
+        rv_errors = gates.review_card_errors(doc)
         if rv_errors:
             raise BridgeError("；".join(rv_errors))
     irreversible = [r.get("action") for r in (doc.get("recommendation") or [])

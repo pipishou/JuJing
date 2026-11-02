@@ -207,7 +207,7 @@ def main():
             check("real content_plan 齐全（angle/structure/titles/channel/review_metrics/labels）",
                   not cp_errors, "；".join(cp_errors)[:300])
         elif kind == "review":
-            rv_errors = _gates.review_errors(r)
+            rv_errors = _gates.review_card_errors(r)
             check("real review.observed_outcome 非空", not rv_errors, "；".join(rv_errors)[:300])
         check("real is_demo=false", r.get("is_demo") is False)
         check("real task_id", bool(r.get("task_id")))
