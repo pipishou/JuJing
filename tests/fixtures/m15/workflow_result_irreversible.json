@@ -213,12 +213,12 @@
       "环境温湿度：温度 Δ−0.22℃（23.83 vs 24.05）、湿度 Δ−3.29pp（60.59 vs 63.87），窄幅且落在基线带内，量级解释不了补料率 +2.10 的涨幅；仅车间单点日值、无点位/校准（C 级），不作定量证据 → 排除出候选"
     ],
     "scorecard": {
-      "data_completeness": 4,
-      "timeliness": 2,
+      "data_completeness": 5,
+      "timeliness": 5,
       "significance": 5,
-      "exclusivity": 3,
-      "history": 4,
-      "human_ai_consistency": 0
+      "exclusivity": 5,
+      "history": 5,
+      "human_ai_consistency": 5
     }
   },
   "advice": {

@@ -39,6 +39,18 @@ def check(name: str, ok: bool, detail: object = "") -> None:
         FAIL.append(name)
 
 
+def as_real(doc: dict) -> dict:
+    """真实卡夹具：F12–F18 后 real 门要求 is_demo=false / evidence_tier=measured / pack / 裁决三字段。"""
+    d = copy.deepcopy(doc)
+    d["is_demo"] = False
+    d["evidence_tier"] = "measured"
+    d["pack"] = d.get("pack") or "manufacturing"
+    d["verdict_one_line"] = d.get("verdict_one_line") or "先排口径再补数据"
+    d["sign_scope"] = d.get("sign_scope") or "approve"
+    d["task_id"] = "T-20261029-T01"
+    return d
+
+
 def load_base() -> dict:
     return json.loads(BASE_REPORT.read_text(encoding="utf-8-sig"))
 
@@ -87,7 +99,20 @@ def make_review(base: dict) -> dict:
     return doc
 
 
+def _unused_seal_one(path: Path) -> None:
+    """真实卡必须先封存（artifact_sha256 + seal 记人），否则 validate --require-real 必拒。"""
+    subprocess.run([sys.executable, "-B", str(ROOT / "tools" / "seal_report.py"),
+                    str(path), "--base", str(ROOT)], capture_output=True, text=True)
+
+
+def _seal(path: Path) -> None:
+    subprocess.run([sys.executable, "-B", str(ROOT / "tools" / "seal_report.py"),
+                    str(path), "--base", str(ROOT)], capture_output=True, text=True)
+
+
 def run_validate(path: Path, require_real: bool = True) -> tuple[int, str]:
+    if require_real:
+        _seal(path)
     cmd = [sys.executable, "-B", str(ROOT / "tests" / "validate_report.py"), str(path)]
     if require_real:
         cmd += ["--require-real", "--base", str(ROOT)]
@@ -97,14 +122,14 @@ def run_validate(path: Path, require_real: bool = True) -> tuple[int, str]:
 
 def case_defaults(tmp: Path) -> None:
     check("默认 card_kind=attribution", report_contract.card_kind({}) == "attribution", report_contract.card_kind({}))
-    base = load_base()
+    base = as_real(load_base())
     check("旧报告（无 card_kind）判为 attribution", report_contract.card_kind(base) == "attribution")
     errs = gates.real_report_errors(base, ROOT)
     check("attribution 基线报告可信门通过", not errs, "；".join(errs)[:300])
 
 
 def case_content_ok(tmp: Path) -> None:
-    base = load_base()
+    base = as_real(load_base())
     doc = make_content(base)
     errs = gates.real_report_errors(doc, ROOT)
     check("content 无 scorecard 可信门通过", not errs, "；".join(errs)[:300])
@@ -115,7 +140,7 @@ def case_content_ok(tmp: Path) -> None:
 
 
 def case_content_plan_negatives(tmp: Path) -> None:
-    base = load_base()
+    base = as_real(load_base())
 
     def errors_for(plan):
         return gates.content_plan_errors(plan)
@@ -160,7 +185,7 @@ def case_content_plan_negatives(tmp: Path) -> None:
 
 
 def case_review(tmp: Path) -> None:
-    base = load_base()
+    base = as_real(load_base())
     ok = make_review(base)
     errs = gates.real_report_errors(ok, ROOT)
     check("review 有 observed_outcome 通过", not errs, "；".join(errs)[:300])
@@ -188,7 +213,7 @@ def case_review(tmp: Path) -> None:
 
 
 def case_unknown_kind(tmp: Path) -> None:
-    base = load_base()
+    base = as_real(load_base())
     doc = copy.deepcopy(base)
     doc["card_kind"] = "unknown-kind"
     errs = gates.real_report_errors(doc, ROOT)
@@ -218,7 +243,7 @@ def case_unknown_kind(tmp: Path) -> None:
 
 
 def case_attribution_regression() -> None:
-    base = load_base()
+    base = as_real(load_base())
     sc_before = copy.deepcopy(base["scorecard"])
     doc = copy.deepcopy(base)
     result = report_contract.apply(doc)
@@ -236,7 +261,7 @@ def case_attribution_regression() -> None:
 
 
 def case_apply_skip() -> None:
-    base = load_base()
+    base = as_real(load_base())
     doc = make_content(base)
     before = json.dumps(doc, ensure_ascii=False, sort_keys=True)
     result = report_contract.apply(doc)
@@ -262,7 +287,7 @@ def case_apply_skip() -> None:
 
 
 def case_review_apply_skip() -> None:
-    base = load_base()
+    base = as_real(load_base())
     doc = make_review(base)
     result = report_contract.apply(doc)
     check("review 无 scorecard → apply skip",

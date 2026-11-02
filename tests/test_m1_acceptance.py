@@ -332,6 +332,17 @@ def intake_for_create() -> dict:
     return obj
 
 
+def seal_report(repo: Path, path: Path) -> None:
+    """用产品 tools/seal_report.py 给夹具报告封存（F10/K-07：real 报告必须可验 artifact_sha256）。
+
+    --force 只跳过「封存前先跑交付门」，不跳任何后续校验：负例夹具正是要带着合法封存
+    去撞 real 门，才能证明拒绝原因是证据/溯源本身，而不是「没封存」。
+    """
+    p = tool(repo, "tools/seal_report.py", path, "--force", "--note", "acceptance fixture")
+    if p.returncode != 0:
+        test_issue(f"seal_report 封存夹具失败 rc={p.returncode}: {tail(p.out, 400)}")
+
+
 def build_real_report(repo: Path, out_rel: str, task_id: str = "T-20261019-900",
                       gate_status: str = "confirmed", signer: str = "业务负责人",
                       mutate=None) -> Path:
@@ -381,6 +392,7 @@ def build_real_report(repo: Path, out_rel: str, task_id: str = "T-20261019-900",
         # 注意：mutate 可能改结构；data_refs 语义保持上面构造的
     out = repo / out_rel
     dump_json(out, rep)
+    seal_report(repo, out)
     return out
 
 

@@ -46,6 +46,9 @@ def main():
 
     def mutate(fn):
         doc = copy.deepcopy(base)
+        # 动过内容就必须掉封存戳（否则 validate 会按 artifact_sha256 失配拒，和 ROI 判据无关）
+        for k in ("artifact_sha256", "seal", "sealed_at", "sealed_by", "seal_command"):
+            doc.pop(k, None)
         fn(doc["recommendation"][0])
         return doc
 

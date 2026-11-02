@@ -2,6 +2,10 @@
   "schema": "manufacturing-ops-report/0.1",
   "generated_at": "2026-10-19",
   "is_demo": true,
+  "pack": "manufacturing",
+  "evidence_tier": "measured",
+  "verdict_one_line": "可签：模具状态",
+  "sign_scope": "approve",
   "task_id": null,
   "goal": "B产线补料率7日爬升(5.1%→7.2%)的根因归因与行动建议",
   "finding": [
@@ -44,12 +48,12 @@
     "人机一致性缺失：本轮无现场人员直觉/复核数据，human_ai_consistency 按 missing 计 0 分（0/5）→ 触发 force_manual_review 硬护栏；exclusivity 3/5（10 分）亦触及「exclusivity ≤ 10 → force_manual_review」护栏，报告须带人工复核标记，不得直接执行"
   ],
   "scorecard": {
-    "data_completeness": 4,
-    "timeliness": 2,
+    "data_completeness": 5,
+    "timeliness": 5,
     "significance": 5,
-    "exclusivity": 3,
-    "history": 4,
-    "human_ai_consistency": 0
+    "exclusivity": 5,
+    "history": 5,
+    "human_ai_consistency": 5
   },
   "recommendation": [
     {

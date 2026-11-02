@@ -46,7 +46,7 @@
       "action": "B0 查口径 + 四维分层（机台/班次/模具/批次），固定篮子重算补料率日斜率",
       "roi": {
         "cost": "0（2 人×0.5 天）",
-        "avoided": "若属口径问题，2.1X 元/天立即归零",
+        "avoided": "若属口径问题，21000 元/天立即归零",
         "anchor": "pack.roi_anchors（无直接锚点：内部分摊人工）"
       },
       "irreversibility": "reversible"
@@ -55,7 +55,7 @@
       "action": "B1 预防保养：清排气、通水路、查加热圈（停机 0–0.5h）",
       "roi": {
         "cost": "500（锚点 maintenance）",
-        "avoided": "若为结垢/排气堵塞则 2.1X 元/天永久消除",
+        "avoided": "若为结垢/排气堵塞则 21000 元/天永久消除",
         "anchor": "pack.roi_anchors.maintenance"
       },
       "irreversibility": "reversible"
@@ -74,7 +74,8 @@
     "status": "pending_user_confirmation",
     "requested_by": "manufacturing-advisory-board",
     "requested_at": "2026-10-26",
-    "reason": "换模属不可逆动作（需停机 0.5–1h 并动用备用模），须老板确认后才能进入行动单"
+    "reason": "换模属不可逆动作（需停机 0.5–1h 并动用备用模），须老板确认后才能进入行动单",
+    "action": "mold_change"
   },
   "attribution_method": "MANUAL",
   "sources": [

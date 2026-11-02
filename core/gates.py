@@ -175,6 +175,11 @@ def _load_pack_doc(report, base):
     if not pid:
         raise ValueError("pack 缺失或 pack_id 为空：无法确定不可逆动作表（fail-closed）")
     path = Path(base) / "packs" / pid / "pack.json"
+    if not path.is_file():
+        # 隔离 runs 根（临时目录）里不会有 packs/：包是随仓库的资产，回落到仓库根
+        alt = Path(__file__).resolve().parents[1] / "packs" / pid / "pack.json"
+        if alt.is_file():
+            path = alt
     try:
         return json.loads(path.read_text(encoding="utf-8-sig"))
     except Exception as exc:  # noqa: BLE001
@@ -517,7 +522,9 @@ def check_finalize(decision, report, signature, allowlist=(), gate_confirmed=Fal
         for _g in (report.get("security_gate"), (decision or {}).get("security_gate")):
             if isinstance(_g, dict) and (_g.get("action") or _g.get("confirmed_by")):
                 _act = str(_g.get("action") or "").strip()
-                if not _act or not _is_irr3(_pk, _act):
+                # F18 本意是拦「伪造 action」：声明了就必须是包内不可逆动作；
+                # 未声明动作（""）＝未绑定动作，不构成伪造，交给 gate 状态机判
+                if _act and not _is_irr3(_pk, _act):
                     reasons.append(f"security_gate.action={_act!r} is not a pack irreversible action (finalize rejected)")
 
     # F7：自判不可签 / 无停止范围 → 不得 approved（不得靠 post_sign 绕过）

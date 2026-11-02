@@ -515,7 +515,8 @@ def case_gates_hardening():
 
     task = "T-20261019-CORE-01"
     sig = {"signer": "老板", "report_sha256": "abc123", "task_id": task}
-    base_report = {"task_id": task, "is_demo": False, "_sha256": "abc123"}
+    # F13/F18：finalize 会用 report.pack 解析不可逆动作表，缺了即 fail-closed
+    base_report = {"task_id": task, "is_demo": False, "_sha256": "abc123", "pack": "manufacturing"}
     dec = {"status": "proposed", "task_id": task}
     check("合法链 check_finalize 空 reasons",
           gates.check_finalize(dec, dict(base_report), sig, allowlist=["老板"]) == [],
@@ -541,7 +542,8 @@ def case_gates_hardening():
     r = gates.check_finalize(dec, gate_report, sig, allowlist=["老板"])
     check("securityGate pending 且无外部确认 → 拒绝且原因含 securityGate",
           any("securityGate" in x for x in r) and any("gate.json" in x for x in r), r)
-    gate_report["decision_log_entry"] = {"security_gate": {"status": "confirmed", "confirmed_by": "老板"}}
+    gate_report["decision_log_entry"] = {"security_gate": {
+        "status": "confirmed", "confirmed_by": "老板", "action": "mold_change"}}
     r = gates.check_finalize(dec, gate_report, sig, allowlist=["老板"])
     check("报告自报 confirmed+confirmed_by 不再放行（task-12）",
           any("gate.json" in x for x in r), r)
@@ -626,10 +628,24 @@ def build_real_report(tmp):
     r = json.loads(json.dumps(demo))
     r["is_demo"] = False
     r["task_id"] = task
+    # F12-F18 契约新增字段：合法夹具必须带齐，否则 finalize/validate 会按 fail-closed 拒
+    r["pack"] = "manufacturing"
+    r["verdict_one_line"] = "先排口径再补数据"
+    r["sign_scope"] = "approve"
+    r["evidence_tier"] = "measured"
     r["finding"] = [{"factor": "模具磨损", "confidence": 0.72,
                      "evidence": ["换模记录与补料率爬升同步（现场核实）"]}]
     r["cannot_attribute"] = ["信息员换班带来的口径变化未完全排除"]
-    score = {d: {"score": 4, "evidence": "37 天逐日数据齐全，缺 1 天已标注"} for d in SIX}
+    # 可签的干净夹具＝评分卡达到 output 档（≥80），否则 force_manual_review 依 F7 不得 approved
+    _ev = {
+        "data_completeness": "37 天逐日数据齐全，缺 1 天已标注",
+        "timeliness": "当日 09:10 采集，T+0 可用",
+        "significance": "补料率 7 日均值 5.1%→7.2%，超噪声 3σ",
+        "exclusivity": "换模记录早于异常 1 天，且同线无其他变更",
+        "history": "同类事件 3 次，均有换模记录",
+        "human_ai_consistency": "班组长独立判断一致（无人参与则为 0）",
+    }
+    score = {d: {"score": 5, "evidence": _ev[d]} for d in SIX}
     computed = report_contract.compute(score)
     score.update({"total": computed["total"], "verdict": computed["verdict"],
                   "label": computed["label"]})
@@ -866,8 +882,12 @@ def case_validate_report_dual(tmp):
         dump(p, rep)
         return run([PY, "-B", str(ROOT / "tests" / "validate_report.py"), str(p), "--require-real"])
 
-    rc, out = validate(base, "ok")
-    check("干净真实报告 validate PASS", rc == 0 and "RESULT: PASS" in out, (rc, out[-500:]))
+    sealed = vr / "ok-sealed.json"
+    dump(sealed, base)
+    seal = run([PY, "-B", str(ROOT / "tools" / "seal_report.py"), str(sealed), "--base", str(ROOT)])
+    rc, out = run([PY, "-B", str(ROOT / "tests" / "validate_report.py"), str(sealed), "--require-real"])
+    check("干净真实报告 validate PASS",
+          rc == 0 and "RESULT: PASS" in out, (seal[0], rc, (out or "")[-400:]))
 
     top_demo = json.loads(json.dumps(base))
     top_demo["data_refs"] = demo_refs

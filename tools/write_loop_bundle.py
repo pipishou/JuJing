@@ -15,12 +15,22 @@ M1 修复：
 import argparse
 import json
 import re
+import hashlib
 import shutil
 import sys
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -104,12 +114,20 @@ def main():
     refs = report.get("data_refs") or refs
     findings = report.get("finding") or []
     _ref = refs[0] if refs else None
-    _url = ("file://" + str(_ref.get("path")) + "#sha256=" + str(_ref.get("sha256"))
-            if isinstance(_ref, dict) else "file://report")
-    _shas = {str((x.get("sha256") if isinstance(x, dict) else x) or "") for x in refs} if refs else set()
-    _shas.discard("")
-    _single = len(_shas) <= 1
-    _grade = "C" if _single else "B"
+    if isinstance(_ref, dict) and _ref.get("sha256"):
+        _url = "file://" + str(_ref.get("path")) + "#sha256=" + str(_ref.get("sha256"))
+    else:
+        # 兼容裸路径 refs：能读到文件就现算 sha，读不到才退回无源占位
+        _path = str(_ref if not isinstance(_ref, dict) else (_ref or {}).get("path") or "")
+        _abs = None
+        if _path:
+            for _cand in (outdir.parent / _path, Path(ROOT) / _path):
+                if _cand.is_file():
+                    _abs = _cand
+                    break
+        _url = ("file://" + _path + "#sha256=" + _sha256_file(_abs)) if _abs else "file://report"
+    # 四卡只挂单一来源：单源最高只能记 C（多源才配 B），不再用 ref 的 sha 差异谎报 B
+    _grade = "C"
     _dq = "inference_only" if report.get("evidence_tier") == "inference_only" else "measured"
     evidence = []
     for fi, f in enumerate(findings):

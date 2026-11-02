@@ -106,6 +106,9 @@ def check_input(doc: dict) -> None:
             raise BridgeError("；".join(rv_errors))
     irreversible = [r.get("action") for r in (doc.get("recommendation") or [])
                     if isinstance(r, dict) and r.get("irreversibility") == "irreversible"]
+    _gate = doc.get("security_gate") or {}
+    if irreversible and _gate and not str(_gate.get("action") or "").strip():
+        errs.append("security_gate 缺 action：不可逆建议必须绑定到具体不可逆动作（不得只写状态）")
     if irreversible and not doc.get("security_gate"):
         raise BridgeError(
             "含不可逆建议但没有 security_gate（必须由人工确认后填入）：" + "；".join(str(a)[:40] for a in irreversible)
@@ -187,6 +190,16 @@ def build_report(doc: dict, task_id: str, task_dir: Path, pack: dict, refs: list
     for _k in ("verdict_one_line", "sign_scope", "evidence_tier"):
         if doc.get(_k) is not None:
             report[_k] = doc[_k]
+    # F12–F18：交付层裁决三字段不得缺，归因卡按建议与不可逆性推导默认值
+    _recs = doc.get("recommendation") or []
+    if report.get("verdict_one_line") is None:
+        _first = (_recs[0].get("action") if _recs else "") or doc.get("goal") or "先补数据再定论"
+        report["verdict_one_line"] = str(_first)[:30]
+    if report.get("sign_scope") is None:
+        report["sign_scope"] = "no_stop" if any(
+            r.get("irreversibility") == "irreversible" for r in _recs) else "approve"
+    if report.get("evidence_tier") is None:
+        report["evidence_tier"] = "measured"
     if kind == "weekly":
         for key in ("period", "metrics", "weekly"):
             if doc.get(key) is not None:
@@ -210,6 +223,15 @@ def write_outputs(task_dir: Path, report: dict, task_id: str) -> None:
     tmp = target.with_name("report.json.tmp")
     tmp.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, target)
+    # F12–F18：产出即封存（artifact_sha256 + seal 记人），否则 validate --require-real 视为手改件
+    try:
+        import subprocess as _sp
+        import sys as _sys
+        _sp.run([_sys.executable, "-B", str(ROOT / "tools" / "seal_report.py"),
+                 str(target), "--base", str(ROOT), "--force"],
+                capture_output=True, timeout=120)
+    except Exception:  # noqa: BLE001 —— 封存失败不阻断写盘，交给 selfcheck 报红
+        pass
     status_path = task_dir / "status.json"
     status = {}
     if status_path.is_file():

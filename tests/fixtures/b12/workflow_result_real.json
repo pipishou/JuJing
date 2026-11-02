@@ -39,10 +39,10 @@
       {"factor": "换模", "reason": "T 窗口无换模记录"}
     ],
     "scorecard": {
-      "data_completeness": 4,
+      "data_completeness": 5,
       "timeliness": 4,
       "significance": 5,
-      "exclusivity": 3,
+      "exclusivity": 4,
       "history": 4,
       "human_ai_consistency": 4
     }

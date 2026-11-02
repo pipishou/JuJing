@@ -101,13 +101,18 @@ def _apply_to_report(tdir, report, doc):
         "confirmed_at": doc.get("confirmed_at"),
         "comment": doc.get("comment") or "",
     }
-    # 保留被确认的动作：确认不得清空 report 里声明的不可逆动作（否则 F28 无对象可对账）；
-    # 值为空时不写该键，避免被 shape 门误判成「声明了一个空动作」。
-    _confirmed_action = str(doc.get("action")
-                            or ((report.get("security_gate") or {}).get("action") if isinstance(report.get("security_gate"), dict) else "")
-                            or "").strip()
-    if _confirmed_action:
-        gate_view["action"] = _confirmed_action
+    # 报告里声明的「要执行的动作」**不被确认覆盖**：确认只改状态与人，不改动作。
+    # 否则 F28 两侧同源（都等于确认值），只能抓手改 gate.json，抓不到「确认 A、执行 B」。
+    # 人工确认的动作存 confirmed_action，供对账与审计追溯。
+    _declared = ""
+    _top_report = report.get("security_gate")
+    if isinstance(_top_report, dict):
+        _declared = str(_top_report.get("action") or "").strip()
+    _confirmed = str(doc.get("action") or "").strip()
+    if _confirmed:
+        gate_view["confirmed_action"] = _confirmed
+    if _declared:
+        gate_view["action"] = _declared
     requested_at = None
     old_top = report.get("security_gate")
     if isinstance(old_top, dict):
@@ -140,16 +145,23 @@ def _write_gate(tdir, old, entry, status, confirmer, comment, task_id, requested
         "comment": str(comment or ""),
         "requested_at": requested_at,
         "updated_at": now,
-        # 被确认的业务动作（历史缺陷：gate.json 从不记动作，导致 F28 永远无法对账）
+        # action＝人工确认的动作；requested_action＝报告当时请求的动作（两者不同即对账失败）
         "action": (entry.get("gate_action") or old.get("action") or ""),
+        "requested_action": (entry.get("requested_action") or old.get("requested_action") or ""),
         "history": history,
     }
     fsutil.atomic_write_json(gate_path(tdir), doc)
     return doc
 
 
-def confirm(tdir, confirmer, comment="", report=None):
-    """人工确认 securityGate：写 gate.json + 回写报告 + 追加事件；返回 gate.json dict。"""
+def confirm(tdir, confirmer, comment="", report=None, action=""):
+    """人工确认 securityGate：写 gate.json + 回写报告 + 追加事件；返回 gate.json dict。
+
+    action：**人工当场拍的那个动作**。只有显式传入才用，否则取报告声明的动作。
+    语义要点（2026-11-02 审查）：若这里总是从报告抄 action，F28 就退化成
+    「自己和自己比」，只能抓「确认后手改 gate.json」，抓不到「确认 A、执行 B」。
+    """
+
     who = _require_confirmer(confirmer, "confirm")
     tdir = Path(tdir)
     tdir.mkdir(parents=True, exist_ok=True)
@@ -162,14 +174,20 @@ def confirm(tdir, confirmer, comment="", report=None):
         if isinstance(top, dict):
             requested_at = top.get("requested_at")
     now = now_iso()
-    gate_action = ""
+    _declared_action = ""
     if isinstance(report, dict):
+        _t = report.get("security_gate")
+        if isinstance(_t, dict):
+            _declared_action = str(_t.get("action") or "").strip()
+    gate_action = str(action or "").strip() or _declared_action
+    if not gate_action and isinstance(report, dict):
         _top = report.get("security_gate")
         if isinstance(_top, dict):
             gate_action = str(_top.get("action") or "")
     entry = {"action": "confirm", "status": "confirmed", "confirmed_by": who,
              "confirmed_at": now, "comment": str(comment or ""),
-             "gate_action": gate_action}
+             "gate_action": gate_action,
+             "requested_action": _declared_action}
     doc = _write_gate(tdir, old, entry, "confirmed", who, comment, task_id, requested_at)
     if report:
         _apply_to_report(tdir, report, doc)

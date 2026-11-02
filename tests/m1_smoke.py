@@ -152,7 +152,10 @@ def case_a3(tmp):
     rc, log = finalize(report, dec.parent, nosig, tmp, allow="老板")
     check("A3 无 signer 伪签名 finalize 非 0", rc != 0, log[-400:])
     # 合法链：老板签 + 白名单（flag 或 env BOT_SIGNERS 均可）；动作可逆 → 无 securityGate 阻塞
+    # 前置：报告必须「自判可签」（F7：force_manual_review / 不可签 → finalize 拒 approved）。
+    # demo-result 的六维分（timeliness=2、human_ai=0）会触发硬护栏，故合法链改用可签分数。
     rev = make_result(tmp)
+    rev["attribution"]["scorecard"] = {k: 5 for k in SIX}
     rev["advice"]["security_gate_requested"] = False
     rev["advice"]["recommendation"] = [{"action": "优化保养排程", "irreversibility": "reversible",
                                         "roi": {"cost": "¥500", "avoided": "¥500", "anchor": "a"}}]

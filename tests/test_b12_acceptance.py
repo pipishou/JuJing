@@ -200,6 +200,15 @@ def sha256_file(path: Path) -> str:
     return sha256_bytes(path.read_bytes())
 
 
+def sha256_file_lf(path: Path) -> str:
+    """按 LF 归一化后取哈希。
+
+    红线不能因 Windows 检出（CRLF）而假红：同一份内容在不同平台必须得到同一个指纹。
+    """
+    data = path.read_bytes().replace(bytes([13, 10]), bytes([10]))
+    return sha256_bytes(data)
+
+
 def try_json(text: str):
     """尽力从输出里解析 JSON（对象或数组），失败返回 None。"""
     if not text:
@@ -290,7 +299,13 @@ class LocalServer:
                     "not_ready",
                     f"server/app.py 启动即退出 rc={self.proc.returncode}：" + self.log_tail(800),
                 )
-            st, body, _ = self.get_raw("/api/health", timeout=2)
+            # 子进程刚起时端口可能尚未 listen / 已 bind 未 serve_forever：
+            # 首探普遍会 URLError(timeout)，这里的语义是「就绪前重试」，不能当失败断言。
+            try:
+                st, body, _ = self.get_raw("/api/health", timeout=2)
+            except CaseFailure:
+                time.sleep(0.3)
+                continue
             if st == 200:
                 return
             time.sleep(0.3)
@@ -993,7 +1008,7 @@ def run_regression(sb: Sandbox) -> list:
         if not path.is_file():
             problems.append(f"缺回归红线文件 {rel}")
             continue
-        actual = sha256_file(path)
+        actual = sha256_file_lf(path)
         if not actual.startswith(prefix):
             problems.append(f"demo 哈希变化：{rel} 期望 {prefix}… 实算 {actual[:12]}…")
     for name, args in REGRESSION_SCRIPTS:

@@ -1195,12 +1195,12 @@ def create_task(cfg, body):
         "state": "created", "step": "intake",
         "created_at": task.get("created_at"), "updated_at": now_iso(),
     })
+    task["created_via"] = "api"
+    write_json_atomic(tdir / "task.json", task)
     files, data_files = apply_uploads(cfg, tdir, task_id, uploads)
     # task-15：接单埋点（飞轮漏斗分母含「建了但没跑」的单）。
     # 只在真正新建时记一次：重复 task_id 在 tdir.exists() 处已 409，走不到这里；
     # 后续 /run 的兜底埋点看到 created_via=api 会跳过，避免同单重复计数。
-    task["created_via"] = "api"
-    write_json_atomic(tdir / "task.json", task)
     created = {
         "task_id": task_id,
         "scene_id": str(task.get("scene_id") or task.get("metric_id")

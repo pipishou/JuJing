@@ -180,6 +180,28 @@ def apply_pack_roi(pack_doc, items):
     return filled
 
 
+def security_gate_action(pack_doc, items):
+    """返回安全门要绑定的不可逆动作（F2：gate 必须点名具体动作，不得只写状态）。
+
+    优先取「报告自己标注 irreversible」且动作在 pack 不可逆表内的建议：
+    门确认的就是这条要执行的不可逆动作，后续 finalize 的 action 对账才有对象。
+    首轮只看显式 irreversible 标注，避免 pack 关键词（如「停线」）把可逆动作
+    误绑成安全门对象；没有显式标注时才退回 pack 动作表判定。
+    """
+    def _one(want_declared):
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            action = str(item.get("action") or "")
+            if want_declared and item.get("irreversibility") != "irreversible":
+                continue
+            if pack_mod.is_irreversible(pack_doc, action):
+                return action
+        return ""
+
+    return _one(True) or _one(False)
+
+
 def needs_security_gate(pack_doc, items):
     for item in items or []:
         if not isinstance(item, dict):
@@ -263,14 +285,13 @@ def main():
         if missing:
             return fail(f"real 模式必须提供 {', '.join(missing)}")
 
-    # 3) 数据溯源（real 记录 sha256；demo 保留裸路径）
+    # 3) 数据溯源（real 必须记录 sha256；demo 能记就记，文件缺失才退回裸路径）
     refs = split_csv(args.data_refs) or list(DEFAULT_DATA_REFS)
-    if real:
-        try:
-            data_refs = provenance.refs_record(refs, ROOT)
-        except provenance.ProvenanceError as exc:
+    try:
+        data_refs = provenance.refs_record(refs, ROOT)
+    except provenance.ProvenanceError as exc:
+        if real:
             return fail(f"data_refs 溯源失败：{exc}")
-    else:
         data_refs = refs
 
     # 4) scorecard → 100 分制（real 先过占位/缺证据门）
@@ -298,16 +319,19 @@ def main():
 
     # 6) 安全门：不可逆动作必须呈请
     gate_needed = needs_security_gate(pack_doc, rec) or bool(advice.get("security_gate_requested"))
+    gate_action = security_gate_action(pack_doc, rec) if gate_needed else ""
     gate = {
         "requested_at": run_day.isoformat(),
         "confirmed_by": None,
         "status": "pending_user_confirmation",
+        "action": gate_action,
     } if gate_needed else None
     if gate_needed:
         emit_event(args, "gate", "host",
                    "securityGate requested: 报告含不可逆动作，需人工确认 gate.json",
                    meta={"status": "pending_user_confirmation",
-                         "requested_at": run_day.isoformat()})
+                         "requested_at": run_day.isoformat(),
+                         "action": gate_action})
 
     # 7) 文本字段缺省值（行业包阈值参与，不再硬编码 5.5%/7.2%）
     context = args.context or (

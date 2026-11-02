@@ -77,6 +77,22 @@ def test_confirm_keeps_action(tmp: pathlib.Path) -> None:
     check("report.security_gate.status == confirmed", top.get("status") == "confirmed")
 
 
+def test_confirm_other_action_is_caught(tmp: pathlib.Path) -> None:
+    """人工确认的动作与报告要执行的动作不一致 → F28 必须命中（确认 A、执行 B）。"""
+    tdir = _task_dir(tmp)
+    report = json.loads((tdir / "report.json").read_text(encoding="utf-8"))
+    doc = gate_mod.confirm(tdir, "老板", "我批的是停机", report, action="stop_line")
+    after = json.loads((tdir / "report.json").read_text(encoding="utf-8"))
+
+    check("gate.json.action == stop_line（人工确认值）", str(doc.get("action") or "") == "stop_line")
+    check("gate.json.requested_action == mold_change（报告请求值）",
+          str(doc.get("requested_action") or "") == "mold_change")
+    check("报告动作不被确认覆盖（仍 mold_change）",
+          str((after.get("security_gate") or {}).get("action") or "") == "mold_change")
+    msg = gates.gate_action_mismatch(doc, after)
+    check("确认 A / 执行 B → F28 命中", bool(msg) and "mismatch" in msg)
+
+
 def test_mismatch_detected(tmp: pathlib.Path) -> None:
     tdir = _task_dir(tmp)
     report = json.loads((tdir / "report.json").read_text(encoding="utf-8"))
@@ -111,6 +127,8 @@ def main() -> int:
         (base / "b").mkdir()
         test_confirm_keeps_action(base / "a")
         test_mismatch_detected(base / "b")
+        (base / "c").mkdir()
+        test_confirm_other_action_is_caught(base / "c")
         test_order_lock()
     print(f"\n{CHECKS - len(FAILS)}/{CHECKS} 通过")
     if FAILS:
