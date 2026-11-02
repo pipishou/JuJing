@@ -451,9 +451,12 @@ def main():
 
     # F1/J-05：不可签的产物不得停在待签状态（裁决与状态机一致）
     _status_path = Path(args.out).parent / "status.json"
-    if _verdict != "output" and _status_path.is_file():
+    if _verdict != "output":
         try:
-            _st = json.loads(_status_path.read_text(encoding="utf-8-sig"))
+            # 文件不存在也要落 blocked：此前 `and _status_path.is_file()` 让 run_task 新单
+            # （此刻还没有 status.json）整条跳过，随后被 run_task 写成 assembled，J-05 失效。
+            _st = (json.loads(_status_path.read_text(encoding="utf-8-sig"))
+                   if _status_path.is_file() else {})
             _st.update({"state": "blocked", "step": "blocked_g25", "updated_at": run_day.isoformat()})
             atomic_write_json(_status_path, _st)
         except Exception:  # noqa: BLE001 —— 状态落盘失败不阻断报告

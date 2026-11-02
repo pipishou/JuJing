@@ -445,7 +445,30 @@ def main():
             decision_status = "approved"
             set_status(outdir, "signed", step="finalized", task_id=task_id)
         else:
-            set_status(outdir, "assembled", step="awaiting_sign", task_id=task_id)
+            # J-05：不可签产物不得停在待签。assemble_report 已把 blocked 写进 status.json，
+            # 这里若无条件改回 assembled，就等于把「不许签」的信号擦掉（历史缺陷）。
+            _cur_state, _cur_step = "", ""
+            try:
+                _sp = outdir / "status.json"
+                if _sp.is_file():
+                    _cur = json.loads(_sp.read_text(encoding="utf-8-sig"))
+                    _cur_state = str(_cur.get("state") or "")
+                    _cur_step = str(_cur.get("step") or "")
+            except Exception:  # noqa: BLE001 —— 读不到状态就按默认流程走
+                pass
+            try:
+                _rp = outdir / "report.json"
+                if _rp.is_file():
+                    _verd = str(((json.loads(_rp.read_text(encoding="utf-8-sig"))
+                                  .get("scorecard") or {}).get("verdict")) or "")
+                    if _verd and _verd != "output":
+                        _cur_state, _cur_step = "blocked", "blocked_g25"
+            except Exception:  # noqa: BLE001
+                pass
+            if _cur_state == "blocked":
+                set_status(outdir, "blocked", step=_cur_step or "blocked_g25", task_id=task_id)
+            else:
+                set_status(outdir, "assembled", step="awaiting_sign", task_id=task_id)
 
         if decision_path.is_file():
             decision_status = decision_status or read_json(decision_path).get("status")
