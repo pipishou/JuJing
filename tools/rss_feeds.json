@@ -1,0 +1,25 @@
+{
+  "_comment": "每日资讯订阅源（RSSHub 路由）。实例按顺序 failover：rss_fetch 单源失败只记 errors，不中断。",
+  "feeds": [
+    {
+      "url": "https://hub.slarker.me/36kr/newsflashes",
+      "source": "36氪快讯"
+    },
+    {
+      "url": "https://hub.slarker.me/ithome/ranking/24h",
+      "source": "IT之家 24h 热榜"
+    },
+    {
+      "url": "https://hub.slarker.me/sspai/matrix",
+      "source": "少数派 Matrix"
+    },
+    {
+      "url": "https://hub.slarker.me/hackernews/best",
+      "source": "Hacker News Best"
+    },
+    {
+      "url": "https://rsshub.ktachibana.party/36kr/newsflashes",
+      "source": "36氪快讯（备用实例）"
+    }
+  ]
+}

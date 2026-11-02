@@ -14,7 +14,7 @@ apply({ commands: { register: (definition) => registered.push(definition) } });
 
 assert.deepEqual(
   registered.map((item) => item.name),
-  ["today", "queue", "park", "resume", "ticket", "bt-metrics"],
+  ["today", "queue", "park", "resume", "ticket", "decide", "defer", "focus", "bt-metrics"],
 );
 
 for (const command of ["today", "queue", "bt-metrics"]) {

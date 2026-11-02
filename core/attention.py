@@ -1,19 +1,26 @@
-"""注意力账本与基线（Slice 1，2026-11-01）。
+"""注意力账本与基线（Slice 1，2026-11-01；2026-11-02 改为单一事实源）。
 
 定位：**只读埋点 + 可复算基线**，不改提醒、不改任务状态、不改 UI 行为。
 
-数据源：
-  - 现有全局事件流 `runtime/events.jsonl`（对话/提醒/事项/任务）
-  - 本模块自己的 `runtime/attention/ledger.jsonl`（attention_* 事件与快照）
+单一事实源（P0-4，2026-11-02）：
+  - 事实源只有一条：`runtime/events.jsonl`（经 `core.eventlog.emit()` 写入）。
+    注意力动作统一落成 `bot_team_attention_*` 事件，例如
+    `attention.append("attention_interrupt", ...)` → `bot_team_attention_interrupt`。
+  - `runtime/attention/ledger.jsonl` 降级为**投影缓存（projection cache）**：
+    内容完全可由事件流重算，删掉不丢事实。
+      重建方式：`attention.rebuild_ledger()`（纯函数 `project_ledger(events)`），
+      或命令行 `python -B core/attention.py --rebuild`。
+  - `metrics()` 只读事件流；**禁止**把 ledger 当事实源（旧实现因此恒 0：
+    写 ledger 不写 events，metrics 又只读 events）。
 
 口径（K-07 可复算）：
   - 窗口默认 3 天；只按事件 `ts` 过滤，不改写原事件
-  - 打断：`bot_team_reminder_issued` + `attention_interrupt`
-  - 票：`bot_team_item_created` / `attention_ticket_opened` 开头，
-        `bot_team_item_closed` / `attention_ticket_resolved` 收口
+  - 打断：`bot_team_reminder_issued` + `bot_team_attention_interrupt`
+  - 票：`bot_team_item_created` / `bot_team_attention_ticket_opened` 开头，
+        `bot_team_item_closed` / `bot_team_attention_ticket_resolved` 收口
   - WIP 峰值：按事件顺序维护“未收口票”集合的峰值；数据不足时如实返回 0，
     并在 `data_quality.wip_source` 标明来源
-  - 任务切换：显式 `attention_task_switch` 事件；不从对话文本猜
+  - 任务切换：显式 `bot_team_attention_task_switch` 事件；不从对话文本猜
 """
 from __future__ import annotations
 
@@ -23,21 +30,29 @@ import json
 import os
 import pathlib
 import re
-import threading
-import uuid
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:  # 允许 `python -B core/attention.py`
+    sys.path.insert(0, str(ROOT))
+
+from core import eventlog  # noqa: E402
+from core import fsutil  # noqa: E402
+from core.filelock import FileLock  # noqa: E402
+
 DEFAULT_DAYS = 3
 MAX_DAYS = 90
 LEDGER_FILENAME = "ledger.jsonl"
 EVENT_RE = re.compile(r"^attention_[a-z0-9_]+$")
+ATTENTION_PREFIX = "bot_team_attention_"
 
-INTERRUPT_EVENTS = ("bot_team_reminder_issued", "attention_interrupt")
-TICKET_OPEN_EVENTS = ("bot_team_item_created", "attention_ticket_opened")
-TICKET_CLOSE_EVENTS = ("bot_team_item_closed", "attention_ticket_resolved")
+# 事件名按「去掉 bot_team_ 前缀后的短名」比对，这样
+# `bot_team_reminder_issued`（真实提醒链路）与 `bot_team_attention_*`（注意力动作）
+# 共用一套口径，且历史事件无需迁移。
+INTERRUPT_EVENTS = ("reminder_issued", "attention_interrupt")
+TICKET_OPEN_EVENTS = ("item_created", "attention_ticket_opened")
+TICKET_CLOSE_EVENTS = ("item_closed", "attention_ticket_resolved")
 TASK_SWITCH_EVENTS = ("attention_task_switch",)
-
-_lock = threading.Lock()
 
 
 class AttentionError(ValueError):
@@ -84,6 +99,7 @@ def _read_jsonl(path: pathlib.Path) -> tuple[list[dict], int]:
 
 
 def read_ledger(root=None) -> list[dict]:
+    """读账本投影缓存（非事实源；删掉可用 rebuild_ledger 从事件流重建）。"""
     rows, _ = _read_jsonl(ledger_path(root))
     return rows
 
@@ -114,38 +130,106 @@ def _ref_id(rec: dict) -> str:
     return str(rec.get("event_id") or f"seq-{rec.get('seq')}")
 
 
-def _validate(name: str, payload: dict) -> None:
-    if not EVENT_RE.match(str(name or "")):
-        raise AttentionError(f"事件名必须匹配 attention_<lower_snake>：{name!r}")
+def _validate(name: str, payload: dict) -> tuple[str, str]:
+    """校验事件名并返回 (短名 attention_xxx, 事件流全名 bot_team_attention_xxx)。"""
     if not isinstance(payload, dict):
         raise AttentionError("payload 必须是对象")
+    raw = str(name or "").strip()
+    if raw.startswith(ATTENTION_PREFIX):
+        short = "attention_" + raw[len(ATTENTION_PREFIX):]
+        if not EVENT_RE.match(short):
+            raise AttentionError(f"事件名必须匹配 attention_<lower_snake>：{name!r}")
+        return short, raw
+    if EVENT_RE.match(raw):
+        return raw, ATTENTION_PREFIX + raw[len("attention_"):]
+    raise AttentionError(
+        f"事件名必须匹配 attention_<lower_snake> 或 bot_team_attention_<lower_snake>：{name!r}"
+    )
+
+
+def _short_event(name) -> str:
+    """事件流全名 → 短名（去掉 bot_team_ 前缀）；非 bot_team_* 原样返回。"""
+    raw = str(name or "")
+    return raw[len("bot_team_"):] if raw.startswith("bot_team_") else raw
+
+
+def _is_attention_event(rec: dict) -> bool:
+    return str(rec.get("event") or "").startswith(ATTENTION_PREFIX)
+
+
+def project_ledger(events: list[dict]) -> list[dict]:
+    """纯函数：事件流 → 账本投影行（不落盘）。
+
+    只收 `bot_team_attention_*`；`seq` 是注意力事件自己的 1..N 序号，
+    `source_seq` 保留它在全局事件流里的序号，便于对账。
+    相同输入必然得到相同输出——这是「删掉 ledger 可重建」的依据。
+    """
+    rows: list[dict] = []
+    for rec in events or []:
+        if not isinstance(rec, dict) or not _is_attention_event(rec):
+            continue
+        payload = rec.get("payload") if isinstance(rec.get("payload"), dict) else {}
+        rows.append({
+            "seq": len(rows) + 1,
+            "event_id": rec.get("event_id"),
+            "ts": rec.get("ts"),
+            "event": _short_event(rec.get("event")),
+            "actor": rec.get("actor") or "system",
+            "payload": dict(payload),
+            "source_seq": int(rec.get("seq") or 0),
+        })
+    return rows
+
+
+def _ledger_lock(root=None) -> FileLock:
+    """账本投影的跨进程锁；emit + 重算 + 落盘必须在同一把锁内，避免缓存回退。"""
+    path = ledger_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return FileLock(path.with_name(path.name + ".lock"))
+
+
+def _write_rows(rows: list[dict], root=None) -> None:
+    path = ledger_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = "".join(
+        json.dumps(r, ensure_ascii=False, separators=(",", ":")) + "\n" for r in rows
+    )
+    fsutil.atomic_write_text(path, text)
+
+
+def rebuild_ledger(events: list[dict] | None = None, *, root=None,
+                   write: bool = True) -> list[dict]:
+    """从事件流重建账本投影缓存；返回重建后的行。
+
+    events 为空/None 时读事件流；给了 events 即纯函数式（可测）。
+    重建是幂等的：同样的 events → 同样的 ledger 字节。
+    """
+    if not write:
+        if events is None:
+            events = eventlog.iter_events(events_path(root))
+        return project_ledger(events)
+    with _ledger_lock(root):
+        if events is None:
+            events = eventlog.iter_events(events_path(root))
+        rows = project_ledger(events)
+        _write_rows(rows, root)
+        return rows
 
 
 def append(name: str, payload: dict | None = None, *, root=None,
            actor: str = "system", ts: str | None = None) -> dict:
-    """追加一条 attention_* 事件；只 append，不修改历史。"""
+    """写一条注意力动作：emit 到全局事件流，再刷新账本投影（P0-4 单一事实源）。
+
+    返回事件流记录（`event` 为 `bot_team_attention_*`）。
+    """
     payload = payload or {}
-    _validate(name, payload)
-    path = ledger_path(root)
-    with _lock:
-        rows, _ = _read_jsonl(path)
-        last_seq = max((int(r.get("seq") or 0) for r in rows), default=0)
-        rec = {
-            "seq": last_seq + 1,
-            "event_id": uuid.uuid4().hex,
-            "ts": ts or now_iso(),
-            "event": name,
-            "actor": actor,
-            "payload": payload,
-        }
-        path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(rec, ensure_ascii=False, separators=(",", ":")) + "\n"
-        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-        try:
-            os.write(fd, line.encode("utf-8"))
-        finally:
-            os.close(fd)
-        return rec
+    _, canonical = _validate(name, payload)
+    with _ledger_lock(root):
+        rec = eventlog.emit(canonical, actor=actor, payload=payload,
+                            path=events_path(root), ts=ts)
+        # ledger 只是投影缓存；从事件流重算保证「删掉也能恢复且内容一致」。
+        _write_rows(project_ledger(eventlog.iter_events(events_path(root))), root)
+    return rec
 
 
 def _window(events: list[dict], *, days: int, now: _dt.datetime) -> tuple[list[dict], _dt.datetime]:
@@ -185,25 +269,26 @@ def metrics(*, root=None, days: int = DEFAULT_DAYS, now: _dt.datetime | None = N
 
     for rec in selected:
         name = str(rec.get("event") or "")
+        short = _short_event(name)
         payload = rec.get("payload") if isinstance(rec.get("payload"), dict) else {}
         event_counts[name] = event_counts.get(name, 0) + 1
 
-        if name in INTERRUPT_EVENTS:
+        if short in INTERRUPT_EVENTS:
             interruptions += 1
             kind = str(payload.get("kind") or "unknown")
             by_kind[kind] = by_kind.get(kind, 0) + 1
             source = str(payload.get("source") or "unknown")
             by_source[source] = by_source.get(source, 0) + 1
-        elif name in TICKET_OPEN_EVENTS:
+        elif short in TICKET_OPEN_EVENTS:
             tickets_opened += 1
             open_ids.add(_ref_id(rec))
-        elif name in TICKET_CLOSE_EVENTS:
+        elif short in TICKET_CLOSE_EVENTS:
             tickets_resolved += 1
             open_ids.discard(_ref_id(rec))
-        elif name in TASK_SWITCH_EVENTS:
+        elif short in TASK_SWITCH_EVENTS:
             task_switches += 1
 
-        if name in TICKET_OPEN_EVENTS:
+        if short in TICKET_OPEN_EVENTS:
             wip_peak = max(wip_peak, len(open_ids))
 
     return {
@@ -237,6 +322,8 @@ def metrics(*, root=None, days: int = DEFAULT_DAYS, now: _dt.datetime | None = N
             "bad_lines": bad,
             "wip_source": "item_events",
             "history": bool(selected),
+            "source_of_truth": "events",
+            "ledger_role": "projection",
         },
         "sources": {
             "events": str(source_path),
@@ -374,8 +461,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", help="bot-team 根目录")
     ap.add_argument("--days", type=int, default=DEFAULT_DAYS)
     ap.add_argument("--record", action="store_true", help="写一条 attention_snapshot")
+    ap.add_argument("--rebuild", action="store_true",
+                    help="从事件流重建账本投影缓存（删掉 ledger 后可用）")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
     args = ap.parse_args(argv)
+    if args.rebuild:
+        rows = rebuild_ledger(root=args.root)
+        print(json.dumps({"ok": True, "rebuilt": len(rows),
+                          "ledger": str(ledger_path(args.root))}, ensure_ascii=False))
+        return 0
     data = snapshot(root=args.root, days=args.days) if args.record else metrics(root=args.root, days=args.days)
     if args.json:
         print(json.dumps(data, ensure_ascii=False, indent=2))

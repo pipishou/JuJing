@@ -11,11 +11,14 @@
     GET  /ui/<path>                           ui/ 静态资源
     GET  /api/health                          {ok, pack, version, owner, allow_signers, ...}
     GET  /api/v1/attention/metrics            注意力基线（Slice 1，只读）：打断/票/WIP 峰值
-    GET  /api/v1/attention/today              今日最多 3 件 + WIP + 停泊 + 日报文案（Slice 2）
-    GET  /api/v1/attention/queue              完整队列（active/parked）
+    GET  /api/v1/attention/today              今日最多 3 件 + WIP + 停泊/paused + 日报文案（Slice 2）
+    GET  /api/v1/attention/queue              完整队列（active/parked/paused）
     GET  /api/v1/attention/tickets            票列表；POST 开票（一问/2–3 选项/推荐/截止）
-    POST /api/v1/attention/tickets/<id>/decide|defer
-    POST /api/v1/workitems/<id>/park|resume   停泊/恢复（恢复受 WIP≤2 约束）
+    POST /api/v1/attention/tickets/<id>/decide|defer|snooze|resume|drop
+    GET|POST|DELETE /api/v1/attention/focus   免打扰（同时只允许 1 个 focus item）
+    POST /api/v1/workitems/<id>/park|resume   停泊/恢复（恢复受 WIP≤2 约束，非法状态 409）
+    POST /api/context/ask                     body {q,k?} → 检索块索引 + LLM；无 [n] 引用即 no_citation
+    GET  /api/context/stats                   runtime/context/meta.json（索引统计；未建过 exists=false）
     GET  /api/packs                           已装行业包列表
     GET  /api/team                            core.team.load_team：employees/crews/shelf/roster/pack
     GET  /api/scenes                          场景种子（core.scene.load_seeds；未就绪回退 packs/<pack>/scenes/*.json）
@@ -95,7 +98,7 @@ VENV_PY = r"D:\work\产品类\个人产品\bot-2\venv\Scripts\python.exe"
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,95}$")
 TASK_ROUTE_RE = re.compile(r"^/api/tasks/([^/]+)(?:/([a-z][a-z-]*))?$")
 WORKITEM_ACTION_RE = re.compile(r"^/api/v1/workitems/([^/]+)/(park|resume)$")
-TICKET_ACTION_RE = re.compile(r"^/api/v1/attention/tickets/([^/]+)/(decide|defer)$")
+TICKET_ACTION_RE = re.compile(r"^/api/v1/attention/tickets/([^/]+)/(decide|defer|snooze|resume|drop)$")
 SIX_DIMS = ("data_completeness", "timeliness", "significance", "exclusivity", "history", "human_ai_consistency")
 DEFAULT_OWNER = "老板"
 DEFAULT_ALLOW_SIGNERS = "老板,boss"
@@ -316,33 +319,36 @@ def workitems_mutate(cfg, body):
 def _workitems_mutate(cfg, body):
     ws = import_tool(cfg, "workitems_store")
     path = workitems_path(cfg)
-    store = ws.load(path)
     action = str(body.get("action") or "update").strip().lower()
     by = str(body.get("by") or cfg.owner or "老板")
-    if action == "add":
-        store, item = ws.add_item(store, body.get("item") or body, by=by)
-        att = import_core(cfg, "attention")
-        if att.enforce_wip(item, store.get("items", []), actor=by):
-            att.append("attention_parked", {
-                "item_id": item.get("id"), "reason": "wip_full",
-                "resume_at": "", "wip_limit": att.WIP_LIMIT,
-            }, root=Path(cfg.root), actor=by)
-    elif action == "update":
-        item_id = str(body.get("id") or "").strip()
-        if not item_id:
-            raise ApiError(400, "update 需要 id")
-        patch = body.get("patch")
-        if not isinstance(patch, dict):
-            patch = {k: v for k, v in body.items() if k not in ("action", "id", "by")}
-        store, item = ws.update_item(store, item_id, patch, by=by)
-    elif action == "delete":
-        item_id = str(body.get("id") or "").strip()
-        if not item_id:
-            raise ApiError(400, "delete 需要 id")
-        store, item = ws.delete_item(store, item_id)
-    else:
+    att = import_core(cfg, "attention")
+    item_id = str(body.get("id") or "").strip()
+    if action not in ("add", "update", "delete"):
         raise ApiError(400, f"未知动作：{action}（add/update/delete）")
-    ws.save(store, path)
+    if action in ("update", "delete") and not item_id:
+        raise ApiError(400, f"{action} 需要 id")
+    patch = body.get("patch")
+    if action == "update" and not isinstance(patch, dict):
+        patch = {k: v for k, v in body.items() if k not in ("action", "id", "by")}
+
+    def _apply(store):
+        if action == "add":
+            _, item = ws.add_item(store, body.get("item") or body, by=by)
+            if att.enforce_wip(item, store.get("items", []), actor=by):
+                att.append("attention_parked", {
+                    "item_id": item.get("id"), "reason": "wip_full",
+                    "resume_at": "", "wip_limit": att.WIP_LIMIT,
+                }, root=Path(cfg.root), actor=by)
+            return item
+        if action == "update":
+            return ws.update_item(store, item_id, patch, by=by)[1]
+        return ws.delete_item(store, item_id)[1]
+
+    # P0-5：load→改→save 必须在账本文件锁内（并发请求不丢更新）。
+    try:
+        store, item = ws.mutate(_apply, path)
+    except att.AttentionError as exc:
+        raise _attention_user_error(exc)
     return {"ok": True, "action": action, "revision": store.get("revision"),
             "item": item, "summary": ws.summary(store)}
 
@@ -371,14 +377,36 @@ def _workitems_import(cfg, body):
     if not items:
         raise ApiError(400, "没解析出事项（检查表头是否含 问题点描述/责任人/计划完成时间/状态）")
     path = workitems_path(cfg)
-    store = ws.load(path)
+    by = str(body.get("by") or "导入")
     source = {"kind": "import", "file": str(src_path), "sheet": sheet_name,
               "sha256": ws.sha256_file(src_path), "size": src_path.stat().st_size,
-              "imported_at": ws._now(), "imported_by": str(body.get("by") or "导入")}
-    store, stats = ws.merge_items(store, items, by=str(body.get("by") or "导入"), source=source)
-    ws.save(store, path)
+              "imported_at": ws._now(), "imported_by": by}
+    att = import_core(cfg, "attention")
+
+    def _apply(store):
+        before_ids = {it.get("id") for it in store.get("items", []) if isinstance(it, dict)}
+        _, stats = ws.merge_items(store, items, by=by, source=source)
+        # P0-2：导入也必须过 WIP 门。新事项超过 WIP 上限时逐个停泊并留痕，
+        # 绝不“导进来就悄悄变成在办”。已有事项不在这里回填停泊（不改历史）。
+        new_items = [it for it in store.get("items", [])
+                     if isinstance(it, dict) and it.get("id") not in before_ids]
+        parked_ids = []
+        for item in new_items:
+            if att.enforce_wip(item, store.get("items", []), actor=by):
+                parked_ids.append(item.get("id"))
+                att.append("attention_parked", {
+                    "item_id": item.get("id"), "reason": "wip_full_import",
+                    "resume_at": "", "wip_limit": att.WIP_LIMIT,
+                }, root=Path(cfg.root), actor=by)
+        stats["wip_parked"] = len(parked_ids)
+        stats["wip_parked_ids"] = parked_ids
+        return stats
+
+    # P0-5：导入同样是读-改-写，整体在账本锁内执行。
+    store, stats = ws.mutate(_apply, path)
     return {"ok": True, "sheet": sheet_name, "stats": stats,
-            "revision": store.get("revision"), "summary": ws.summary(store)}
+            "revision": store.get("revision"), "summary": ws.summary(store),
+            "wip": {"active": att.wip_count(store.get("items", [])), "limit": att.WIP_LIMIT}}
 
 
 def workitems_csv(cfg):
@@ -3867,6 +3895,107 @@ def dialog_list(cfg):
         for d in rows]}
 
 
+# ---------------------------------------------------------------- C1/C2：上下文检索（只依据片段回答）
+CONTEXT_DEFAULT_K = 8
+CONTEXT_MAX_K = 20
+CONTEXT_SYSTEM_PROMPT = (
+    "你是 bot-team 的历史上下文助手。只能依据用户给出的编号片段回答，"
+    "不得使用片段之外的知识，也不得猜测。每个结论后面必须用 [1]、[2] 这样的编号标注出处；"
+    "片段里找不到答案时，直接回答「没找到」。"
+)
+CITATION_RE = re.compile(r"\[(\d{1,2})\]")
+
+
+def context_module(cfg):
+    """core.context（延迟导入，与其它 core 模块同口径）。"""
+    return import_core(cfg, "context")
+
+
+def context_llm(cfg):
+    """LLM 通道。测试注入点：monkeypatch 本函数即可离线跑（不真调模型）。"""
+    return import_core(cfg, "llm")
+
+
+def context_index_paths(cfg):
+    """索引/元数据路径；BOT_CONTEXT_INDEX / BOT_CONTEXT_META 可覆盖（测试/多库切换用）。"""
+    root = Path(cfg.root)
+    index = Path(os.environ.get("BOT_CONTEXT_INDEX")
+                 or (root / "runtime" / "context" / "index.jsonl"))
+    meta = Path(os.environ.get("BOT_CONTEXT_META")
+                or (root / "runtime" / "context" / "meta.json"))
+    return index, meta
+
+
+def context_stats(cfg):
+    """GET /api/context/stats：meta.json 内容 + 是否存在（没建过索引也回 200，交前端提示）。"""
+    index, meta_path = context_index_paths(cfg)
+    payload = {"ok": True, "exists": meta_path.is_file(), "index": str(index)}
+    if meta_path.is_file():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as exc:
+            raise ApiError(500, f"meta.json 读不了：{exc}")
+        if isinstance(meta, dict):
+            payload.update(meta)
+    return payload
+
+
+def context_prompt(q, hits):
+    """编号片段 + 问题：编号必须与 citations 的 n 一一对应。"""
+    blocks = []
+    for i, hit in enumerate(hits, 1):
+        blocks.append("[%d] 来源：%s #chunk %s\n%s"
+                      % (i, hit["path"], hit["chunk_no"], hit["snippet"]))
+    return "片段：\n\n" + "\n\n".join(blocks) + "\n\n问题：" + q
+
+
+def context_ask(cfg, body):
+    """POST /api/context/ask：检索 → 组 prompt → LLM → 引用校验。
+
+    没有命中就不问模型（问了只会编）；答案里没有落在 1..len(hits) 的 [n] 判 no_citation。
+    """
+    body = body or {}
+    q = str(body.get("q") or "").strip()
+    if not q:
+        raise ApiError(400, "q 不能为空")
+    try:
+        k = int(body.get("k") or CONTEXT_DEFAULT_K)
+    except (TypeError, ValueError):
+        raise ApiError(400, "k 必须是整数")
+    k = max(1, min(k, CONTEXT_MAX_K))
+    index_path, _ = context_index_paths(cfg)
+    hits = context_module(cfg).load(index_path).search(q, k=k)
+    if not hits:
+        # 没有片段就不问模型：问了只会编（C2 的硬约束）
+        return {"ok": False, "reason": "no_hits", "citations": []}
+    messages = [
+        {"role": "system", "content": CONTEXT_SYSTEM_PROMPT},
+        {"role": "user", "content": context_prompt(q, hits)},
+    ]
+    try:
+        out = context_llm(cfg).chat(messages, temperature=0.2, timeout=120)
+    except Exception as exc:  # noqa: BLE001 - 上游通道失败不拖垮服务
+        raise ApiError(502, f"LLM 调用失败：{exc}")
+    answer = str((out or {}).get("content") or "")
+    cited = []
+    for m in CITATION_RE.finditer(answer.replace("［", "[").replace("］", "]")):
+        n = int(m.group(1))
+        if 1 <= n <= len(hits) and n not in cited:
+            cited.append(n)
+    if not cited:
+        return {"ok": False, "reason": "no_citation"}
+    cited.sort()
+    return {
+        "ok": True,
+        "answer": answer,
+        "citations": [
+            {"n": n, "path": hits[n - 1]["path"],
+             "chunk_no": hits[n - 1]["chunk_no"], "snippet": hits[n - 1]["snippet"]}
+            for n in cited
+        ],
+    }
+
+
 # ---------------------------------------------------------------- 注意力 Slice 2：今日 / 队列 / 停泊 / 票
 
 def _workitems(cfg):
@@ -3882,19 +4011,78 @@ def _tickets(cfg):
 
 
 def _attention_user_error(exc):
+    code = getattr(exc, "http_status", None)
+    if code:
+        return ApiError(int(code), str(exc))
     status = 409 if "WIP" in str(exc) or "重复" in str(exc) else 400
     return ApiError(status, str(exc))
+
+
+# WIP 软上限沿用 attention.WIP_LIMIT=2；硬上限只决定是否“顶脸”，不改变门。
+WIP_HARD_LIMIT = 5
+
+
+def _paused_items(att, items):
+    """外部 paused（无停泊记录）的事项：既不进 active，也不进 parked，必须单独可见。"""
+    return sorted([it for it in (items or [])
+                   if isinstance(it, dict) and it.get("status") == "paused"
+                   and not att.is_parked(it)], key=att._sort_key)
 
 
 def attention_today(cfg, query):
     ws = _workitems(cfg)
     att = _attention(cfg)
     store = ws.load(workitems_path(cfg))
-    data = att.today(store.get("items", []), limit=att.TODAY_LIMIT)
+    items = store.get("items", [])
+    data = att.today(items, limit=att.TODAY_LIMIT)
+    total_active = att.wip_count(items)
+    shown = len(data.get("items") or [])
+    hidden = max(0, total_active - shown)
+    paused = _paused_items(att, items)
+    include = _str_param(query, "include", "").lower()
+    include_paused = include in ("paused", "all", "1", "true", "yes")
+    if include_paused:
+        data["items"] = list(data.get("items") or []) + paused
+    data["hidden_count"] = hidden
+    data["paused"] = paused
+    data["paused_count"] = len(paused)
+    data["include_paused"] = include_paused
+    data["wip"].update({"hard_limit": WIP_HARD_LIMIT,
+                        "over_hard_limit": total_active > WIP_HARD_LIMIT})
     try:
-        data["tickets"] = _tickets(cfg).list_tickets(root=Path(cfg.root), status="open")
+        tk = _tickets(cfg)
+        root = Path(cfg.root)
+        data["tickets"] = tk.list_tickets(root=root, status="open")
+        data["tickets_deferred"] = (tk.list_tickets(root=root, status="deferred")
+                                    + tk.list_tickets(root=root, status="snoozed"))
+        data["suppressed_today"] = tk.list_suppressed(root=root, date=data.get("date"))
+        data["focus"] = tk.focus_state(root=root)
     except Exception:  # noqa: BLE001 — 票模块异常不拖垮今日视图
-        data["tickets"] = []
+        data.setdefault("tickets", [])
+        data.setdefault("tickets_deferred", [])
+        data.setdefault("suppressed_today", [])
+        data.setdefault("focus", {"active": False})
+    notes = []
+    if total_active > WIP_HARD_LIMIT:
+        notes.append(f"⚠ 在办 {total_active} 件，超过硬上限 {WIP_HARD_LIMIT}"
+                     f"（软上限 {att.WIP_LIMIT}）；先 /park 收敛。")
+    if hidden > 0:
+        notes.append(f"另有 {hidden} 件未显示（在办 {total_active} 件；"
+                     f"WIP 软上限 {att.WIP_LIMIT}/硬上限 {WIP_HARD_LIMIT}）")
+    if paused:
+        notes.append(f"另有 {len(paused)} 件 paused（外部暂停，"
+                     f"GET /api/v1/attention/today?include=paused 查看）")
+    deferred = data.get("tickets_deferred") or []
+    if deferred:
+        notes.append(f"已推迟/稍后票 {len(deferred)} 张（/decide 可直接裁决）")
+    suppressed = data.get("suppressed_today") or []
+    if suppressed:
+        notes.append(f"另有 {len(suppressed)} 张票被抑制（每日上限/focus），已记入摘要")
+    focus = data.get("focus") or {}
+    if focus.get("active"):
+        notes.append(f"focus：{focus.get('item') or ''}（至 {focus.get('ends_at') or ''}）")
+    if notes:
+        data["brief"] = str(data.get("brief") or "") + "\n" + "\n".join(notes)
     return data
 
 
@@ -3902,7 +4090,12 @@ def attention_queue(cfg):
     ws = _workitems(cfg)
     att = _attention(cfg)
     store = ws.load(workitems_path(cfg))
-    data = att.queue(store.get("items", []))
+    items = store.get("items", [])
+    data = att.queue(items)
+    paused = _paused_items(att, items)
+    data["paused"] = paused
+    data["paused_count"] = len(paused)
+    data["wip"]["hard_limit"] = WIP_HARD_LIMIT
     try:
         data["tickets"] = _tickets(cfg).list_tickets(root=Path(cfg.root))
     except Exception:  # noqa: BLE001
@@ -3913,30 +4106,42 @@ def attention_queue(cfg):
 def workitem_action(cfg, item_id, action, body):
     ws = _workitems(cfg)
     att = _attention(cfg)
-    store = ws.load(workitems_path(cfg))
-    _, item = ws.find_item(store, unquote(item_id))
     body = body or {}
     by = str(body.get("by") or cfg.owner or "owner")
+
+    def _apply(store):
+        _, item = ws.find_item(store, unquote(item_id))
+        if action == "park":
+            att.park(item, reason=str(body.get("reason") or "manual"),
+                     resume_at=str(body.get("resume_at") or ""), actor=by)
+        else:
+            # P0-2：只有“停泊项”可恢复；done/cancelled/外部 paused/active 一律 409，
+            # 不再静默 200 假装恢复成功。
+            if not att.is_parked(item):
+                raise ApiError(409,
+                               f"事项 {item.get('id')} 状态是 {item.get('status')}，不是停泊项，"
+                               f"/resume 不可恢复；请先 /park 或用 /api/workitems 更新状态")
+            att.resume(item, store.get("items", []), actor=by)
+        return item
+
+    # P0-5：停泊/恢复也是读-改-写，锁内完成；恢复失败不落盘。
+    try:
+        store, item = ws.mutate(_apply, workitems_path(cfg))
+    except att.AttentionError as exc:
+        raise _attention_user_error(exc)
     if action == "park":
-        att.park(item, reason=str(body.get("reason") or "manual"),
-                 resume_at=str(body.get("resume_at") or ""), actor=by)
-        ws.save(store, workitems_path(cfg))
         att.append("attention_parked", {
             "item_id": item.get("id"), "reason": item["attention"].get("reason"),
             "resume_at": item["attention"].get("resume_at"), "wip_limit": att.WIP_LIMIT,
         }, root=Path(cfg.root), actor=by)
     else:
-        try:
-            att.resume(item, store.get("items", []), actor=by)
-        except att.AttentionError as exc:
-            raise _attention_user_error(exc)
-        ws.save(store, workitems_path(cfg))
         att.append("attention_resumed", {
             "item_id": item.get("id"), "status": item.get("status"),
         }, root=Path(cfg.root), actor=by)
+    active = att.wip_count(store.get("items", []))
     return {"ok": True, "action": action, "item": item,
-            "wip": {"active": att.wip_count(store.get("items", [])),
-                    "limit": att.WIP_LIMIT, "slots_left": max(0, att.WIP_LIMIT - att.wip_count(store.get("items", []))) }}
+            "wip": {"active": active, "limit": att.WIP_LIMIT,
+                    "slots_left": max(0, att.WIP_LIMIT - active)}}
 
 
 def tickets_list(cfg):
@@ -3952,29 +4157,74 @@ def ticket_open(cfg, body):
             body.get("deadline"), work_item_id=str(body.get("work_item_id") or ""),
             cost_min=body.get("cost_min") or 0,
             actor=str(body.get("by") or cfg.owner or "owner"),
+            agent_id=str(body.get("agent_id") or body.get("by") or cfg.owner or "owner"),
+            one_way=bool(body.get("one_way")),
+            reason=str(body.get("reason") or ""),
             root=Path(cfg.root),
         )
     except tk.TicketError as exc:
         raise _attention_user_error(exc)
+    if ticket.get("status") == "suppressed":
+        return {"ok": True, "suppressed": True,
+                "reason": ticket.get("suppress_reason"),
+                "detail": ticket.get("suppress_detail"),
+                "ticket": ticket}
     return {"ok": True, "ticket": ticket}
 
 
 def ticket_action(cfg, ticket_id, action, body):
     tk = _tickets(cfg)
     body = body or {}
+    actor = str(body.get("by") or cfg.owner or "owner")
+    tid = unquote(ticket_id)
     try:
         if action == "decide":
-            ticket = tk.decide(unquote(ticket_id), body.get("choice"),
+            ticket = tk.decide(tid, body.get("choice"),
                                note=str(body.get("note") or ""),
-                               root=Path(cfg.root),
-                               actor=str(body.get("by") or cfg.owner or "owner"))
+                               root=Path(cfg.root), actor=actor)
+        elif action == "defer":
+            ticket = tk.defer(tid, body.get("until"), root=Path(cfg.root), actor=actor)
+        elif action == "snooze":
+            ticket = tk.snooze(tid, str(body.get("until") or ""),
+                               root=Path(cfg.root), actor=actor)
+        elif action == "resume":
+            ticket = tk.resume(tid, root=Path(cfg.root), actor=actor)
+        elif action == "drop":
+            ticket = tk.drop(tid, reason=str(body.get("reason") or ""),
+                             root=Path(cfg.root), actor=actor)
         else:
-            ticket = tk.defer(unquote(ticket_id), body.get("until"),
-                              root=Path(cfg.root),
-                              actor=str(body.get("by") or cfg.owner or "owner"))
+            raise ApiError(400, f"未知票动作：{action}")
     except tk.TicketError as exc:
         raise _attention_user_error(exc)
     return {"ok": True, "action": action, "ticket": ticket}
+
+
+def attention_focus_state(cfg):
+    return {"ok": True, "focus": _tickets(cfg).focus_state(root=Path(cfg.root))}
+
+
+def attention_focus_start(cfg, body):
+    tk = _tickets(cfg)
+    body = body or {}
+    try:
+        state = tk.start_focus(
+            str(body.get("item") or body.get("focus") or "飞书专注"),
+            body.get("minutes") or tk.DEFAULT_FOCUS_MIN,
+            actor=str(body.get("by") or cfg.owner or "owner"),
+            override=bool(body.get("override")),
+            root=Path(cfg.root),
+        )
+    except tk.TicketError as exc:
+        raise _attention_user_error(exc)
+    return {"ok": True, "focus": state}
+
+
+def attention_focus_end(cfg, body):
+    tk = _tickets(cfg)
+    body = body or {}
+    state = tk.end_focus(actor=str(body.get("by") or cfg.owner or "owner"),
+                         root=Path(cfg.root))
+    return {"ok": True, "focus": state}
 
 
 def route_api(cfg, method, path, query, body):
@@ -3982,6 +4232,14 @@ def route_api(cfg, method, path, query, body):
         if method != "GET":
             raise ApiError(405, "method not allowed")
         return 200, attention_metrics(cfg, query)
+    if path in ("/api/v1/attention/focus", "/api/attention/focus"):
+        if method == "GET":
+            return 200, attention_focus_state(cfg)
+        if method == "POST":
+            return 200, attention_focus_start(cfg, body)
+        if method == "DELETE":
+            return 200, attention_focus_end(cfg, body)
+        raise ApiError(405, "method not allowed")
     if path == "/api/v1/attention/today":
         if method != "GET":
             raise ApiError(405, "method not allowed")
@@ -3994,7 +4252,8 @@ def route_api(cfg, method, path, query, body):
         if method == "GET":
             return 200, tickets_list(cfg)
         if method == "POST":
-            return 201, ticket_open(cfg, body)
+            out = ticket_open(cfg, body)
+            return (200 if out.get("suppressed") else 201), out
         raise ApiError(405, "method not allowed")
     wm = WORKITEM_ACTION_RE.match(path)
     if wm:
@@ -4078,6 +4337,14 @@ def route_api(cfg, method, path, query, body):
         if method != "GET":
             raise ApiError(405, "method not allowed")
         return 200, dialog_get(cfg, unquote(dmatch.group(1)))
+    if path == "/api/context/ask":
+        if method != "POST":
+            raise ApiError(405, "method not allowed")
+        return 200, context_ask(cfg, body)
+    if path == "/api/context/stats":
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return 200, context_stats(cfg)
 
     match = TASK_ROUTE_RE.match(path)
     if not match:
@@ -4153,6 +4420,9 @@ class BotHandler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         self._handle("POST")
 
+    def do_DELETE(self):  # noqa: N802 — focus 结束等幂等删除
+        self._handle("DELETE")
+
     def do_OPTIONS(self):  # noqa: N802
         self._send_json(204, {})
 
@@ -4164,7 +4434,7 @@ class BotHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         try:
             if path.startswith("/api/"):
-                if method not in ("GET", "POST"):
+                if method not in ("GET", "POST", "DELETE"):
                     raise ApiError(405, "method not allowed")
                 stream = str((query.get("stream") or [""])[0]).strip().lower()
                 if path.startswith("/api/tasks/") and path.endswith("/events") and stream in ("1", "true", "yes"):

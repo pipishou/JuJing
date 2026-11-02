@@ -1,0 +1,13 @@
+{
+  "说明": "复制为 tools/rss_feeds.json 后按需增删；url 用自建 RSSHub 生成的 feed 地址",
+  "feeds": [
+    {
+      "name": "示例·RSSHub 路由占位",
+      "url": "http://127.0.0.1:1200/github/trending/python/daily"
+    },
+    {
+      "name": "示例·Hacker News",
+      "url": "https://news.ycombinator.com/rss"
+    }
+  ]
+}

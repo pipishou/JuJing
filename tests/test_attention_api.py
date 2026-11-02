@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
 if str(ROOT / "server") not in sys.path:
     sys.path.insert(0, str(ROOT / "server"))
 
-from core import attention  # noqa: E402
+from core import eventlog  # noqa: E402
 
 SPEC = importlib.util.spec_from_file_location("bot_team_app", ROOT / "server" / "app.py")
 APP = importlib.util.module_from_spec(SPEC)
@@ -25,14 +25,10 @@ class TestAttentionApi(unittest.TestCase):
         self.root = pathlib.Path(self.tmp.name)
         (self.root / "runtime").mkdir(parents=True, exist_ok=True)
         self.events = self.root / "runtime" / "events.jsonl"
-        rows = [
-            {"seq": 1, "ts": attention.now_iso(), "event": "bot_team_reminder_issued",
-             "event_id": "e1", "payload": {"kind": "hard", "source": "ledger_due"}},
-            {"seq": 2, "ts": attention.now_iso(), "event": "bot_team_item_created",
-             "event_id": "e2", "payload": {"item_id": "WI-1"}},
-        ]
-        self.events.write_text("\n".join(__import__("json").dumps(r, ensure_ascii=False) for r in rows) + "\n",
-                               encoding="utf-8")
+        # P0-4：事件必须走真实入口 emit，不再裸写 events.jsonl 造假。
+        eventlog.emit("reminder_issued", payload={"kind": "hard", "source": "ledger_due"},
+                      path=self.events)
+        eventlog.emit("item_created", payload={"item_id": "WI-1"}, path=self.events)
         self.old_events = os.environ.get("BOT_EVENTS_FILE")
         os.environ["BOT_EVENTS_FILE"] = str(self.events)
         self.cfg = APP.Config(self.root)

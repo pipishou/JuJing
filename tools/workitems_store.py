@@ -37,6 +37,14 @@ from pathlib import Path
 
 SCHEMA = "workitems.store.v1"
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:  # `python -B tools/workitems_store.py` 直接运行时也能 import core
+    sys.path.insert(0, str(ROOT))
+
+from core import fsutil  # noqa: E402
+from core.filelock import FileLock, LockTimeout  # noqa: E402
+
+# 读-改-写 必须在同一把锁内（P0-5）。默认 5s；可通过 env 覆盖便于压测/慢盘。
+DEFAULT_LOCK_TIMEOUT = float(os.environ.get("BOT_WORKITEMS_LOCK_TIMEOUT") or 5.0)
 
 # 状态词 → 机器值（前端只认这 6 个，导入时把五花八门的中文折进来）
 STATUS = {
@@ -72,6 +80,10 @@ class StoreError(Exception):
     """账本不可用（坏 JSON / 版本不符 / 找不到事项），CLI 一律 rc=2。"""
 
 
+class StoreLockError(StoreError):
+    """账本锁超时：有别的进程/线程长期占用（绝不静默跳过锁写）。"""
+
+
 # ---------------------------------------------------------------- 路径与读写
 
 def store_path():
@@ -81,13 +93,41 @@ def store_path():
     return ROOT / "runtime" / "workitems" / "current.json"
 
 
+def lock_path(path=None):
+    """账本锁文件：与账本同目录的 `<name>.lock`（跨进程互斥）。"""
+    p = Path(path) if path else store_path()
+    return p.with_name(p.name + ".lock")
+
+
+def file_lock(path=None, timeout=None):
+    return FileLock(lock_path(path), timeout=DEFAULT_LOCK_TIMEOUT if timeout is None else timeout)
+
+
+def mutate(fn, path=None, *, timeout=None):
+    """在文件锁内完成 load → fn(store) → save；返回 (store, fn 的返回值)。
+
+    fn 必须**原地**改 store（update_item/add_item/delete_item 都满足）。
+    fn 抛异常时不落盘（账本保持原样），异常原样上抛。
+    这是「并发 20 个更新不丢」的唯一入口：锁覆盖整个读-改-写窗口。
+    """
+    try:
+        with file_lock(path, timeout):
+            store = load(path)
+            out = fn(store)
+            save(store, path, _locked=True)
+            return store, out
+    except LockTimeout as exc:
+        raise StoreLockError("账本锁超时，未写入（%s）：%s" % (path or store_path(), exc)) from exc
+
+
 def _now():
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def empty_store():
     return {"schema": SCHEMA, "revision": 0, "updated_at": _now(),
-            "source": {"kind": "empty"}, "items": []}
+            "source": {"kind": "empty"}, "items": [],
+            "_loaded_revision": 0}
 
 
 def load(path=None):
@@ -102,28 +142,74 @@ def load(path=None):
         raise StoreError("账本版本不符：%r（期望 %s）" % (data.get("schema"), SCHEMA))
     data.setdefault("items", [])
     data.setdefault("revision", 0)
+    # 记住「我是基于哪一版改的」：save 时磁盘 revision 变了就拒绝覆盖（不静默丢更新）。
+    data["_loaded_revision"] = int(data.get("revision") or 0)
     return data
 
 
-def save(store, path=None, bump=True):
-    """原子写：先写同目录临时文件再 replace，避免半个 JSON。"""
-    p = Path(path) if path else store_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    if bump:
-        store["revision"] = int(store.get("revision") or 0) + 1
-    store["updated_at"] = _now()
+def _disk_revision(p):
+    if not p.exists():
+        return 0
+    try:
+        return int(json.loads(p.read_text(encoding="utf-8")).get("revision") or 0)
+    except (ValueError, OSError):
+        return 0
+
+
+def _write_store(store, p):
+    """真实落盘（调用方负责持锁）。下划线开头的进程内字段不写进 JSON。"""
     fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".wi-", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-            json.dump(store, fh, ensure_ascii=False, indent=2)
+            doc = {k: v for k, v in store.items() if not str(k).startswith("_")}
+            json.dump(doc, fh, ensure_ascii=False, indent=2)
             fh.write("\n")
-        os.replace(tmp, str(p))
+            fh.flush()
+            os.fsync(fh.fileno())
+        fsutil.replace_with_retry(tmp, str(p))
     finally:
         if os.path.exists(tmp):
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
+
+
+def save(store, path=None, bump=True, _locked=False):
+    """原子写：先写同目录临时文件再 replace，避免半个 JSON。
+
+    Windows 上目标文件被并发读句柄占用时 os.replace 会报 WinError 5，
+    统一走 `core.fsutil.replace_with_retry`（重试而非失败）。
+
+    并发写请用 `mutate()/update_locked()`（锁内 load→改→save）；直接 save
+    是「乐观写」：磁盘 revision 与你 load 时不一致会抛 StoreLockError，
+    **拒绝静默覆盖**（P0-5 的丢更新就是静默覆盖造成的）。
+    """
+    p = Path(path) if path else store_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if _locked:
+        return _save_locked(store, p, bump, check=False)
+    try:
+        with file_lock(p):
+            return _save_locked(store, p, bump, check=True)
+    except LockTimeout as exc:
+        raise StoreLockError("账本锁超时，未写入（%s）：%s" % (p, exc)) from exc
+
+
+def _save_locked(store, p, bump=True, check=True):
+    if check:
+        expected = store.get("_loaded_revision")
+        current = _disk_revision(p)
+        if expected is not None and int(current) != int(expected):
+            raise StoreLockError(
+                "账本已被其他进程/线程修改（磁盘 revision %s，本进程基于 %s）：拒绝覆盖；"
+                "请改用 mutate()/update_locked() 重做这次修改" % (current, expected)
+            )
+    if bump:
+        store["revision"] = int(store.get("revision") or 0) + 1
+    store["updated_at"] = _now()
+    _write_store(store, p)
+    store["_loaded_revision"] = int(store.get("revision") or 0)
     return store
 
 
@@ -416,6 +502,33 @@ def delete_item(store, item_id):
     return store, item
 
 
+# ---------------------------------------------------------------- 锁内写入口（P0-5）
+
+def update_locked(item_id, patch, *, path=None, by="老板", timeout=None):
+    """锁内更新一条事项 → (store, item)。并发安全，修订号严格 +1。"""
+    return mutate(lambda s: update_item(s, item_id, patch, by=by)[1], path, timeout=timeout)
+
+
+def add_locked(data, *, path=None, by="老板", timeout=None):
+    """锁内新增一条事项 → (store, item)。并发下 id 不重复。"""
+    return mutate(lambda s: add_item(s, data, by=by)[1], path, timeout=timeout)
+
+
+def delete_locked(item_id, *, path=None, timeout=None):
+    """锁内删除一条事项 → (store, item)。"""
+    return mutate(lambda s: delete_item(s, item_id)[1], path, timeout=timeout)
+
+
+def merge_locked(new_items, *, path=None, source=None, by="import",
+                 match_by_id=False, timeout=None):
+    """锁内幂等合并（导入用）→ (store, stats)。"""
+    def _apply(store):
+        _, stats = merge_items(store, new_items, by=by, source=source,
+                               match_by_id=match_by_id)
+        return stats
+    return mutate(_apply, path, timeout=timeout)
+
+
 # ---------------------------------------------------------------- 视图
 
 def is_overdue(item, as_of=None):
@@ -561,15 +674,13 @@ def main(argv=None):
                      {"status": args.status, "progress": args.progress, "owner": args.owner,
                       "due": args.due, "note": args.note, "title": args.title}.items()
                      if v is not None}
-            store, item = update_item(store, args.item_id, patch, by=args.by)
-            save(store, path)
+            store, item = update_locked(args.item_id, patch, path=path, by=args.by)
             _print({"ok": True, "revision": store["revision"], "item": item})
         elif args.cmd == "add":
             data = {k: getattr(args, k) for k in
                     ("title", "section", "category", "priority", "impact", "depts",
                      "solution", "owner", "due", "status", "note")}
-            store, item = add_item(store, data, by=args.by)
-            save(store, path)
+            store, item = add_locked(data, path=path, by=args.by)
             _print({"ok": True, "revision": store["revision"], "item": item})
         elif args.cmd == "export":
             out = write_csv(store, args.out)

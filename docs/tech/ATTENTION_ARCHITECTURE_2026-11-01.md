@@ -122,12 +122,46 @@ active ──blocked──▶ blocked ──resolved──▶ active
   "recommendation": "A",
   "cost_if_wrong": "低：可回头查型号",
   "deadline": "2026-11-01T18:00:00+08:00",
-  "status": "open|decided|deferred|expired",
+  "status": "open|deferred|snoozed|decided|dropped|suppressed",
   "created_at": "2026-11-01T10:00:00+08:00"
 }
 ```
 
 硬约束：**一问、2–3 选项、有推荐、有截止、有反悔代价**；缺任一不得开票。
+
+#### 3.2.1 票状态机与迁移表（2026-11-02 P0-1 定稿）
+
+实现：`core/tickets.py`；事实源为 append-only 的 `runtime/attention/tickets.jsonl`，
+`list_tickets()` 按事件折叠出当前状态。`suppressed` 不是持久票状态，而是
+配额/focus 命中时返回的草稿（见 3.2.2），不进入待裁决队列。
+
+| 当前状态 | 动作（HTTP） | 新状态 | 账本事件 |
+|---|---|---|---|
+| open | `defer {until}` → 200 | deferred | `attention_ticket_deferred` |
+| open / deferred / snoozed | `decide {choice,note}` → 200 | decided | `attention_ticket_decided` |
+| open / deferred | `snooze {until?}`（默认 +1h）→ 200 | snoozed | `attention_ticket_snoozed` |
+| deferred / snoozed | `resume` → 200 | open | `attention_ticket_resumed` |
+| open / deferred / snoozed | `drop {reason}` → 200 | dropped | `attention_ticket_dropped` |
+| decided / dropped | 任意动作 → **409** | 不变 | 不写（返回明确原因） |
+
+- `decide` 必须能吃掉 `deferred`/`snoozed`：票推迟后仍可直接裁决，不必先 `resume`。
+- `open` 是唯一“待用户裁决”状态；`/today` 的 `tickets` 只列 open，
+  `tickets_deferred` 额外列 deferred+snoozed（摘要一行，不展开）。
+- 非法迁移一律 `TicketConflict`（HTTP 409），消息含当前状态与允许状态，
+  例如 `票 AT-… 状态是 decided，不允许裁决（允许：open/deferred/snoozed）；decided/dropped 是终态`。
+
+#### 3.2.2 每日配额、one_way 与 focus
+
+- 配额：同一 `created_by`（agent）+ 本地日期最多 `DAILY_INTERRUPT_LIMIT=3` 次普通打断，
+  从票账本 `attention_ticket_opened` 计数；第 4 张不静默丢弃，写
+  `attention_ticket_suppressed`（含 `reason=daily_quota`、`used/limit`、票草稿），
+  响应 `200 {suppressed:true, reason, detail}`，并在 `/today` 的
+  `suppressed_today` 与 brief 中留一行摘要。
+- `one_way=true`（单向门）不计数、不抑制；仍需完整票字段。
+- focus：同一时刻只允许 1 个 focus item（`runtime/attention/focus.json`）。
+  已 focus 时再开 focus → 409；显式 `override=true` 才覆盖并记
+  `attention_focus_started`（`override=true`、`previous_item`）。focus 期间普通票被抑制（`reason=focus_active`），
+  `one_way` 仍可穿透。`DELETE /api/v1/attention/focus` 或到 `ends_at` 自动结束。
 
 ### 3.3 Mandate
 
@@ -203,7 +237,7 @@ adapters/
   feishu.py         # 薄适配：只做消息归一化/发送，不做路由
 runtime/
   attention/budget.json
-  attention/ledger.jsonl
+  attention/ledger.jsonl   # 投影缓存（非事实源，可由 events.jsonl 重建）
   attention/tickets/current.json
   workitems/current.json
 ```
@@ -216,15 +250,19 @@ runtime/
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
-| GET | `/api/v1/attention/today` | 今日 3 件事 + WIP + 预算 + focus 状态 |
-| GET | `/api/v1/attention/queue` | 完整队列（含停泊/等待/老化） |
-| POST | `/api/v1/attention/focus` | `{minutes: 90}` 开始免打扰 |
+| GET | `/api/v1/attention/today` | 今日 3 件事 + WIP + 票 + focus；超过 3 件必给「另有 N 件未显示」；`?include=paused` 追加 paused |
+| GET | `/api/v1/attention/queue` | 完整队列（含停泊/等待/老化/paused） |
+| GET | `/api/v1/attention/focus` | 当前 focus 状态 |
+| POST | `/api/v1/attention/focus` | `{item, minutes: 90, override?}` 开始免打扰；已有 focus 时需 override |
 | DELETE | `/api/v1/attention/focus` | 结束免打扰 |
 | POST | `/api/v1/workitems/{id}/park` | 停泊，释放 WIP |
-| POST | `/api/v1/workitems/{id}/resume` | 恢复 |
-| POST | `/api/v1/attention/tickets` | 开票（校验一问/选项/推荐/截止） |
-| POST | `/api/v1/attention/tickets/{id}/decide` | `{choice, note}` |
-| POST | `/api/v1/attention/tickets/{id}/defer` | 推迟到指定时间 |
+| POST | `/api/v1/workitems/{id}/resume` | 恢复；非停泊项（含外部 paused）→ 409 |
+| POST | `/api/v1/attention/tickets` | 开票（校验一问/选项/推荐/截止；配额/focus 命中→200 suppressed） |
+| POST | `/api/v1/attention/tickets/{id}/decide` | `{choice, note}`；open/deferred/snoozed→decided，终态 409 |
+| POST | `/api/v1/attention/tickets/{id}/defer` | 推迟到指定时间（→deferred） |
+| POST | `/api/v1/attention/tickets/{id}/snooze` | 稍后（→snoozed，默认 +1h） |
+| POST | `/api/v1/attention/tickets/{id}/resume` | deferred/snoozed→open |
+| POST | `/api/v1/attention/tickets/{id}/drop` | open/deferred/snoozed→dropped |
 | GET | `/api/v1/mandates` | 当前有效授权 |
 | POST | `/api/v1/mandates` | 签发 |
 | POST | `/api/v1/mandates/{id}/revoke` | 撤销 |
@@ -363,6 +401,7 @@ Router 只读六行，不读 worker 全量日志；需要细节时按引用读�
 验收：能回答“过去 3 天打断了多少次、你处理了几张票、WIP 峰值多少”。
 
 **状态（2026-11-01）：已实现。** 代码 `core/attention.py`；API `GET /api/v1/attention/metrics`；测试 `tests/test_attention.py`（6 项）+ `tests/test_attention_api.py`（2 项）全 PASS；无历史事件时返回 0 且 `data_quality.history=false`，不伪造基线。
+**修订（2026-11-02，P0-4）：** 原实现只写 `ledger.jsonl`、metrics 只读 `events.jsonl`，导致指标恒 0；已改为单一事实源，见 §16。
 
 ### Slice 2：WIP + 日报 + 票（1–2 天）
 
@@ -524,3 +563,31 @@ attention_metrics = {
 **验证**：`BOT_TEAM_API=http://127.0.0.1:8799 node integrations/dsh-command-bot-team/smoke.mjs` 已 PASS（today/queue/bt-metrics 均返回 success；无真实事件时显示 0，不伪造）。
 
 **边界**：这是本机 owner-only 桥；不解决 8787 常驻（DSH/电脑关机即不可用），也不替代飞书日报推送。日报推送下一步单独做。
+
+---
+
+## 16. 单一事实源与并发写（P0-4 / P0-5，2026-11-02）
+
+### 16.1 账本：events 是事实，ledger 是投影
+
+```text
+事实源   runtime/events.jsonl        # core.eventlog.emit() 追加，bot_team_* 前缀
+投影缓存 runtime/attention/ledger.jsonl  # 只由事件流重算，可随时删除
+```
+
+- attention 动作统一走 `attention.append(...)` → `core.eventlog.emit()` 写 `bot_team_attention_*`（如 `attention_interrupt`、`attention_ticket_opened`、`attention_task_switch`、`attention_snapshot`）。提醒/票/任务状态仍复用 `bot_team_reminder_issued`、`bot_team_item_created`、`bot_team_item_closed`，metrics 按去前缀短名统一口径。
+- `metrics()` **只读事件流**，不读 ledger；`data_quality` 标明 `source_of_truth="events"`、`ledger_role="projection"`。
+- 重建（任何人、任何机器）：
+  - 纯函数：`attention.project_ledger(events)` / `attention.rebuild_ledger(events, write=False)`
+  - 落盘：`attention.rebuild_ledger()` 或 `python -B core/attention.py --rebuild --root .`
+  - 重建幂等；删掉 ledger 后行内容与删除前逐字节一致（测试 `tests/test_attention_ledger.py`）。
+- 测试禁止裸写 `runtime/events.jsonl` 造假：写事件走 `emit()`/`attention.append()`，纯函数测试显式传 events 列表。
+
+### 16.2 并发：文件锁覆盖整个读-改-写
+
+- 锁原语 `core/filelock.py`：Windows `msvcrt.locking(LK_NBLCK)`、POSIX `fcntl.flock(LOCK_EX|LOCK_NB)`；锁文件 `<target>.lock` 常驻，进程崩溃由内核释放；超时抛 `LockTimeout`（绝不静默跳过锁）。
+- workitems：`tools/workitems_store.mutate(fn, path)` 在锁内 load→fn→save；封装 `update_locked / add_locked / delete_locked / merge_locked`。`save()` 是乐观写：磁盘 revision ≠ 本进程 load 时 → `StoreLockError`（拒绝覆盖），后台路由一律走 `mutate`。
+- 发号：`core/ids._FileLock` 复用同一 `FileLock`，超时转 `IdError`。
+- 压测（`tests/test_workitems_concurrency.py`）：20 线程更新 → revision 2..21 全出现、最终 21；20 线程新增 → 20 个唯一 id；8 进程新增 → 8 个唯一 id；20 线程/8 进程发号 → 无重号；占锁时 `update_locked(timeout=0.1)` → `StoreLockError`、`allocate` → `IdError`；裸 `load→save` 并发 → 明确报错而非丢更新。
+- 纪律：**不要**在并发路径上手写 `load()` 后直接 `save()`；用 `mutate()`/`*_locked()`。单写者初始化（测试夹具、一次性导入）可直接 `save()`。
+

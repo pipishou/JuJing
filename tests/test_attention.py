@@ -68,14 +68,21 @@ class TestLedger(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_append_is_append_only_and_seq_increments(self):
+    def test_append_writes_event_and_projects_ledger(self):
         a = attention.append("attention_interrupt", {"kind": "hard"}, root=self.root, ts=iso(0))
         b = attention.append("attention_task_switch", {"from": "A", "to": "B"}, root=self.root, ts=iso(0))
+        # 事实源：全局事件流（bot_team_attention_*），seq 严格递增。
+        events = attention.eventlog.iter_events(attention.events_path(self.root))
         self.assertEqual((a["seq"], b["seq"]), (1, 2))
+        self.assertEqual([e["event"] for e in events],
+                         ["bot_team_attention_interrupt", "bot_team_attention_task_switch"])
+        # 账本只是投影：内容必须等于事件流重算的结果。
         path = attention.ledger_path(self.root)
         lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
         self.assertEqual(len(lines), 2)
+        self.assertEqual([json.loads(ln) for ln in lines], attention.project_ledger(events))
         self.assertEqual(json.loads(lines[0])["event"], "attention_interrupt")
+        self.assertEqual(json.loads(lines[0])["source_seq"], 1)
 
     def test_bad_name_rejected(self):
         with self.assertRaises(attention.AttentionError):

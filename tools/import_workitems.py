@@ -22,9 +22,15 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import workitems_store as ws  # noqa: E402
 import xlsx_lite  # noqa: E402
+
+try:  # 注意力层可能未部署（老包），WIP 门降级为不启用而不是导入失败
+    from core import attention as att  # noqa: E402
+except Exception:  # noqa: BLE001
+    att = None
 
 
 def read_rows(path, sheet=None):
@@ -72,7 +78,6 @@ def main(argv=None):
                               "parsed": len(items), "sample": items[:2]},
                              ensure_ascii=False, indent=2))
             return 0
-        store = ws.load(args.file)
         source = None
         if not args.no_save_source:
             src_path = Path(args.source)
@@ -85,8 +90,8 @@ def main(argv=None):
                 "imported_at": ws._now(),
                 "imported_by": args.by,
             }
-        store, stats = ws.merge_items(store, items, by=args.by, source=source)
-        ws.save(store, args.file)
+        # P0-5：导入也是读-改-写，交给锁内合并入口（并发导入不丢条目/不撞 id）。
+        store, stats = ws.merge_locked(items, path=args.file, source=source, by=args.by)
         as_of = date.fromisoformat(args.as_of) if args.as_of else None
         print(json.dumps({
             "ok": True, "sheet": sheet_name, "revision": store.get("revision"),

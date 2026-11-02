@@ -8,17 +8,17 @@
   - task 级序号存 <root>/.task_seq.json；其余存 <root>/ids.json（kind -> next int）
   - 若 task_id 给到且 <root> 不是该 task 目录，则序号文件落到 <root>/<task_id>/ids.json
   - 同日多任务不重复：扫描已存在目录/文件，seq 跳过已占用编号
-  - 文件锁：os.open(lock, O_CREAT|O_EXCL)，重试 ≤3s；原子写回 os.replace
+  - 文件锁：core.filelock 原生排他锁（Windows msvcrt / POSIX flock），≤3s；原子写回 os.replace
 只依赖 stdlib。
 """
 import json
 import os
 import re
-import time
 from datetime import date
 from pathlib import Path
 
 from core import fsutil
+from core.filelock import FileLock, LockTimeout
 
 PREFIXES = {
     "task": "T",
@@ -31,8 +31,6 @@ PREFIXES = {
 }
 
 LOCK_TIMEOUT = 3.0
-LOCK_STALE = 30.0
-LOCK_POLL = 0.02
 
 
 class IdError(RuntimeError):
@@ -98,40 +96,24 @@ def _mkstemp(directory, stem):
 
 
 class _FileLock:
-    """O_CREAT|O_EXCL 锁；超时抛 IdError，陈旧锁自动清理。"""
+    """发号锁：复用 core.filelock（进程崩溃由内核释放，不留死锁文件）。
+
+    超时转成 IdError，保持本模块既有异常契约。
+    """
 
     def __init__(self, path):
         self.path = Path(path)
+        self._lock = FileLock(self.path, timeout=LOCK_TIMEOUT)
 
     def __enter__(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        deadline = time.time() + LOCK_TIMEOUT
-        while True:
-            try:
-                fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.close(fd)
-                return self
-            except FileExistsError:
-                try:
-                    age = time.time() - self.path.stat().st_mtime
-                except OSError:
-                    age = 0
-                if age > LOCK_STALE:
-                    try:
-                        os.unlink(self.path)
-                    except OSError:
-                        pass
-                    continue
-                if time.time() > deadline:
-                    raise IdError(f"编号锁超时（{LOCK_TIMEOUT}s）: {self.path}")
-                time.sleep(LOCK_POLL)
+        try:
+            self._lock.__enter__()
+        except LockTimeout as exc:
+            raise IdError("编号锁超时（%ss）: %s" % (LOCK_TIMEOUT, self.path)) from exc
+        return self
 
     def __exit__(self, exc_type, exc, tb):
-        try:
-            os.unlink(self.path)
-        except OSError:
-            pass
-        return False
+        return self._lock.__exit__(exc_type, exc, tb)
 
 
 def _existing_max(root, prefix, compact):

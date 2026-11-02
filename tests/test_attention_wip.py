@@ -25,6 +25,7 @@ class TestWipAndTickets(unittest.TestCase):
         self.root = pathlib.Path(self.tmp.name)
         self.env = {}
         for key, name in (("BOT_ATTENTION_FILE", "attention.jsonl"),
+                          ("BOT_EVENTS_FILE", "events.jsonl"),
                           ("BOT_WORKITEMS_FILE", "workitems.json"),
                           ("BOT_TICKETS_FILE", "tickets.jsonl")):
             self.env[key] = os.environ.get(key)

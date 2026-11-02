@@ -1,6 +1,6 @@
 # dsh-command-bot-team
 
-DSH 斜杠命令桥：把飞书里的 `/today`、`/queue`、`/park`、`/resume`、`/ticket`、`/bt-metrics` 直接转到 bot-team 本地服务 `127.0.0.1:8787`。
+DSH 斜杠命令桥：把飞书里的 `/today`、`/queue`、`/park`、`/resume`、`/ticket`、`/decide`、`/defer`、`/focus`、`/bt-metrics` 直接转到 bot-team 本地服务 `127.0.0.1:8787`。
 
 命令是 **DSH Host command**，不产生模型消息、不消耗 token；飞书只负责把 `/...` 送进 dsh-im，dsh-im 调 Host 的 `commands.execute()`。
 
@@ -52,11 +52,14 @@ node integrations/dsh-command-bot-team/smoke.mjs
 
 | 命令 | 作用 |
 |---|---|
-| `/today` | 今日最多 3 件 + WIP + 待拍板票 |
-| `/queue` | 进行中 / 停泊全量 |
+| `/today` | 今日最多 3 件 + WIP + 待拍板票；超过 3 件必带「另有 N 件未显示」，paused 另计一行 |
+| `/queue` | 进行中 / 停泊 / paused 全量 |
 | `/park <事项ID>` | 停泊，释放 WIP 槽 |
-| `/resume <事项ID>` | 恢复（WIP 已满会拒绝） |
-| `/ticket 问题 \| 选项A \| 选项B \| 推荐 \| 截止` | 开一张待拍板票 |
+| `/resume <事项ID>` | 恢复停泊项；非停泊项会明确报错（不再静默成功） |
+| `/ticket 问题 \| 选项A \| 选项B \| 推荐 \| 截止` | 开一张待拍板票；配额/focus 命中时返回“已抑制”并留痕 |
+| `/decide <票ID> <选项>` | 裁决；open/deferred/snoozed 都能直接裁决，decided/dropped 报 409 |
+| `/defer <票ID> [日期]` | 推迟（默认明天 09:00）；之后可直接 `/decide` 或 `/resume` |
+| `/focus [分钟] [事项]` | 开始免打扰（默认 90 分钟）；`/focus off` 结束；同时只允许 1 个 |
 | `/bt-metrics` | 3 天注意力基线 |
 
 注意：飞书原生 `/` 面板只列 dsh-im 自带命令；本插件的命令**手动输入可用**，不保证出现在面板候选里。
