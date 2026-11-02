@@ -87,3 +87,103 @@
 **口径**：业务专家是**一个席位、三套底稿**（稻盛/外贸/芒格），按任务类型切换，不拆成三个 Bot——拆了会把「每单派全部专家」的并行成本乘 3，而 MVP 阶段收益不成立。
 
 复验命令：`python -B tools/rebuild_persona.py --check`（5 个 sha 全 OK）、`python -B tests/test_advisory_pack.py`（六角色全绿）、`python -B tests/validate_structure.py`（PASS）。
+
+## 九、建 Bot 填表清单（可直接抄进 Tobs 表单）
+
+> 用途：Tobs 建 Bot 表单逐字段要填什么。所有 Bot 共用：**模型 `deepseek-v4.1-flash`**（opencode-go 套餐）、**思考强度 `high`**、**语言 中文**、**工具 默认全开（除计算机控制在首周只读）**。
+
+### 0 号 工作助理（团长）
+
+| 字段 | 填什么 |
+|---|---|
+| 名称 | 工作助理 |
+| emoji / 头像 | 🧭（像素头像选「向导/罗盘」类） |
+| 一句话定位 | 你的工作管家：接住每句话，判级、派活、汇总、出卡。 |
+| 人设来源 | 本仓 `packs/expert_market/manufacturing-business-team/`（IDENTITY.md + SOUL.md） |
+| 记忆 | 独立 git 仓 `bot-team-memory/assistant` |
+| 主动推送 | **开**（每天 ≤3 条：早间今日 / 到点提醒 / 晚间复盘） |
+| 群聊 | 「工作事项」群 + 飞书私聊 |
+| 首条自检 | 发「今天有什么」→ 应回「今日 3 件 + 逾期 N 件」 |
+
+### 1 号 AI 专家
+
+| 字段 | 填什么 |
+|---|---|
+| 名称 | AI 专家 |
+| emoji | 🧠 |
+| 一句话定位 | 判断这事该不该用 AI、用什么形态、怎么验收。 |
+| 人设来源 | `packs/expert_market/manufacturing-advisory-board/persona/andrej-karpathy/distill`（7 模型 / 8 启发式） |
+| 记忆 | `bot-team-memory/ai-expert` |
+| 主动推送 | **关**（只能被团长委派或群内 @） |
+| 群聊 | 只在「工作事项」群里被 @ 时回答 |
+| 输出纪律 | 只回六行；必须给 1 条反证 |
+
+### 2 号 产品专家
+
+| 字段 | 填什么 |
+|---|---|
+| 名称 | 产品专家 |
+| emoji | 🍎 |
+| 一句话定位 | 一句话定义、做减法、删需求。 |
+| 人设来源 | `persona/steve-jobs/distill`（含「后见之明」校验段） |
+| 记忆 | `bot-team-memory/product-expert` |
+| 主动推送 | 关 |
+| 群聊 | 「工作事项」群 |
+| 输出纪律 | 先答「这条能不能删」，再答「留什么」 |
+
+### 3 号 业务专家
+
+| 字段 | 填什么 |
+|---|---|
+| 名称 | 业务专家 |
+| emoji | 🏭 |
+| 一句话定位 | 算得清账吗、谁负责、交期与单证敢不敢承诺。 |
+| 人设来源 | **两份**：`persona/kazuo-inamori/distill`（内部经营）+ `persona/foreign-trade-b2b/distill`（外贸/单证/交付） |
+| 路由规则 | 在它的 IDENTITY.md 写死：涉及境外客户/询盘/单证/交期承诺 → 外贸口径；其余 → 经营口径 |
+| 记忆 | `bot-team-memory/business-expert` |
+| 主动推送 | 关 |
+| 群聊 | 「工作事项」群 |
+
+### 4 号 内容操盘手
+
+| 字段 | 填什么 |
+|---|---|
+| 名称 | 内容操盘手 |
+| emoji | 🎬 |
+| 一句话定位 | 情报→核验→选题→结构→标题→渠道→复盘→沉淀，一条龙。 |
+| 人设来源 | `persona/manufacturing-content-operator/distill` |
+| 记忆 | `bot-team-memory/content-operator` |
+| 主动推送 | **开**（仅资讯：08:30 主推 10 条 / 12:30 补漏静默 / 20:30 复盘一句） |
+| 群聊 | 飞书私聊为主，不进群 |
+| 定时任务 | 三个（`08:30` / `12:30` / `20:30`），时区 Asia/Shanghai |
+| 数据源 | `tools/rss_feeds.json`（RSSHub 主 `hub.slarker.me`、备 `rsshub.ktachibana.party`）+ `tools/rss_fetch.py --limit 10 --per-source 3` |
+
+### 建完后的三步验收
+
+1. 0 号私聊发「今天有什么」→ 10 秒内回「今日 N 件 / 逾期 M 件」（数据来自 `/api/workitems`）。
+2. 群里 @0 号说「帮我定一下这周先做哪三件」→ 它应判级（L1/L2）、@对应专家、汇总并写「未采纳谁」。
+3. 4 号次日 08:30 是否真推 10 条（首日允许人工触发一次验证格式）。
+
+---
+
+## 九、记忆仓与建 Bot 填表值（2026-11-02 16:20）
+
+记忆仓：`https://github.com/pipishou/bot-memory`（**私有**），本地 `D:/work/产品类/个人产品/bot-2/bot-memory`，首提交 `9292948`。
+三层记忆：核心事实 `<bot>/MEMORY.md`／日期日志 `<bot>/log/YYYY-MM.md`／临时便签 `<bot>/notes/`。
+
+建 Bot 时各字段按下表填（人格文件路径相对 `bot-team/packs/expert_market/manufacturing-advisory-board/`）：
+
+| # | 名称 | 一句话定位 | 人格文件 | 记忆目录 | 模型/强度 | 可主动推 |
+|---|---|---|---|---|---|---|
+| 1 | 工作助理（团长） | 每天开局、判级派活、收敛拍板 | `agents/jobs.md`（团长不加人格，用中立语气；人格仅用于产品判断） | `assistant/` | deepseek-v4.1-flash / high | ✅ 每天 ≤3 条 |
+| 2 | AI 专家 | 模型能力边界与可验证性 | `agents/karpathy.md` | `ai-expert/` | flash / high | ❌ |
+| 3 | 产品专家 | 该删什么、第一秒体验 | `agents/jobs.md` | `product-expert/` | flash / high | ❌ |
+| 4 | 业务专家 | 经营账 + 外贸口径双路由 | `agents/kazuo-inamori.md`（主）/ `agents/foreign-trade-b2b.md`（外贸任务切换） | `business-expert/` | flash / high | ❌ |
+| 5 | 内容操盘手 | 每日 10 条情报 → 选题 → 标题 | `agents/content-operator.md` | `content-operator/` | flash / high | ✅ 仅 08:30 情报 |
+
+建 Bot 的通用提示词（每个都粘同一段，只改角色名）：
+```
+你是「<角色名>」。人格与纪律已写在你的人格文件里，先读它，再回答。
+记忆目录：bot-memory/<bot>/（核心事实 MEMORY.md、日期日志 log/、临时便签 notes/）。
+铁律：只回六行；结论必须带出处或标[推断]；不许替我拍板；不确定就说不确定。
+```
