@@ -187,3 +187,18 @@
 记忆目录：bot-memory/<bot>/（核心事实 MEMORY.md、日期日志 log/、临时便签 notes/）。
 铁律：只回六行；结论必须带出处或标[推断]；不许替我拍板；不确定就说不确定。
 ```
+
+## 十、建 Bot 实况（2026-11-02 16:45，脚本 `tools/dsh_create_bots.sh`）
+
+| Bot | id（slug） | 记忆目录（真实绑定） | 人格来源 |
+|---|---|---|---|
+| 工作助理 | `bot-5f46e53ba61b4c58966d3528bd47653c` | `bot-memory/assistant/` | jobs.md + 团长头段 |
+| AI 专家 | `bot-0d8da16ee82042be85ccee7225008b53` | `bot-memory/ai-expert/` | karpathy.md（7 模型/8 启发式） |
+| 产品专家 | `bot-f9e7ff3cf9294b85801a43b98361a3c9` | `bot-memory/product-expert/` | jobs.md |
+| 业务专家 | `bot-b28c350128d24abab3f492fe20c63b53` | `bot-memory/business-expert/` | kazuo-inamori.md（+外贸底稿可切） |
+| 内容操盘手 | `bot-0c08af3a9864458885d1c072b767bfca` | `bot-memory/content-operator/` | content-operator.md |
+| （Tob 默认） | `bot-10695da2e6f346b186b70cc7a1ca96ad` | 插件自管 | — |
+
+- 创建日志：`runtime/logs/create-bots-20261102-164527.log`（237 行；5 个 Bot 的 `validate / allocate-id / create-bot` 三步均 `status: ok`，`rc=0`；`model` 步 `status: deferred`）。
+- **记忆绑定方式**：Tobs 在每个 `<role>/<bot-id>/` 下建独立 git 记忆仓，其 `MEMORY.md` 只有一行指向 `<role>/MEMORY.md`（即我方写入的核心事实文件）——所以**改核心事实要改 `<role>/MEMORY.md`**，改 `<role>/<bot-id>/MEMORY.md` 无效。
+- **未完成**：5 个 Bot 的 `model` 检查项全部 `code=no-model-yet`（`model_presets` 表为空）→ 必须在 Bot 模式设置里授权模型（或 DSH 退出后跑 `tools/dsh_set_bot_models.sh`），否则发消息不会有回复。
