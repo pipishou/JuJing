@@ -71,3 +71,19 @@
 | 通道 | 飞书私聊（Tobs IM） | 手机上的一等公民：`/today` 看今日、点卡签字、回一句改状态 |
 
 判断依据：**面板跟人走，账本跟证据走**。日常操作在 Tobs 面板（Bot 在哪你在哪），需要核对证据/翻历史时才回 8787。
+
+## 八、人格底稿现状（2026-11-02 复验）
+
+| 角色 | 人格底稿 | sha | 状态 |
+|---|---|---|---|
+| 工作助理（团长） | 无独立人格文件（由 Tobs Orchestrator 兼任） | — | 待重启后建 Bot |
+| AI 专家 | `persona/andrej-karpathy/distill`（7 模型/8 启发式，含可验证性） | 7186ad00 | ✅ |
+| 产品专家 | `persona/steve-jobs/distill`（6 模型 + 后见之明校验） | fcdcdc0f | ✅ |
+| 内容操盘手 | `persona/manufacturing-content-operator/distill` | c7c05174 | ✅ |
+| 业务专家 · 稻盛 | `persona/kazuo-inamori/distill`（6 模型/8 启发式） | b4e77fa3 | ✅ |
+| 业务专家 · 外贸 | `persona/foreign-trade-b2b/distill`（主题蒸馏，不挂人名） | a98ca72b | ✅ |
+| 业务专家 · 芒格 | 女娲现成 `munger-perspective`（零成本，按需接入） | — | 未接线 |
+
+**口径**：业务专家是**一个席位、三套底稿**（稻盛/外贸/芒格），按任务类型切换，不拆成三个 Bot——拆了会把「每单派全部专家」的并行成本乘 3，而 MVP 阶段收益不成立。
+
+复验命令：`python -B tools/rebuild_persona.py --check`（5 个 sha 全 OK）、`python -B tests/test_advisory_pack.py`（六角色全绿）、`python -B tests/validate_structure.py`（PASS）。
