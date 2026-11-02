@@ -38,7 +38,7 @@ make_bot() {
   local args=(create --name "$name" --memory-location "$MEM/$memory_dir")
   [ -n "$PRESET" ] && args+=(--preset "$PRESET")
   if [ -n "$extra" ]; then
-    { printf '%s\n\n' "$extra"; cat "$persona_file"; } | tobs "${args[@]}" --persona-stdin --core-memory "$MEM/$memory_dir/MEMORY.md"
+    { printf '%s\n\n' "$extra"; cat "$persona_file"; } | neutralize | tobs "${args[@]}" --persona-stdin --core-memory "$MEM/$memory_dir/MEMORY.md"
   else
     cat "$persona_file" | neutralize | tobs "${args[@]}" --persona-stdin --core-memory "$MEM/$memory_dir/MEMORY.md"
   fi
