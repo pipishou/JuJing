@@ -213,6 +213,9 @@ def build_report(doc: dict, task_id: str, task_dir: Path, pack: dict, refs: list
             report["outcome"] = doc["outcome"]
     if report["security_gate_requested"]:
         report["security_gate"] = doc.get("security_gate") or {}
+    # 指标游戏（2026-11-02 案例）：改口径/移出统计/调分母等只写 report["flags"] 提示，
+    # 不阻断、不判红；validate_report 会打一行「⚠ 指标游戏标记 N 处」。
+    gates.apply_metric_gaming_flags(report)
     return report
 
 

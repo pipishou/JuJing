@@ -39,6 +39,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+import core.gate as gate_mod  # noqa: E402
 import core.gates as gates  # noqa: E402
 
 REPORTS: list[str] = []
@@ -232,6 +233,24 @@ def case_gate(tmp: Path) -> None:
     (bad_dir / "review.json").write_text("{not json", encoding="utf-8")
     check("负例：review.json 损坏 → load_review=None（fail-closed）",
           gates.load_review(bad_dir) is None)
+
+    # gate confirm 回写报告字节 → 旧复核必然失效；返回体必须显式回显，不静默作废
+    inv_dir = tmp / "confirm_invalidation"
+    inv_dir.mkdir(parents=True, exist_ok=True)
+    rep = {"task_id": "T-REVIEW-UNIT-05", "security_gate_requested": True,
+           "security_gate": {"status": "pending_user_confirmation"}, "recommendation": []}
+    dump_json(inv_dir / "report.json", rep)
+    pre = sha256_bytes((inv_dir / "report.json").read_bytes())
+    dump_json(inv_dir / "review.json", make_review(rep, pre))
+    doc = gate_mod.confirm(str(inv_dir), "老板", "同意", json.loads(json.dumps(rep)))
+    check("confirm 回写字节 → review_invalidated=true", doc.get("review_invalidated") is True, doc)
+    check("review_invalidated 为 bool", isinstance(doc.get("review_invalidated"), bool), doc)
+
+    clean_dir = tmp / "confirm_no_review"
+    clean_dir.mkdir(parents=True, exist_ok=True)
+    dump_json(clean_dir / "report.json", {"task_id": "T-REVIEW-UNIT-06"})
+    doc = gate_mod.confirm(str(clean_dir), "老板", "", {"task_id": "T-REVIEW-UNIT-06"})
+    check("无 review.json → review_invalidated=false", doc.get("review_invalidated") is False, doc)
 
 
 # --------------------------------------------------------------------------- #
@@ -517,6 +536,25 @@ def case_http(tmp: Path) -> None:
         check("HTTP 正控：路径在响应里", str(review_path) == str(payload.get("path") or ""), payload)
         check("HTTP 正控：复核不改报告字节", report_path.read_bytes() == before)
 
+        # 复核必须留审计事件（run.log：phase=review / action=confirmed）
+        run_log = tdir / "run.log"
+        rev_events = []
+        if run_log.is_file():
+            for _line in run_log.read_text(encoding="utf-8").splitlines():
+                _line = _line.strip()
+                if not _line:
+                    continue
+                try:
+                    _ev = json.loads(_line)
+                except ValueError:
+                    continue
+                if _ev.get("phase") == "review":
+                    rev_events.append(_ev)
+        check("HTTP 正控：复核写 run.log 审计事件（phase=review/action=confirmed）",
+              len(rev_events) == 1 and rev_events[0].get("action") == "confirmed"
+              and (rev_events[0].get("meta") or {}).get("reviewed_by") == "老板",
+              rev_events)
+
         status, payload = _http("POST", f"{base}/api/tasks/{task_ok}/sign", {"signer": "老板"})
         check("HTTP 正控：/sign 认复核 → 200", status == 200, (status, payload))
         check("HTTP 正控：/sign 标 review_applied=true", payload.get("review_applied") is True, payload)
@@ -580,6 +618,8 @@ def case_http(tmp: Path) -> None:
         status, payload = _http("POST", f"{base}/api/tasks/{task_g}/gate",
                                 {"action": "confirm", "confirmer": "老板", "comment": "同意交付口径"})
         check("HTTP 3f：/gate confirm → 200", status == 200, (status, payload))
+        check("HTTP 3f：无复核时 confirm 回显 review_invalidated=false",
+              payload.get("review_invalidated") is False, payload)
         gate_sha = sha256_bytes((tdir_g / "report.json").read_bytes())
         status, payload = _http("POST", f"{base}/api/tasks/{task_g}/review",
                                 {"reviewed_by": "老板",
@@ -603,11 +643,122 @@ def case_http(tmp: Path) -> None:
                            "reason": "先复核后 confirm：验证 confirm 回写报告会作废旧复核，必须拒签。",
                            "decisions": [{"finding_id": "F1", "verdict": "accept", "note": "证据成立"}]})
         check("HTTP 3f 夹具：先复核 200", status == 200)
-        status, _ = _http("POST", f"{base}/api/tasks/{task_g2}/gate",
-                          {"action": "confirm", "confirmer": "老板", "comment": "同意"})
+        status, payload_c = _http("POST", f"{base}/api/tasks/{task_g2}/gate",
+                                  {"action": "confirm", "confirmer": "老板", "comment": "同意"})
+        check("HTTP 3f：先复核后 confirm → 响应回显 review_invalidated=true",
+              status == 200 and payload_c.get("review_invalidated") is True, (status, payload_c))
         status, payload = _http("POST", f"{base}/api/tasks/{task_g2}/sign", {"signer": "老板"})
         check("HTTP 3f：先复核后 confirm → /sign 409（旧复核失效，需重做）",
               status == 409, (status, payload))
+        check("HTTP 3f：409 文案明确「复核已被 gate 确认作废，请重新复核」",
+              "作废" in str(payload), payload)
+
+        # 作废后重新复核 → 正常放行（作废不是死路）
+        status, _ = _http("POST", f"{base}/api/tasks/{task_g2}/review",
+                          {"reviewed_by": "老板",
+                           "reason": "confirm 回写后重新复核：以当前报告字节为准，结论不变，放行不改分。",
+                           "decisions": [{"finding_id": "F1", "verdict": "accept", "note": "证据成立"}]})
+        check("HTTP 3f：作废后重新复核 → 200", status == 200, status)
+        status, payload = _http("POST", f"{base}/api/tasks/{task_g2}/sign", {"signer": "老板"})
+        check("HTTP 3f：重新复核后 /sign → 200", status == 200, (status, payload))
+    finally:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:  # noqa: BLE001
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001
+                pass
+        log_fh.close()
+
+
+# --------------------------------------------------------------------------- #
+# 4) Maker–Checker：复核人白名单（BOT_REVIEWERS_FILE）与签字人分离
+# --------------------------------------------------------------------------- #
+def case_http_reviewers(tmp: Path) -> None:
+    print("\n[4] Maker–Checker：复核人白名单 + 复核人≠签字人（BOT_REVIEWERS_FILE）")
+    runs = tmp / "runs_reviewers"
+    runs.mkdir(parents=True, exist_ok=True)
+    log_path = tmp / "server_reviewers.log"
+    reviewers_file = tmp / "reviewers.json"
+    dump_json(reviewers_file, {"reviewers": [
+        {"id": "ou_zhang", "id_type": "open_id", "name": "张复核",
+         "reviewer": "张复核", "chat_id": ""},
+        {"id": "ou_li", "id_type": "open_id", "name": "李复核",
+         "reviewer": "李复核", "chat_id": ""},
+    ]})
+    # 结构同 im_signers.json：可直接复用（signer 当 reviewer），坏文件 fail-closed
+    from server.app import load_reviewers  # noqa: PLC0415 - 需 notify_lark 桩（case_sign_entry 已装）
+    im_shape = tmp / "im_signers_shape.json"
+    dump_json(im_shape, {"signers": [
+        {"id": "ou_x", "id_type": "open_id", "name": "Mo", "signer": "老板", "chat_id": ""}]})
+    check("复核人白名单兼容 im_signers 结构（signer 即 reviewer）",
+          load_reviewers(im_shape) == ("老板",), load_reviewers(im_shape))
+    bad_file = tmp / "reviewers_bad.json"
+    bad_file.write_text("{not json", encoding="utf-8")
+    try:
+        load_reviewers(bad_file)
+        check("坏复核人白名单 → ValueError（fail-closed）", False, "未抛错")
+    except ValueError as exc:
+        check("坏复核人白名单 → ValueError（fail-closed）", "不可解析" in str(exc), str(exc))
+    port = _free_port()
+    env = dict(os.environ)
+    env.update({
+        "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1",
+        "BOT_RUNS_ROOT": str(runs),
+        "BOT_LEDGER_ROOT": str(tmp / "ledger_reviewers"),
+        "BOT_WORKITEMS_FILE": str(tmp / "workitems_reviewers.json"),
+        "BOT_EVENTS_FILE": str(tmp / "events_reviewers.jsonl"),
+        "BOT_REVIEWERS_FILE": str(reviewers_file),
+    })
+    env.pop("BOT_SIGNERS", None)
+    env.pop("BOT_SIGNER", None)
+    log_fh = open(log_path, "w", encoding="utf-8")
+    proc = subprocess.Popen(
+        [str(PY), "-B", str(ROOT / "server" / "app.py"), "--port", str(port),
+         "--root", str(ROOT), "--allow-signers", "老板,boss,张复核,李复核"],
+        cwd=str(ROOT), env=env, stdout=log_fh, stderr=subprocess.STDOUT, text=True,
+        encoding="utf-8", errors="replace")
+    base = f"http://127.0.0.1:{port}"
+    try:
+        if not _wait_health(port, log_path):
+            check("HTTP 复核人：服务启动", False, "health 超时")
+            return
+        check("HTTP 复核人：服务启动", True)
+
+        task_a = "T-REVIEW-RV-01"
+        _make_task(runs, task_a, "assembled")
+        status, payload = _http(
+            "POST", f"{base}/api/tasks/{task_a}/review",
+            {"reviewed_by": "老板",
+             "reason": "复核人白名单启用后，签字人不得自己复核自己，必须拒。",
+             "decisions": [{"finding_id": "F1", "verdict": "accept", "note": "证据成立"}]})
+        check("HTTP 复核人负例：不在 reviewers 白名单 → 403",
+              status == 403 and "复核人" in str(payload), (status, payload))
+
+        task_b = "T-REVIEW-RV-02"
+        _make_task(runs, task_b, "assembled")
+        status, payload = _http(
+            "POST", f"{base}/api/tasks/{task_b}/review",
+            {"reviewed_by": "张复核",
+             "reason": "复核人独立于签字人：先复核，随后由同一人签字应被拒。",
+             "decisions": [{"finding_id": "F1", "verdict": "accept", "note": "证据成立"}]})
+        check("HTTP 复核人正控：白名单内复核 → 200", status == 200, (status, payload))
+        status, payload = _http("POST", f"{base}/api/tasks/{task_b}/sign", {"signer": "张复核"})
+        check("HTTP 负例：复核人=签字人 → 403 且文案点名",
+              status == 403 and "复核人不得与签字人相同" in str(payload), (status, payload))
+
+        task_c = "T-REVIEW-RV-03"
+        _make_task(runs, task_c, "assembled")
+        status, payload = _http(
+            "POST", f"{base}/api/tasks/{task_c}/review",
+            {"reviewed_by": "李复核",
+             "reason": "复核人李复核与签字人老板分离：复核后由老板签字应放行。",
+             "decisions": [{"finding_id": "F1", "verdict": "accept", "note": "证据成立"}]})
+        check("HTTP 复核人正控：复核 200（李复核）", status == 200, (status, payload))
+        status, payload = _http("POST", f"{base}/api/tasks/{task_c}/sign", {"signer": "老板"})
+        check("HTTP 正控：复核人≠签字人 → /sign 200", status == 200, (status, payload))
     finally:
         try:
             proc.terminate()
@@ -632,6 +783,7 @@ def main() -> int:
         case_sign_entry()
         case_cli(tmp)
         case_http(tmp)
+        case_http_reviewers(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print(f"\n{CHECKS - len(FAILS)}/{CHECKS} 通过")

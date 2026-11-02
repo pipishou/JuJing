@@ -498,6 +498,37 @@ def case_gate(tmp):
     check("无报告目录也可确认", doc4.get("status") == "confirmed" and doc4.get("task_id") == bare.name,
           doc4)
 
+    # 甲方案补丁（2026-11-02）：confirm 回写报告字节会作废旧复核 → 必须显式回显，不静默作废
+    inv = Path(tmp) / "gate" / "T-20261019-CORE-03"
+    inv_report = {"task_id": inv.name, "security_gate_requested": True,
+                  "security_gate": {"status": "pending_user_confirmation"},
+                  "recommendation": []}
+    dump(inv / "report.json", inv_report)
+    pre_sha = hashlib.sha256((inv / "report.json").read_bytes()).hexdigest()
+    dump(inv / "review.json", {"schema": "review.v1", "task_id": inv.name,
+                               "report_sha256": pre_sha, "reviewed_by": "老板"})
+    doc_inv = gate.confirm(inv, "老板", "同意", json.loads(json.dumps(inv_report)))
+    check("confirm 回写字节 → review_invalidated=true",
+          doc_inv.get("review_invalidated") is True, doc_inv)
+    check("review_invalidated 是 bool", isinstance(doc_inv.get("review_invalidated"), bool), doc_inv)
+
+    plain = Path(tmp) / "gate" / "T-20261019-CORE-04"
+    plain_report = {"task_id": plain.name, "recommendation": []}
+    dump(plain / "report.json", plain_report)
+    doc_plain = gate.confirm(plain, "老板", "", json.loads(json.dumps(plain_report)))
+    check("无 review.json → review_invalidated=false",
+          doc_plain.get("review_invalidated") is False, doc_plain)
+
+    keep = Path(tmp) / "gate" / "T-20261019-CORE-05"
+    keep_report = {"task_id": keep.name, "recommendation": []}
+    dump(keep / "report.json", keep_report)
+    keep_sha = hashlib.sha256((keep / "report.json").read_bytes()).hexdigest()
+    dump(keep / "review.json", {"schema": "review.v1", "task_id": keep.name,
+                               "report_sha256": keep_sha, "reviewed_by": "老板"})
+    doc_keep = gate.confirm(keep, "老板", "")  # 不回写报告 → 字节未变
+    check("confirm 未回写报告 → 复核不作废",
+          doc_keep.get("review_invalidated") is False, doc_keep)
+
 
 # ---------------------------------------------------------------------------
 # 5. core.gates 硬化
@@ -587,6 +618,76 @@ def case_gates_hardening():
     demo = dict(base_report)
     demo["is_demo"] = True
     check("demo 报告拒绝", any("demo" in x for x in gates.check_finalize(dec, demo, sig, ["老板"])))
+
+
+# ---------------------------------------------------------------------------
+# 5b. 指标游戏：只标记不阻断（2026-11-02 案例实测：模型建议「把已逾期事项移出
+#     在办统计口径」，系统照单全收并进了决策卡）
+# ---------------------------------------------------------------------------
+def case_metric_gaming(tmp):
+    print("\n[5b] core.gates 指标游戏：只标记不阻断")
+
+    def rec(action="", effect="", **extra):
+        item = {"action": action,
+                "roi": {"cost": "¥0", "avoided": "¥1000", "anchor": "maintenance（pack:manufacturing）"},
+                "irreversibility": "reversible"}
+        if effect:
+            item["expected_effect"] = effect
+        item.update(extra)
+        return item
+
+    hit1 = {"recommendation": [rec(action="把已逾期事项移出在办统计口径，逾期率自然回落")]}
+    h1 = gates.metric_gaming_flags(hit1)
+    check("命中①改统计口径/移出统计", bool(h1) and h1[0]["index"] == 0, h1)
+    check("命中①带命中短语", any("移出" in str(x.get("phrase")) for x in h1), h1)
+
+    hit2 = {"recommendation": [rec(action="按新流程重排优先级"),
+                               rec(action="复核后重排处置计划",
+                                   effect="调整分母，把长期挂起项从逾期率计算中剔除")]}
+    h2 = gates.metric_gaming_flags(hit2)
+    check("命中②expected_effect 调整分母", any(x["index"] == 1 for x in h2), h2)
+
+    miss1 = {"recommendation": [rec(action="补拉 2026-10-12~10-19 日台账并核对 M-03 台账状态")]}
+    miss1_hits = gates.metric_gaming_flags(miss1)
+    check("不命中①正常补数据建议", miss1_hits == [], miss1_hits)
+
+    miss2 = {"recommendation": [rec(action="核对统计口径变更记录（MES 版本、补料单生成规则）")]}
+    miss2_hits = gates.metric_gaming_flags(miss2)
+    check("不命中②核对口径变更（诊断性，非改口径）", miss2_hits == [], miss2_hits)
+
+    flagged = {"recommendation": [rec(action="把已逾期事项移出在办统计口径")]}
+    hits = gates.apply_metric_gaming_flags(flagged)
+    mg_flags = [f for f in (flagged.get("flags") or []) if f.get("code") == "metric_gaming"]
+    check("写进 report['flags']（code=metric_gaming，带 count/items）",
+          len(mg_flags) == 1 and mg_flags[0].get("count") == len(hits), flagged.get("flags"))
+    gates.apply_metric_gaming_flags(flagged)
+    check("flags 只标记：重复调用不重复追加",
+          len([f for f in (flagged.get("flags") or [])
+               if isinstance(f, dict) and f.get("code") == "metric_gaming"]) == 1)
+
+    # 真实 advisory 实测（2026-11-02 案例产物，仓库外隔离目录；不在场时跳过不判红）
+    real = Path(ROOT).parents[1] / "_tmp_case" / "runs" / "T-20261102-002" / "report.json"
+    if real.is_file():
+        real_doc = json.loads(real.read_text(encoding="utf-8-sig"))
+        real_hits = gates.metric_gaming_flags(real_doc)
+        check("真实 advisory 命中指标游戏", bool(real_hits), real_hits)
+        print("      真实命中:", json.dumps(real_hits, ensure_ascii=False)[:600])
+    else:
+        print(f"      （真实 advisory 不在场，跳过：{real}）")
+
+    # validate_report.py：只提示一行，不判红
+    report, _clean, _demo = build_real_report(tmp)
+    report["recommendation"] = [{
+        "action": "把已逾期事项移出在办统计口径，逾期率立刻降到 20% 以下",
+        "roi": {"cost": "¥0", "avoided": "¥1000", "anchor": "maintenance（pack:manufacturing）"},
+        "irreversibility": "reversible",
+    }]
+    p = Path(tmp) / "metric-gaming" / "report.json"
+    dump(p, report)
+    rc, out = run([PY, "-B", str(ROOT / "tests" / "validate_report.py"), str(p)])
+    check("validate_report 输出「⚠ 指标游戏标记 1 处」",
+          "⚠ 指标游戏标记 1 处" in out, out[-600:])
+    check("指标游戏不判红（validate rc=0）", rc == 0, (rc, out[-600:]))
 
 
 # ---------------------------------------------------------------------------
@@ -976,6 +1077,7 @@ def main():
         case_team(tmp)
         case_gate(tmp)
         case_gates_hardening()
+        case_metric_gaming(tmp)
         case_pack()
         case_finalize_gate(tmp)
         case_validate_report_dual(tmp)

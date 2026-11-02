@@ -803,6 +803,16 @@ class Config:
         self.runs.mkdir(parents=True, exist_ok=True)
         self.owner = str(owner or DEFAULT_OWNER).strip() or DEFAULT_OWNER
         self.allow_signers = parse_signers(allow_signers or DEFAULT_ALLOW_SIGNERS)
+        # Maker–Checker（2026-11-02）：可选复核人白名单。缺文件＝回退旧行为（只认
+        # allow_signers，向后兼容）；文件存在＝复核人必须在其内，且 ≠ 最终签字人。
+        self.reviewers_file = Path(os.environ.get("BOT_REVIEWERS_FILE")
+                                   or (self.root / "server" / "reviewers.json"))
+        self.reviewers_error = ""
+        try:
+            self.reviewers = load_reviewers(self.reviewers_file)
+        except ValueError as exc:  # 坏文件 fail-closed：复核入口一律 500，不放行
+            self.reviewers = ()
+            self.reviewers_error = str(exc)
         self.alloc_lock = threading.Lock()
         self.map_lock = threading.Lock()
         self.running_lock = threading.Lock()
@@ -816,7 +826,51 @@ class Config:
             return self._task_locks.setdefault(task_id, threading.Lock())
 
     def identity(self):
-        return {"owner": self.owner, "allow_signers": list(self.allow_signers)}
+        return {"owner": self.owner, "allow_signers": list(self.allow_signers),
+                "reviewers": (list(self.reviewers) if self.reviewers is not None else None),
+                "reviewers_source": ("error" if self.reviewers_error else
+                                     "file" if self.reviewers is not None else "allowlist"),
+                "reviewers_file": str(self.reviewers_file)}
+
+
+def load_reviewers(path):
+    """读复核人白名单（结构同 server/im_signers.json）；文件不存在 → None。
+
+    {"reviewers": [{"id","id_type","name","reviewer","chat_id"}, ...]}
+    兼容 im_signers 原样复用：条目名可取 reviewer（首选）/ signer / name，顶层键也可用
+    "signers"。文件存在但列表为空 → ()（拒绝所有复核，fail-closed，不是「不启用」）。
+    """
+    path = Path(path)
+    if not path.is_file():
+        return None
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8-sig") or "{}")
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"复核人白名单不可解析：{path}（{exc}）") from exc
+    raw = None
+    if isinstance(doc, list):
+        raw = doc
+    elif isinstance(doc, dict):
+        raw = doc.get("reviewers", doc.get("signers"))
+    if not isinstance(raw, list):
+        raise ValueError(f"复核人白名单格式错误：需要 {{\"reviewers\": [...]}}：{path}")
+    names = []
+    for i, item in enumerate(raw):
+        if isinstance(item, str):
+            names.append(item)
+            continue
+        if not isinstance(item, dict):
+            raise ValueError(f"复核人白名单格式错误：reviewers[{i}] 不是对象")
+        value = ""
+        for key in ("reviewer", "signer", "name"):
+            candidate = str(item.get(key) or "").strip()
+            if candidate:
+                value = candidate
+                break
+        if not value:
+            raise ValueError(f"复核人白名单格式错误：reviewers[{i}] 缺 reviewer/signer")
+        names.append(value)
+    return tuple(dict.fromkeys(n.strip() for n in names if n.strip()))
 
 
 def parse_signers(raw):
@@ -3283,7 +3337,21 @@ def _review_block_detail(report_doc, review, allowlist, report_sha256):
     return "；".join(problems) if problems else None
 
 
-def sign_block_reason(report_doc, status_doc, body, review=None, allowlist=(), report_sha256=""):
+def review_invalidated_note(review, report_sha256, gate_doc=None):
+    """复核钉的 sha 与当前报告不符时给一句人话（gate 回写导致 → 点明「作废」）。"""
+    if not isinstance(review, dict):
+        return ""
+    review_sha = str(review.get("report_sha256") or "").strip()
+    report_sha = str(report_sha256 or "").strip()
+    if not review_sha or not report_sha or review_sha == report_sha:
+        return ""
+    if isinstance(gate_doc, dict) and str(gate_doc.get("status") or "") == "confirmed":
+        return "复核已被 gate 确认作废，请重新复核"
+    return "复核绑定的报告字节已变，请重新复核"
+
+
+def sign_block_reason(report_doc, status_doc, body, review=None, allowlist=(),
+                      report_sha256="", gate_doc=None):
     """F12：签字入口唯一判定（行为级单测直接调用）。返回拒绝原因；None=允许签字。
 
     规则：blocked 一律拒；不可签报告仅允许
@@ -3301,6 +3369,9 @@ def sign_block_reason(report_doc, status_doc, body, review=None, allowlist=(), r
             _detail = _review_block_detail(report_doc, review, allowlist, report_sha256)
             if _detail is None:
                 return None
+            _note = review_invalidated_note(review, report_sha256, gate_doc)
+            if _note:
+                _detail = f"{_detail}；{_note}"
             return (f"报告自判不可签（verdict={_vl[:40]!r}, sign_scope=no_stop）："
                     f"不得签字；{_detail}")
     return None
@@ -3336,6 +3407,7 @@ def post_review(cfg, task_id, body):
         raise ApiError(409, "报告缺少 scorecard.verdict：无法记录复核原档位（先重跑评分）")
     reviewed_by = str(body.get("reviewed_by") or "").strip()
     require_allowed(cfg, reviewed_by, "reviewed_by")
+    require_reviewer(cfg, reviewed_by)
     reason = str(body.get("reason") or "").strip()
     decisions = body.get("decisions")
     report_sha = sha256_file(report_path)
@@ -3364,6 +3436,22 @@ def post_review(cfg, task_id, body):
     review_path = tdir / gates_mod.REVIEW_FILE
     with cfg.task_lock(task_id):
         write_json_atomic(review_path, doc)
+    # 审计：复核成功也写 run.log（复用 core.events.append_event；phase=review）
+    try:
+        events_mod = import_core(cfg, "events")
+        events_mod.append_event(str(tdir / "run.log"), {
+            "phase": "review",
+            "role": "host",
+            "kind": "status",
+            "line": (f"人工复核 confirmed by {reviewed_by}"
+                     f"（原档位 {verdict}，不改分）：{reason[:60]}"),
+            "action": "confirmed",
+            "meta": {"reviewed_by": reviewed_by, "report_sha256": report_sha,
+                     "original_verdict": verdict, "review_file": str(review_path),
+                     "reviewed_at": doc.get("reviewed_at")},
+        })
+    except Exception:  # noqa: BLE001 - 事件失败不影响已落盘的复核（与 core.gate 同策略）
+        log(traceback.format_exc())
     return 200, {
         "ok": True,
         "task_id": task_id,
@@ -3398,8 +3486,12 @@ def post_sign(cfg, task_id, body):
     # 甲方案：不可签报告持有钉住当前报告字节的合法复核记录 → 允许签字（finalize 仍按复核放行）
     review_doc = gates_mod.load_review(tdir)
     report_sha = sha256_file(report)
+    # Maker–Checker：配置了复核人白名单时，复核人不得同时是最终签字人
+    check_maker_checker(cfg, review_doc, signer)
+    gate_doc = import_core(cfg, "gate").read(tdir) or {}
     _block = sign_block_reason(report_doc, status_doc, body, review=review_doc,
-                               allowlist=cfg.allow_signers, report_sha256=report_sha)
+                               allowlist=cfg.allow_signers, report_sha256=report_sha,
+                               gate_doc=gate_doc)
     if _block:
         raise ApiError(409, _block)
     _sc = report_doc.get("scorecard") if isinstance(report_doc.get("scorecard"), dict) else {}
@@ -3413,7 +3505,6 @@ def post_sign(cfg, task_id, body):
     gate_pending = False
     if isinstance(report_doc, dict) and report_doc.get("is_demo") is not True:
         if gates_mod.report_claims_security_gate(report_doc):
-            gate_doc = import_core(cfg, "gate").read(tdir) or {}
             gate_pending = str(gate_doc.get("status") or "") != "confirmed"
     proc = subprocess.run(cmd, cwd=str(cfg.root), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=child_env(), timeout=120)
@@ -3536,6 +3627,48 @@ def require_allowed(cfg, who, label):
     return name
 
 
+def review_allowlist(cfg):
+    """复核人白名单：None=未配置（回退 allow_signers）；()=配置为空（fail-closed）。"""
+    error = str(getattr(cfg, "reviewers_error", "") or "")
+    if error:
+        raise ApiError(500, f"复核人白名单不可用：{error}")
+    return getattr(cfg, "reviewers", None)
+
+
+def require_reviewer(cfg, who, label="reviewed_by"):
+    """复核人必须落在 BOT_REVIEWERS_FILE 白名单内（未配置文件时回退 allow_signers）。"""
+    name = str(who or "").strip()
+    allowed = review_allowlist(cfg)
+    if allowed is None:
+        return name
+    if not name:
+        raise ApiError(400, f"缺 {label}")
+    if not allowed:
+        raise ApiError(403, f"{label}={name!r} 被拒：复核人白名单为空"
+                            f"（BOT_REVIEWERS_FILE={cfg.reviewers_file}）")
+    if name not in allowed:
+        raise ApiError(403, f"{label}={name!r} 不在复核人白名单"
+                            f"（允许：{', '.join(allowed)}）；配置文件 {cfg.reviewers_file}")
+    return name
+
+
+def check_maker_checker(cfg, review, signer):
+    """Maker–Checker：复核人 ≠ 最终签字人（仅当配置了复核人白名单时启用）。"""
+    allowed = review_allowlist(cfg)
+    if allowed is None:
+        return
+    reviewed_by = str((review or {}).get("reviewed_by") or "").strip()
+    if not reviewed_by:
+        return
+    if reviewed_by not in allowed:
+        raise ApiError(403, f"reviewed_by={reviewed_by!r} 已不在复核人白名单"
+                            f"（BOT_REVIEWERS_FILE={cfg.reviewers_file}）：请重新复核")
+    if signer and reviewed_by == signer:
+        raise ApiError(403, "复核人不得与签字人相同："
+                            f"reviewed_by={reviewed_by!r} == signer={signer!r}"
+                            "（Maker–Checker 未分离，换一个人复核或换一个人签字）")
+
+
 def post_gate(cfg, task_id, body):
     """POST /api/tasks/<id>/gate：不可逆动作的人工确认/拒绝（core.gate.confirm/reject）。"""
     if not isinstance(body, dict):
@@ -3575,6 +3708,8 @@ def post_gate(cfg, task_id, body):
         "ok": True,
         "task_id": task_id,
         "action": action,
+        # 复核是否被本次 confirm 回写作废（true 时 /sign 必 409，需重新复核）
+        "review_invalidated": bool(gate.get("review_invalidated")),
         "gate": gate,
         "identity": cfg.identity(),
     })

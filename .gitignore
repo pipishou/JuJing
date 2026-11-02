@@ -7,6 +7,7 @@
 *.key
 *.pem
 server/im_signers.json
+server/reviewers.json
 
 # 项目记忆与决策账本（本地资产，随人走不入库）
 .junshi/

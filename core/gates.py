@@ -806,3 +806,76 @@ def gate_action_mismatch(gate_doc, report):
     if ga and ra and ga != ra:
         return f"gate.json action={ga!r} != report action={ra!r} (confirm/execute mismatch)"
     return None
+
+
+# --------------------------------------------------------------------------- #
+# 指标游戏（metric gaming）：只标记、不阻断
+#
+# 2026-11-02 案例实测：模型建议「把已逾期事项移出在办统计口径」——不动业务、只动
+# 口径就能把逾期率做低，系统照单全收并写进决策卡。改口径也可能是正常治理动作，
+# 所以这里只产出 flags 交给人工复核，绝不参与 approve/reject 判据。
+# --------------------------------------------------------------------------- #
+METRIC_GAMING_PATTERNS = (
+    # 改统计口径 / 调口径
+    ("改口径", re.compile(r"(?:修改?|调整?|改变?|重设|换)(?:统计)?口径")),
+    # 移出统计（含「移出本周在办统计口径」这类中间夹修饰语的写法）
+    ("移出统计", re.compile(r"移出[^。；;\n]{0,10}统计")),
+    # 调整分母 / 缩小分母
+    ("调整分母", re.compile(r"(?:调整?|修改?|缩小|压减|换)分母")),
+    # 修改统计范围 / 统计边界
+    ("修改统计范围", re.compile(r"(?:修改?|调整?|缩小|扩大|重设)统计(?:范围|口径|边界)")),
+    # 不计入统计 / 从统计中剔除
+    ("不计入统计", re.compile(r"不计入[^。；;\n]{0,8}统计"
+                             r"|(?:剔除|扣除)[^。；;\n]{0,8}(?:分母|统计)")),
+)
+
+
+def metric_gaming_flags(report):
+    """扫描 recommendation 的字符串，返回「指标游戏」命中列表（只标记不阻断）。
+
+    返回每项：{"index": 条目下标, "phrase": 命中短语, "path": 字段路径,
+              "text": 命中的原句（截断 160 字）}
+    只读：不抛错、不改报告、不影响任何门判据。
+    """
+    hits = []
+    if not isinstance(report, dict):
+        return hits
+    recs = report.get("recommendation")
+    if not isinstance(recs, list):
+        return hits
+    seen = set()
+    for index, item in enumerate(recs):
+        pairs = item.items() if isinstance(item, dict) else (("", item),)
+        for key, value in pairs:
+            for text in _iter_strings(value):
+                text = str(text)
+                for phrase, rx in METRIC_GAMING_PATTERNS:
+                    if (index, text) in seen or not rx.search(text):
+                        continue
+                    seen.add((index, text))
+                    suffix = f".{key}" if key else ""
+                    hits.append({"index": index, "phrase": phrase,
+                                 "path": f"recommendation[{index}]{suffix}",
+                                 "text": text[:160]})
+    return hits
+
+
+def apply_metric_gaming_flags(report):
+    """把命中写进 report["flags"]（list，code=metric_gaming），返回命中列表。
+
+    只标记不阻断：报告仍然合法、不判红；重复调用不会重复追加同一条 flag。
+    """
+    hits = metric_gaming_flags(report)
+    if not isinstance(report, dict):
+        return hits
+    flags = report.get("flags")
+    flags = list(flags) if isinstance(flags, list) else []
+    flags = [f for f in flags
+             if not (isinstance(f, dict) and f.get("code") == "metric_gaming")]
+    if hits:
+        flags.append({"code": "metric_gaming", "flag": "metric_gaming",
+                      "count": len(hits), "items": hits, "blocking": False,
+                      "note": "改口径/移出统计/调整分母等指标游戏嫌疑，仅提示，人工复核判断"})
+    if flags or "flags" in report:
+        report["flags"] = flags
+    return hits

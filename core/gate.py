@@ -18,11 +18,13 @@
   - confirmed_by 为空 → GateError（人工确认必须可追溯，M1 遗留硬化）。
 只依赖 stdlib。
 """
+import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 
 from . import events, fsutil
-from .gates import GateError
+from .gates import REVIEW_FILE, GateError
 
 GATE_FILE = "gate.json"
 GATE_STATUSES = ("pending_user_confirmation", "confirmed", "rejected")
@@ -75,7 +77,8 @@ def _event(tdir, doc):
             "kind": "status",
             "line": line,
             "meta": {"status": doc.get("status"), "confirmed_by": doc.get("confirmed_by"),
-                     "gate_file": str(gate_path(tdir))},
+                     "gate_file": str(gate_path(tdir)),
+                     **({"review_invalidated": True} if doc.get("review_invalidated") else {})},
         })
     except Exception:  # noqa: BLE001 事件失败不影响 gate 本身（gate.json 已原子落盘）
         pass
@@ -91,6 +94,26 @@ def _report_target(tdir, report):
     if target.is_file():
         return target
     return None
+
+
+def _sha256_file(path):
+    """文件 sha256；文件不存在/不可读 → 空串（当作「没有旧字节」）。"""
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _review_report_sha(tdir):
+    """review.json 钉住的报告 sha；无复核/坏文件 → None（不 fail-open）。"""
+    try:
+        doc = json.loads((Path(tdir) / REVIEW_FILE).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, dict):
+        return None
+    sha = str(doc.get("report_sha256") or "").strip()
+    return sha or None
 
 
 def _apply_to_report(tdir, report, doc):
@@ -189,10 +212,21 @@ def confirm(tdir, confirmer, comment="", report=None, action=""):
              "gate_action": gate_action,
              "requested_action": _declared_action}
     doc = _write_gate(tdir, old, entry, "confirmed", who, comment, task_id, requested_at)
+    # 复核（review.v1）钉的是报告 sha256；confirm 会回写 report.json 字节。
+    # 回写一旦改变字节，旧复核必然失效——必须在这里显式回显，不能等到 /sign 才 409。
+    target = _report_target(tdir, report)
+    pre_sha = _sha256_file(target) if target is not None else ""
+    review_sha = _review_report_sha(tdir)
     if report:
         _apply_to_report(tdir, report, doc)
-    _event(tdir, doc)
-    return doc
+    post_sha = _sha256_file(target) if target is not None else ""
+    review_invalidated = bool(
+        review_sha and target is not None
+        and (review_sha != pre_sha or pre_sha != post_sha))
+    out = dict(doc)
+    out["review_invalidated"] = review_invalidated
+    _event(tdir, out)
+    return out
 
 
 def reject(tdir, confirmer, comment=""):

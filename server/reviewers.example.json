@@ -1,0 +1,7 @@
+{
+  "_说明": "复制成 server/reviewers.json 后填真实复核人（该文件不入库）。结构同 im_signers.json：id 是 IM 应用维度身份，reviewer 是要写进 review.json 的 reviewed_by 署名，且必须同时出现在服务端 --allow-signers 白名单里。启用后 Maker–Checker 生效：reviewed_by 必须在下面名单内，且不得等于最终签字人 signer（同一人既复核又签字 → 403「复核人不得与签字人相同」）。删除该文件即回退旧行为（只认 --allow-signers）。",
+  "reviewers": [
+    {"id": "ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxx", "id_type": "open_id", "name": "Mo", "reviewer": "张复核", "chat_id": ""},
+    {"id": "zhangsan", "id_type": "user_id", "name": "张三（复核代理人）", "reviewer": "李复核", "chat_id": "oc_yyyyyyyyyyyy"}
+  ]
+}

@@ -21,7 +21,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-EVENT_PHASES = ("s1", "s2", "s3", "s4", "s5", "gate", "intake", "data", "status")
+EVENT_PHASES = ("s1", "s2", "s3", "s4", "s5", "gate", "review", "intake", "data", "status")
 EVENT_KINDS = ("user", "speak", "tool", "think", "status", "artifact")
 EVENT_ROLES = ("host", "analyst", "attr", "biz", "quality", "data")
 

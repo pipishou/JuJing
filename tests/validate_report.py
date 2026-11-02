@@ -239,6 +239,14 @@ def main():
         check(f"rec[{i}] irreversibility", irr in ("reversible", "irreversible"), str(irr))
         irreversible = irreversible or irr == "irreversible"
 
+    # 指标游戏：只标记不阻断——命中也不 append FAIL、不影响 RESULT
+    _mg = _gates.metric_gaming_flags(r)
+    if _mg:
+        _detail = "；".join(f"rec[{h['index']}]「{h['phrase']}」" for h in _mg[:5])
+        print(f"⚠ 指标游戏标记 {len(_mg)} 处：{_detail}")
+    else:
+        print("⚠ 指标游戏标记 0 处")
+
     dl = r.get("decision_log_entry") or {}
     for k in ("id", "actor", "context", "advice", "expected_result", "verification_plan"):
         check(f"decision_log {k}", bool(dl.get(k)))

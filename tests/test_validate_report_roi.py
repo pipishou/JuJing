@@ -39,6 +39,11 @@ def run(report, extra=()):
 
 def main():
     base = json.loads(DEMO.read_text(encoding="utf-8"))
+    # 本用例只验 ROI 口径（0 是有效值）。demo 报告是历史产物、被哈希钉住，
+    # 不在这里改它；补上后加的契约字段，避免无关判据先失败。
+    base.setdefault("verdict_one_line", "补料率异常先查模具状态")
+    base.setdefault("sign_scope", "no_stop")
+    base.setdefault("evidence_tier", "mixed")
 
     # 对照组：原 demo 报告仍 PASS（含 ¥0 建议）
     rc, out = run(base)
