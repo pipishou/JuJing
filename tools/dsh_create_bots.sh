@@ -4,6 +4,8 @@
 # 用法：bash tools/dsh_create_bots.sh
 set -uo pipefail
 
+NODE_BIN="${NODE_BIN:-D:/tools/node/node.exe}"
+[ -x "$NODE_BIN" ] || NODE_BIN="$(command -v node || echo node)"
 DEEPSEEKBOT="${DEEPSEEKBOT:-$HOME/.dsh/profiles/desktop/node_modules/deepseekbot/dist/deepseekbot.mjs}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 AGENTS="$ROOT/packs/expert_market/manufacturing-advisory-board/agents"
@@ -12,8 +14,9 @@ MEM="${BOT_MEMORY_DIR:-D:/work/产品类/个人产品/bot-2/bot-memory}"
 if [ ! -f "$DEEPSEEKBOT" ]; then echo "[FATAL] 找不到 CLI：$DEEPSEEKBOT"; exit 1; fi
 if [ ! -d "$MEM" ]; then echo "[FATAL] 找不到记忆仓：$MEM"; exit 1; fi
 
-tobs() { node "$DEEPSEEKBOT" "$@"; }
+tobs() { "$NODE_BIN" "$DEEPSEEKBOT" "$@"; }
 
+LOG_DIR="$ROOT/runtime/logs"; mkdir -p "$LOG_DIR"; LOG="$LOG_DIR/create-bots-$(date +%Y%m%d-%H%M%S).log"; exec > >(tee -a "$LOG") 2>&1; echo "[log] $LOG"
 echo "== 0. 检查 lease 与预设"
 if ! out=$(tobs list 2>&1); then echo "$out"; echo "[FATAL] CLI 不可写：请先完全退出 DSH 再跑本脚本"; exit 2; fi
 echo "$out" | head -5
