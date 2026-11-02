@@ -50,6 +50,17 @@ ROLES = {
         "persona/manufacturing-content-operator",
         "@pack:persona/manufacturing-content-operator/distill",
     ),
+    "kazuo-inamori": (
+        "agents/kazuo-inamori.md",
+        "persona/kazuo-inamori",
+        "@pack:persona/kazuo-inamori/distill",
+    ),
+    # 主题蒸馏（不挂人名）：外贸 B2B 询盘到交付全流程
+    "foreign-trade-b2b": (
+        "agents/foreign-trade-b2b.md",
+        "persona/foreign-trade-b2b",
+        "@pack:persona/foreign-trade-b2b/distill",
+    ),
 }
 
 START_RE = re.compile(r"<!--\s*PERSONA:START(?P<attrs>[^>]*)-->")

@@ -78,7 +78,8 @@ def check_manifest() -> None:
 
 
 def check_agents() -> None:
-    expected = {"karpathy", "jobs", "manufacturing-ops-expert", "content-operator"}
+    expected = {"karpathy", "jobs", "manufacturing-ops-expert", "content-operator",
+                "kazuo-inamori", "foreign-trade-b2b"}
     found = {p.stem for p in (PACK / "agents").glob("*.md")}
     ok(found == expected, f"agents 名单与设计一致：{sorted(found)}")
     for stem in sorted(expected & found):
@@ -96,7 +97,8 @@ def check_agents() -> None:
 # ---------------------------------------------------------------- L2 场景契约
 def check_scene_contracts() -> None:
     required_sections = ["## 职责边界", "## 场景输出契约", "## 禁止"]
-    for stem in ("karpathy", "jobs", "manufacturing-ops-expert", "content-operator"):
+    for stem in ("karpathy", "jobs", "manufacturing-ops-expert", "content-operator",
+                 "kazuo-inamori", "foreign-trade-b2b"):
         text = read(PACK / "agents" / f"{stem}.md")
         for sec in required_sections:
             ok(sec in text, f"[{stem}] 有「{sec}」")
@@ -137,7 +139,8 @@ def check_host_soul() -> None:
     ]:
         ok(token in soul, f"SOUL：{label}")
     ok("不替" in soul, "SOUL：禁止替专家发言（空壳防线）")
-    for slug in ("karpathy", "manufacturing-ops-expert", "jobs", "content-operator"):
+    for slug in ("karpathy", "manufacturing-ops-expert", "jobs", "content-operator",
+                 "kazuo-inamori", "foreign-trade-b2b"):
         ok(slug in soul, f"SOUL：点名可派发对象 {slug}")
 
 
@@ -179,7 +182,9 @@ def check_update_pipeline() -> None:
         print(proc.stderr.strip())
     ok(proc.returncode == 0, "人格层无漂移（--check 退出 0）")
 
-    for role_dir in ("persona/andrej-karpathy", "persona/steve-jobs", "persona/manufacturing-content-operator"):
+    for role_dir in ("persona/andrej-karpathy", "persona/steve-jobs",
+                     "persona/manufacturing-content-operator",
+                     "persona/kazuo-inamori", "persona/foreign-trade-b2b"):
         src = read(PACK / role_dir / "SOURCES.md")
         ok("女娲" in src, f"{role_dir}/SOURCES.md 记录女娲源")
         ok("inbox" in src, f"{role_dir}/SOURCES.md 有增量采集入口")
@@ -206,7 +211,7 @@ def main() -> int:
         for f in FAILS:
             print("  - " + f)
         return 1
-    print("PASS 全绿：四个角色均有场景契约，人格层可更新且无漂移")
+    print("PASS 全绿：六个角色均有场景契约，人格层可更新且无漂移")
     return 0
 
 

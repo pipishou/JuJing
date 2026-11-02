@@ -17,6 +17,9 @@
 ### 甲（推荐其一）多机 git 同步
 把 B 类放进一个**独立私有仓** `bot-team-memory`（与代码仓分开，避免每次签卡都触发 CI）：
 
+> **为什么不能用 JuJing 仓（2026-11-02 实测）**：`api.github.com/repos/pipishou/JuJing` 返回 `private=false` —— 它是**公开仓**。事项账本里有真实人名、部门、逾期情况，推上去等于把公司内部工作事项公开。所以记忆仓必须是**同账号下的另一个私有仓**；也不用 Tobs 的记忆仓（那是插件目录，存 Bot 人格与会话摘要，插件升级可能覆盖，且职责不同）。
+> 三条路：①同账号新建私有仓 `bot-team-memory`（推荐，零迁移）；②把 JuJing 改私有 + 另开公开镜像仓放 skill/docs（分享链要重建）；③脱敏后进公开仓（不推荐，脱敏规则本身会漂）。
+
 ```
 bot-team-memory/
 ├── workitems/current.json      # 事项账本（revision 乐观锁）
