@@ -202,3 +202,4 @@
 - 创建日志：`runtime/logs/create-bots-20261102-164527.log`（237 行；5 个 Bot 的 `validate / allocate-id / create-bot` 三步均 `status: ok`，`rc=0`；`model` 步 `status: deferred`）。
 - **记忆绑定方式**：Tobs 在每个 `<role>/<bot-id>/` 下建独立 git 记忆仓，其 `MEMORY.md` 只有一行指向 `<role>/MEMORY.md`（即我方写入的核心事实文件）——所以**改核心事实要改 `<role>/MEMORY.md`**，改 `<role>/<bot-id>/MEMORY.md` 无效。
 - **未完成**：5 个 Bot 的 `model` 检查项全部 `code=no-model-yet`（`model_presets` 表为空）→ 必须在 Bot 模式设置里授权模型（或 DSH 退出后跑 `tools/dsh_set_bot_models.sh`），否则发消息不会有回复。
+- 插件版本（2026-11-02 16:58）：desktop `@botharness/tobs` + `deepseekbot` 均升到 **1.6.1**（bundles 已含 `@botharness/tobs`）；web profile 已装 `deepseekbot@1.6.1`（bundles 含 `deepseekbot`）。升级后 Bot 存储 `~/.dsh/botharness/botharness.db` 仍有 6 条，未丢。
