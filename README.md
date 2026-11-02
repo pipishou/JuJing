@@ -62,3 +62,5 @@ Both skills are pure local text. No telemetry, no data collection.
 ## License
 
 [MIT](LICENSE) © 2026 聚鲸智能 (Jujing)
+
+> 本仓库已接入 superagent 实验。
