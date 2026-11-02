@@ -101,6 +101,13 @@ def _apply_to_report(tdir, report, doc):
         "confirmed_at": doc.get("confirmed_at"),
         "comment": doc.get("comment") or "",
     }
+    # 保留被确认的动作：确认不得清空 report 里声明的不可逆动作（否则 F28 无对象可对账）；
+    # 值为空时不写该键，避免被 shape 门误判成「声明了一个空动作」。
+    _confirmed_action = str(doc.get("action")
+                            or ((report.get("security_gate") or {}).get("action") if isinstance(report.get("security_gate"), dict) else "")
+                            or "").strip()
+    if _confirmed_action:
+        gate_view["action"] = _confirmed_action
     requested_at = None
     old_top = report.get("security_gate")
     if isinstance(old_top, dict):
@@ -133,6 +140,8 @@ def _write_gate(tdir, old, entry, status, confirmer, comment, task_id, requested
         "comment": str(comment or ""),
         "requested_at": requested_at,
         "updated_at": now,
+        # 被确认的业务动作（历史缺陷：gate.json 从不记动作，导致 F28 永远无法对账）
+        "action": (entry.get("gate_action") or old.get("action") or ""),
         "history": history,
     }
     fsutil.atomic_write_json(gate_path(tdir), doc)
@@ -153,8 +162,14 @@ def confirm(tdir, confirmer, comment="", report=None):
         if isinstance(top, dict):
             requested_at = top.get("requested_at")
     now = now_iso()
+    gate_action = ""
+    if isinstance(report, dict):
+        _top = report.get("security_gate")
+        if isinstance(_top, dict):
+            gate_action = str(_top.get("action") or "")
     entry = {"action": "confirm", "status": "confirmed", "confirmed_by": who,
-             "confirmed_at": now, "comment": str(comment or "")}
+             "confirmed_at": now, "comment": str(comment or ""),
+             "gate_action": gate_action}
     doc = _write_gate(tdir, old, entry, "confirmed", who, comment, task_id, requested_at)
     if report:
         _apply_to_report(tdir, report, doc)

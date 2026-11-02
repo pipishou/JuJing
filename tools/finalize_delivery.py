@@ -151,6 +151,12 @@ def gate_reasons(report, gate_doc, gate_file, allowlist):
             requested_at = dl["security_gate"].get("requested_at")
     if requested_at:
         view["requested_at"] = requested_at
+    # 与 core.gate 同口径：确认视图带上被确认的动作；空值不落键（避免 shape 门误判）
+    _confirmed_action = str(gate_doc.get("action")
+                            or ((top or {}).get("action") if isinstance(top, dict) else "")
+                            or "").strip()
+    if _confirmed_action:
+        view["action"] = _confirmed_action
     return reasons, view
 
 
@@ -248,13 +254,14 @@ def main():
     if not reasons:
         # D1：先跑完全部判据（sha/状态机/task_id/signer/gate/allowlist），
         # 只有全部通过才把 confirmed 视图回填内存报告；失败路径不改报告、不写 decision。
-        apply_gate_view(report, gate_view)
-        reasons += gates.check_finalize(dec, report, sig, allowlist=allowlist,
-                                        gate_confirmed=bool(gate_view))
-        # F28: confirmed action must equal reported action
+        # F28 必须在覆盖前跑：apply_gate_view 会把 report.security_gate 换成确认视图，
+        # 覆盖后再比对等于拿「刚写进去的值」和自己比，永远相等（历史缺陷）。
         _mm = gates.gate_action_mismatch(gate_doc, report)
         if _mm:
             reasons.append(_mm)
+        apply_gate_view(report, gate_view)
+        reasons += gates.check_finalize(dec, report, sig, allowlist=allowlist,
+                                        gate_confirmed=bool(gate_view))
     if reasons:
         print(json.dumps({"ok": False, "status": "rejected", "reasons": reasons,
                           "gate_file": str(gate_file),
