@@ -32,6 +32,7 @@ from pathlib import Path
 
 TABLES = (
     "channel_records",
+    "source_events",
     "inbox_admissions",
     "messaging_outbox",
     "messaging_reception_history",

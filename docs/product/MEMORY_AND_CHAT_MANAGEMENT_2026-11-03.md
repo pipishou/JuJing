@@ -83,3 +83,29 @@ python -B tools/tobs_chat_export.py --out D:/work/产品类/个人产品/bot-2/b
 - `attempt_state=pending` 的含义是"待处理"，不是"已回复"。
 - 208 次模型调用里有多少是有效对话、多少是重试/串场，**没查**；只把它当"通道活了"的证据，不当质量证据。
 - `bot_schedules=0` 说明：**到今天为止，没有任何一条主动提醒被排上**。
+
+## 七、补测（08:36，修正上一节的「未验证」）
+
+再查一轮表结构，群聊和记忆两件事都查清了：
+
+**消息正文是落库的，而且是明文。**
+
+| `source_kind` | 条数 | 有正文 |
+| --- | --- | --- |
+| `bot-message` | 29 | 29（Bot 之间的实际回复） |
+| `self-record` | 20 | 0（自记录占位） |
+| `human-message` | 13 | 13（**你说的话**） |
+| `memory-change` | 6 | 6（"记忆变了，下轮生效"提示） |
+| `system-message` | 1 | 1 |
+
+抽样（原样）：`human-message` = `工作助力团队能做到什么`、`@内容操盘手 @AI 专家 @工作助理 @业务专家 @产品专家`；
+`bot-message` = `@AI 专家 **取证回：4 步复用清单…**`。另有 `inbox_history_fts`（67 条）做全文检索，连失败记录（`unknown prompt variable "{{ai_reliability}}"`）都在里面。
+
+→ 结论修正：**群聊可导出、可检索、可跨设备**。导出器已加 `source_events`（55 条/天）。
+
+**记忆是 git 仓 + host 校验，机制通、内容为零。**
+
+`memory_accepted_commits` / `memory_accepted_heads` 各 6 行：每个 Bot 的记忆仓有 `sha/parent_sha/actor_kind=system/cause_kind=source-event/validation_result.gitTree`，host 会**校验并接受** Bot 的提交，然后发一条 `memory-change` 事件告诉 Bot"记忆变了"。
+但我检查了 5 个仓的 `log/`：**全部只有 `.gitkeep`，一行日记都没有**——机制搭好了，Bot 一次没用。
+
+→ 所以第「四、三条硬纪律」不是建议，是**必须**：不逼它写，永远是 0。
