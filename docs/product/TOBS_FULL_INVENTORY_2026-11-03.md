@@ -168,3 +168,23 @@ PersonaBot 运行时：给 DSH 装上「有身份、有记忆、能在群聊里�
 1. 飞书发送节流 **250ms/条（5 QPS/会话）**，单回合步骤消息 200 条熔断；每会话一条串行队列。
 2. 去重靠持久 `seenMessageIds`（上限 1000），重试每 key 最多 4 条待补发；429 → `CHANNEL_RATE_LIMIT`，不确定 → `DELIVERY_UNCERTAIN`（停止重试防重）。
 3. **多实例互斥只在进程内**（`consumer-conflict`），Tobs 没有跨进程文件锁 → 我方多实例部署必须自己补锁。
+
+
+---
+
+## 十一 首个真实派活的执行日志解剖（2026-11-03 00:40–00:47）
+
+会话目录：`~/.dsh/sessions/--D-work-~4EA7~54C1~7C7B-~4E2A~4EBA~4EA7~54C1-~4F01~5FAE~002B~98DE~4E66--/botharness-7606fe1b-…/session.v4.jsonl.zstd`（160 事件 / 19 步 / 30 次工具调用）
+
+| 观测 | 数值 |
+| --- | --- |
+| 入站拼接 | `agent/inbox/spliced` 8 次、`user/message` 8 条（群里几条消息被拼进同一回合） |
+| 工具分布 | `web_fetch` 12、`pwsh` 7、`web_search` 3、`write` 2、`compress` 2、`spawn_teammate` 1、`wait_agent` 1、`list_agents` 2 |
+| 错误 | 5 条：**`tool call timed out after 30000ms` ×3**、**`BotHarness Session file path cannot be resolved` ×2** |
+| 结束 | `turn/end → {"kind":"aborted","reason":{"kind":"user"}}` |
+
+**结论（可复算）**：这次派活不是「失败」也不是「卡死」——它真的在干活（查网、写报告分片），被 **user abort** 终止在 step 19，因此 `latest_report_state=None`（没走到 `report_to_orchestrator`）。
+
+**暴露的两个真问题**：
+1. **工具 30 秒硬超时**：`web_fetch`/`web_search` 走公网慢（本机常 9–20s），3 次直接超时。→ Bot 不该用外部抓取，应该调本机脚本（`tools/rss_fetch.py`、`/api/context/ask`），本机调用毫秒级。
+2. **Bot 内 spawn_teammate 不可用**：`BotHarness Session file path cannot be resolved` → Bot 模式下起子代理失败。→ 编排要让 Bot 走 Tobs 自己的 Delegation，而不是 DSH 的 `spawn_teammate`。
