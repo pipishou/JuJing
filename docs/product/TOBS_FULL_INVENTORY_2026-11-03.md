@@ -127,3 +127,44 @@ PersonaBot 运行时：给 DSH 装上「有身份、有记忆、能在群聊里�
 - `@botharness/core` / `im-provider` / `computer` 的 dist **未做代码级逆向**（体积大、打包态），下文结论来自 CLI 帮助 + 官方文档 + DB 实测。【三个只读子代理正在补这一层】
 - 官方文档为 **1.6.x 版**，与本地 1.6.1 一致；但文档未覆盖的隐藏设置（如 wake policy 细项）只有面板可见。
 - 本清单不含「我方还没实现的能力」，只描述 Tobs 自身。
+
+
+---
+
+## 十 IM 与面板（第二批深读，源码行号）
+
+### 10.1 十四个 IM adapter
+
+| 平台 | 入站 | 需公网端口 |
+| --- | --- | --- |
+| 飞书 / Lark（同一 adapter，仅 domain 差异） | SDK `WSClient` 长连接 | 否 |
+| 企业微信·智能机器人 | 官方 WS 长连接 | 否 |
+| 企业微信·自建应用 | **本机 HTTP 回调** 默认 `127.0.0.1:30987` | **是**（要 `callbackBaseUrl`） |
+| 微信（个人） | iLink 长轮询 | 否 |
+| 钉钉 / QQ / Slack / Telegram / Discord | 各自长连接或长轮询 | 否 |
+| WhatsApp / Matrix / iMessage / Email | 各自机制 | 否 |
+| office | 出站连公网 Connector | 否 |
+
+**结论**：飞书是唯一同时满足「群聊 + 私聊 + 卡片按钮 + 文件双向 + 零公网端口」的通道；Lark 只换 domain，不需要第二套 adapter。
+
+### 10.2 飞书 scope（以代码为准，与官方文档有出入）
+
+代码里实际校验：`im:message.group_at_msg.include_bot:readonly`、`im:message:readonly`、`im:resource`、`application:app_slash_command:read/write`、`im:message.group_msg`。
+**缺 `im:resource` 会报 99991672**（`feishu-channel.mjs:13-21`）——文档说缺 `im:message:readonly`，两处不一致，以代码为准先全给。
+
+### 10.3 唤醒策略（比 schedules 更关键的一层）
+
+`Channel sidebar → Wake policy`，来源分 9 类：`human-dm / bot-dm / group-mention / group-ordinary / group-invite / group-join-request / group-join-decision / assignment-report / assignment-lifecycle`；
+模式 5 种：`immediate / digest / conditional / mentions / silent`；投递方式 `turn`（新回合）或 `steer`（插话）。
+→ 「Bot 好像没理我」先看这一层，不要先去翻代码。
+
+### 10.4 面板能改什么 / 不能改什么
+
+能改（RPC 白名单）：`bot.alias.set / bot.bind / bot.delete / bot.disconnect / bot.model.set / bot.preset.set / bot.reconnect / bot.session.list / bot.settings.update / bot.voice.set / bot.workspace.set / bot.mailbox.update / bot.auth.start|poll`。
+**面板改不了**：`state.json` 的 `seenMessageIds / sessions / watches / deferred`、`config.json` 的 host/端口/`callbackBaseUrl` —— 只能改文件。→ 我方若要暴露这些配置，必须先提 RPC 需求。
+
+### 10.5 三条不能忽略的工程事实
+
+1. 飞书发送节流 **250ms/条（5 QPS/会话）**，单回合步骤消息 200 条熔断；每会话一条串行队列。
+2. 去重靠持久 `seenMessageIds`（上限 1000），重试每 key 最多 4 条待补发；429 → `CHANNEL_RATE_LIMIT`，不确定 → `DELIVERY_UNCERTAIN`（停止重试防重）。
+3. **多实例互斥只在进程内**（`consumer-conflict`），Tobs 没有跨进程文件锁 → 我方多实例部署必须自己补锁。
