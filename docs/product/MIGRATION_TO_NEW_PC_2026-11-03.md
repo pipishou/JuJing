@@ -91,3 +91,15 @@ python -m server.app --port 8787 --root <bot-team 路径>
 2. **记忆是「让 Bot 自己写」才长出来的**：`MEMORY.md` 现在只有纪律，`log/` 里要靠每天收尾写 3 行——迁移搬的是记忆文件，不会搬记忆行为。
 3. **双机同时跑会抢 SQLite 单写锁**：两台都开 Tobs 且都写记忆，会撞 `memory-conflict`；一台为主。
 4. **本次未验证**：`bot-zip` 导入通道未实测；新机脚本未在真实第二台机上跑过（本机只有一台），第 7 节清单是判据不是结果。
+
+## 五、不能全同步时，至少「知悉」（v1 已实现）
+
+两机不共享 Tobs 库，但同一支团队要读到同一份项目上下文 → 用**知悉层**（单向、只读）：
+
+- 主机器跑 `python tools/sync_shared.py`，把「产物索引 + 关键事件时间线 + 项目快照」写进 `bot-memory/_shared/`（`artifacts-index.jsonl` / `timeline.jsonl` / `PROJECT_STATE.md` / `README.md`），然后 `git push`。
+- 副机 `git pull` 即可读，**不要手改**（下次生成会覆盖）。`README.md` 只在首次生成，之后不覆盖。
+- 只导出索引与 sha256，不含产物正文、不含凭据（`secret/token/password/api_key` 类字段递归丢弃）、不含账本（账本只能一台主）。
+- 事件白名单：`card_issued / card_signed / outcome_recorded / artifact_saved / review_recorded / memory_change`；`group-ordinary`、`self-record` 不采。
+- 判据：`tests/test_sync_shared.py` 25 项（凭据丢弃、坏行容忍、空输入不炸、README 不覆盖、dry-run 不落盘）。
+
+现状（2026-11-03 首次生成）：产物 0 件、时间线 23 条、出卡/签字/回填各 0——因为 F2 锚点刚接上，真实卡还没跑；数字会随真实使用长。
