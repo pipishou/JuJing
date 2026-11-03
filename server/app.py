@@ -1543,13 +1543,23 @@ def append_followup_event(cfg, tdir, outcome, outcome_sha256=""):
             "observed_outcome": outcome.get("observed_outcome")}
     if outcome_sha256:
         meta["outcome_sha256"] = outcome_sha256
-    return module.append_event(str(Path(tdir) / "run.log"), {
+    event = module.append_event(str(Path(tdir) / "run.log"), {
         "phase": "followup",
         "role": "host",
         "kind": "status",
         "line": "T+7 回填：observed_outcome 已记入 outcome.json（签字 report 字节不变）",
         "meta": meta,
     })
+    try:  # F2 锚点 A4：T+7 回填（现实裁定）
+        win = outcome.get("outcome_window") or ""
+        days = int(str(win).rstrip("d")) if str(win).rstrip("d").isdigit() else None
+        import_core(cfg, "anchors").outcome_recorded(
+            Path(tdir).name,
+            observed_outcome=str(outcome.get("observed_outcome") or ""),
+            window_days=days, source="api")
+    except Exception:
+        pass
+    return event
 
 
 def post_outcome(cfg, task_id, body):
@@ -3567,6 +3577,11 @@ def post_sign(cfg, task_id, body):
     emit_telemetry(cfg, "sign", {"task_id": task_id,
                                  "signer": str(payload["signer"]),
                                  "signature_hash": str(sha256)[:16]})
+    try:  # F2 锚点 A3：人签了字（唯一采纳信号）
+        import_core(cfg, "anchors").card_signed(
+            task_id, signer=str(payload["signer"]), report_sha256=str(sha256))
+    except Exception:
+        pass
     if gate_pending:
         # 只提示、不阻断：A6 契约允许「含未确认 securityGate 的真实报告」先签字，
         # fail-closed 发生在 /finalize（core.gates.check_finalize）。

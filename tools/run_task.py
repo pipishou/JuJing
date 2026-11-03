@@ -357,6 +357,11 @@ def main():
 
         report = read_json(outdir / "report.json")
         report_sha = __import__("hashlib").sha256((outdir / "report.json").read_bytes()).hexdigest()
+        try:  # F2 锚点 A1：卡已产出（进入待签）——只记事实，不打断主链路
+            from core import anchors as _anchors
+            _anchors.card_issued(task_id, report, source="run_task")
+        except Exception:
+            pass
         log_line(outdir, "s5", "host",
                  f"report assembled: total={report.get('scorecard', {}).get('total')} verdict={report.get('scorecard', {}).get('verdict')} is_demo={report.get('is_demo')}")
         # 报告产出埋点：finding_count 取报告有效发现数；degraded_pct 不在数据合同
