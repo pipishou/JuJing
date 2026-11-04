@@ -345,6 +345,12 @@ def main(argv: list[str] | None = None) -> int:
         print(detail)
     if not ok:
         return 1
+    try:  # A1 出卡锚点：卡一旦合法落地就记事件，飞轮据此计数（失败不阻断交付）
+        from core import anchors as _anchors
+
+        _anchors.card_issued(task_id, report, source="advisory_to_task")
+    except Exception:  # noqa: BLE001
+        pass
     print(f"[NEXT] 签字：POST /api/tasks/{task_id}/sign ；终态：POST /api/tasks/{task_id}/finalize")
     return 0
 
