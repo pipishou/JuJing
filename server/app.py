@@ -97,6 +97,7 @@ TZ = timezone(timedelta(hours=8))
 VENV_PY = r"D:\work\产品类\个人产品\bot-2\venv\Scripts\python.exe"
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,95}$")
 TASK_ROUTE_RE = re.compile(r"^/api/tasks/([^/]+)(?:/([a-z][a-z-]*))?$")
+CANDIDATE_ACTION_RE = re.compile(r"^/api/candidates/([^/]+)/(confirm|reject)$")
 WORKITEM_ACTION_RE = re.compile(r"^/api/v1/workitems/([^/]+)/(park|resume)$")
 TICKET_ACTION_RE = re.compile(r"^/api/v1/attention/tickets/([^/]+)/(decide|defer|snooze|resume|drop)$")
 SIX_DIMS = ("data_completeness", "timeliness", "significance", "exclusivity", "history", "human_ai_consistency")
@@ -269,7 +270,8 @@ def import_tool(cfg, name):
         raise ApiError(500, f"tools.{name} 不可用：{exc}")
 
 
-TOOL_USER_ERRORS = ("StoreError", "IngestError", "XlsxError", "SignerConfigError")
+TOOL_USER_ERRORS = ("StoreError", "IngestError", "XlsxError", "SignerConfigError",
+                    "CandidateError")
 
 
 def _as_user_error(exc):
@@ -4307,6 +4309,17 @@ def route_api(cfg, method, path, query, body):
         if method != "GET":
             raise ApiError(405, "method not allowed")
         return 200, workitems_csv(cfg)
+    if path == "/api/candidates":
+        if method != "GET":
+            raise ApiError(405, "method not allowed")
+        return 200, candidates_view(cfg, query)
+    cm = CANDIDATE_ACTION_RE.match(path)
+    if cm:
+        if method != "POST":
+            raise ApiError(405, "method not allowed")
+        if cm.group(2) == "confirm":
+            return 200, candidate_confirm(cfg, cm.group(1), body)
+        return 200, candidate_reject(cfg, cm.group(1), body)
     if path == "/api/reminders":
         if method != "GET":
             raise ApiError(405, "method not allowed")
@@ -4681,6 +4694,64 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+def collect_interval():
+    """采集间隔秒：env BOT_COLLECT_INTERVAL，默认 600，最小 60。"""
+    try:
+        value = int(os.environ.get("BOT_COLLECT_INTERVAL") or 600)
+    except (TypeError, ValueError):
+        value = 600
+    return max(60, value)
+
+
+def collect_disabled():
+    return str(os.environ.get("BOT_COLLECT_DISABLED") or "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def collect_round(cfg):
+    """跑一轮 Tobs 采集并 emit 回合事件；异常只打 stderr，不抛出。"""
+    emitted, errors = 0, 0
+    try:
+        tc = import_tool(cfg, "tobs_collect")
+        state = _runtime_root(cfg) / "tobs_collect.state.json"
+        res = tc.run_once(tc.db_path(), state, 200, False, str(events_path(cfg)))
+        emitted = int(res.get("emitted") or 0)
+        errors = len(res.get("errors") or [])
+        if res.get("ok") is False and errors == 0:
+            errors = 1
+    except Exception as exc:  # noqa: BLE001 - 常驻线程不许因单轮失败退出
+        errors = 1
+        print(f"[collect] 本轮失败：{exc}", file=sys.stderr, flush=True)
+    try:
+        _core(cfg, "eventlog").emit(
+            "bot_team_collect_round", actor="system",
+            payload={"emitted": emitted, "errors": errors},
+            path=events_path(cfg),
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[collect] 回合事件写入失败：{exc}", file=sys.stderr, flush=True)
+    return {"emitted": emitted, "errors": errors}
+
+
+def _collect_loop(cfg, interval):
+    while True:
+        collect_round(cfg)
+        time.sleep(interval)
+
+
+def start_collector(cfg):
+    """起 daemon 采集线程；BOT_COLLECT_DISABLED=1 时不启动。"""
+    if collect_disabled():
+        log("[collect] 常驻采集已禁用（BOT_COLLECT_DISABLED）")
+        return None
+    interval = collect_interval()
+    thread = threading.Thread(target=_collect_loop, args=(cfg, interval),
+                              name="bot-collect", daemon=True)
+    thread.start()
+    log(f"[collect] 常驻采集已启动：每 {interval}s 一轮 → {events_path(cfg)}")
+    return thread
+
+
 def main(argv=None):
     _enable_utf8_stdio()
     args = parse_args(argv)
@@ -4698,6 +4769,7 @@ def main(argv=None):
     except OSError as exc:
         log(f"监听 {args.host}:{args.port} 失败：{exc}（端口被占用？换 --port 8788 试试）")
         return 2
+    start_collector(cfg)
     log(f"bot-team local server: http://{args.host}:{args.port}/")
     log(f"root={cfg.root}")
     log(f"ui={cfg.ui} runs={cfg.runs}")
@@ -4726,6 +4798,54 @@ def events_path(cfg):
     if env:
         return Path(env)
     return Path(cfg.root) / "runtime" / "events.jsonl"
+
+
+def _runtime_root(cfg):
+    """运行根：env BOT_RUNTIME_DIR 优先（测试隔离），否则 <root>/runtime。"""
+    env = os.environ.get("BOT_RUNTIME_DIR")
+    return Path(env) if env else Path(cfg.root) / "runtime"
+
+
+def _candidates_tool(cfg):
+    return import_tool(cfg, "task_candidates")
+
+
+def candidates_view(cfg, query):
+    status = str((query.get("status") or ["pending"])[0] or "pending").strip().lower()
+    if status not in ("pending", "confirmed", "rejected", "all"):
+        raise ApiError(400, f"未知 status：{status}（pending/confirmed/rejected/all）")
+    tool = _candidates_tool(cfg)
+    items = tool.list_candidates(root=_runtime_root(cfg),
+                                 status=None if status == "all" else status)
+    return {"ok": True, "items": items}
+
+
+def candidate_confirm(cfg, cand_id, body):
+    body = body or {}
+    tool = _candidates_tool(cfg)
+    try:
+        cand = tool.confirm(_runtime_root(cfg), unquote(cand_id),
+                            str(body.get("by") or cfg.owner or "老板"),
+                            str(body.get("task_id") or ""))
+    except ApiError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - CandidateError 统一 400
+        raise _as_user_error(exc) or exc
+    return {"ok": True, "candidate": cand}
+
+
+def candidate_reject(cfg, cand_id, body):
+    body = body or {}
+    tool = _candidates_tool(cfg)
+    try:
+        cand = tool.reject(_runtime_root(cfg), unquote(cand_id),
+                           str(body.get("by") or cfg.owner or "老板"),
+                           str(body.get("reason") or ""))
+    except ApiError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - CandidateError 统一 400
+        raise _as_user_error(exc) or exc
+    return {"ok": True, "candidate": cand}
 
 
 def reminders_view(cfg, *, emit=True):

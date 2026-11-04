@@ -53,6 +53,35 @@ def _ratio(num: int, den: int) -> float | None:
     return round(num / den, 4)
 
 
+
+def _wal_counts() -> dict:
+    """读 WAL 统计（F4 四齿：候选/晋升/退役）。WAL 缺失时返回空统计，不报错。"""
+    try:
+        from flywheel_promote import load as _wal_load, summary as _wal_summary
+    except Exception:  # noqa: BLE001
+        return {}
+    try:
+        rows = _wal_load()
+    except Exception:  # noqa: BLE001
+        return {}
+    try:
+        return _wal_summary(rows)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _promotion_candidates() -> int:
+    """达阈值但还没晋升的候选数（周报要看「攒够没」，不是看有没有信号）。"""
+    try:
+        from flywheel_promote import load as _wal_load, promote_check as _check
+    except Exception:  # noqa: BLE001
+        return 0
+    try:
+        return len(_check(_wal_load()))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def build(events: list[dict], days: int = 7, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc).astimezone()
     since = now - timedelta(days=days)
@@ -116,6 +145,10 @@ def build(events: list[dict], days: int = 7, now: datetime | None = None) -> dic
         "backfill_rate": _ratio(outcomes, issued_n),
         "worth_rate": _ratio(agree, judged_n),
         "memory_change_events": memory_changes,
+        "promotion_candidates": _promotion_candidates(),
+        "wal_signals": _wal_counts().get("total", 0),
+        "wal_promotions": _wal_counts().get("promotions", 0),
+        "wal_retirements": _wal_counts().get("retirements", 0),
         "collection_health": "ok" if len(days_seen) >= min(days, 3) else "gap",
         "notes": [
             n for n in (
