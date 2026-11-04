@@ -89,12 +89,21 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="memory_commit")
     ap.add_argument("--repo")
     ap.add_argument("--status", action="store_true")
+    ap.add_argument("--snapshot", action="store_true")
     ap.add_argument("--by", default="bot-team")
     ap.add_argument("--message")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
 
     repo = Path(a.repo) if a.repo else repo_path()
+    if a.snapshot:
+        try:
+            res = snapshot_nested(repo, by=a.by)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[memory-commit] 镜像失败：{exc}", file=sys.stderr)
+            return 1
+        print(res)
+        return 0
     if a.status:
         try:
             print(status(repo))
@@ -118,6 +127,108 @@ def main(argv: list[str]) -> int:
         return 1
     return 0
 
+
+
+MIRROR_DIR = "_mirror"
+NESTED_SKIP = {".git", "node_modules", "__pycache__", ".botharness"}
+
+
+def nested_repos(repo: Path) -> list[Path]:
+    """Tobs 给每个 Bot 建的是独立 git 仓，父仓看不见它们的提交 → 需要镜像。"""
+    out = []
+    for cand in sorted(repo.glob("*/bot-*")):
+        if (cand / ".git").exists():
+            out.append(cand)
+    return out
+
+
+def snapshot_nested(repo: Path, by: str = "bot-team") -> dict:
+    """把每个嵌套仓的工作文件镜像到父仓 _mirror/<角色>/<bot>/ 并提交父仓。"""
+    repos = nested_repos(repo)
+    if not repos:
+        return {"ok": True, "skipped": True, "reason": "没有嵌套仓"}
+    copied = 0
+    for sub in repos:
+        rel = sub.relative_to(repo)
+        dst_root = repo / MIRROR_DIR / rel
+        r = _git(sub, "-c", "core.quotepath=false", "ls-files")
+        for name in [x for x in r.stdout.splitlines() if x.strip()]:
+            src, dst = sub / name, dst_root / name
+            if any(part in NESTED_SKIP for part in Path(name).parts):
+                continue
+            if _denied(name):
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            data = src.read_bytes() if src.exists() else b""
+            if not dst.exists() or dst.read_bytes() != data:
+                dst.write_bytes(data)
+                copied += 1
+    if copied == 0:
+        head = commit(repo, by=by)
+        return {"ok": True, "mirrored": 0, "parent": head}
+    readme = repo / MIRROR_DIR / "README.md"
+    readme.write_text(
+        "# 记忆镜像" + chr(10) + chr(10)
+        + "Tobs 给每个 Bot 建独立 git 仓，父仓看不到它们的提交；本目录是这些仓工作文件的只读镜像，"
+        + "由 tools/memory_commit.py --snapshot 生成。" + chr(10),
+        encoding="utf-8",
+    )
+    head = commit(
+        repo,
+        by=by,
+        message="[" + MARKER + "] " + datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
+        + " 记忆镜像（" + str(copied) + " 个文件，by " + by + "）",
+    )
+    return {"ok": True, "mirrored": copied, "parent": head}
+
+
+def main(argv: list[str]) -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="memory_commit")
+    ap.add_argument("--repo")
+    ap.add_argument("--status", action="store_true")
+    ap.add_argument("--snapshot", action="store_true")
+    ap.add_argument("--by", default="bot-team")
+    ap.add_argument("--message")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args(argv)
+
+    repo = Path(a.repo) if a.repo else repo_path()
+    if a.snapshot:
+        try:
+            res = snapshot_nested(repo, by=a.by)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[memory-commit] 镜像失败：{exc}", file=sys.stderr)
+            return 1
+        print(res)
+        return 0
+    if a.status:
+        try:
+            print(status(repo))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[memory-commit] 失败：{exc}", file=sys.stderr)
+            return 1
+        return 0
+    try:
+        res = commit(repo, by=a.by, message=a.message)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[memory-commit] 失败：{exc}", file=sys.stderr)
+        return 1
+    if a.json:
+        print(res)
+    elif res.get("skipped"):
+        print(f"[memory-commit] 跳过：{res.get('reason')}")
+    elif res.get("ok"):
+        print(f"[memory-commit] {res['commit']} 已提交 {res['files']} 个文件")
+    else:
+        print(f"[memory-commit] 失败：{res.get('reason')}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
