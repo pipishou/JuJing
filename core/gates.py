@@ -302,7 +302,17 @@ def real_report_errors(report, base):
             if not ev:
                 errors.append(f"finding[{i}] 缺证据 evidence")
             else:
+                # 2026-11-04 修：整串只有空白/换行的条目是排版残留（markdown 列表的 `- `），
+                # 不是占位。先过滤掉再判，避免把真实中文证据判成「空证据」；
+                # 过滤后若一条有效证据都没有，仍按缺证据拒绝（不放宽判定面）。
+                items = []
                 for j, item in enumerate(ev):
+                    if isinstance(item, str) and not strip_zero_width(item).strip():
+                        continue
+                    items.append((j, item))
+                if not items:
+                    errors.append(f"finding[{i}] 缺有效证据 evidence（条目均为空白）")
+                for j, item in items:
                     if is_placeholder_evidence(item):
                         errors.append(f"finding[{i}].evidence[{j}] 含占位/空证据: {str(item)[:40]!r}")
 

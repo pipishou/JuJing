@@ -156,3 +156,21 @@
 ### 待老板在面板完成（10 分钟）
 - 6 个 Bot 补 **Task model**（`assignment` 现为 false）
 - 3 类工具审批白名单（本项目目录读写 / 本机 8787 / git 只读）
+
+## R2-F 反哺口（2026-11-04 修正，按聚鲸工作流 §四 四齿）
+
+老板裁定：**不是「有产物就回流」，回流必须走晋升与退役机制**。故 F4 的实现口径改为：
+
+| 齿 | 本项目落法 | 载体 |
+|---|---|---|
+| 信号 WAL | 每条修正/证伪/反馈/事故记一行（append-only，带 clause 锚点） | `runtime/wal.jsonl`（`tools/flywheel_promote.py add`） |
+| 积累 | 同 `(kind, clause)` 达阈值（默认 3）才成**候选**；候选≠同类，必须打印同类性三问 | `promote-check` |
+| 落地（棘轮） | 人工回答三问 + 指定落点（`soul / pack_threshold / reminder_policy / model_route`）才 `promote`；只产出提案，**不自动改 SOUL/pack 文件** | `promote` |
+| 控制 | 人类确认点；退役需 `falsified / idle / superseded` + 证据 | `retire` |
+
+铁律三条（已写进工具，违反即 rc=1）：
+1. 无 `clause` 不记账（没锚点的信号无法聚类，等于没记）
+2. 三问没答完不许晋升；晋升必须指定落点
+3. 退役必须有证据（证伪的实验号 / 空转的观测区间），不许凭感觉删条款
+
+**运行节奏**：周报时跑 `check`（列候选）→ 人有空时 `promote` 一条 → 落地后把改的文件行写回 `applies_to`；连续两轮无消费的条款走 `retire(idle)`。
