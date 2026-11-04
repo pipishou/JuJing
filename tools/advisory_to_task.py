@@ -272,7 +272,7 @@ def selfcheck(task_dir: Path, base: Path) -> tuple[bool, str]:
     except (OSError, ValueError) as exc:
         return False, f"report.json 不可读：{exc}"
     if rc.card_kind(report) == "weekly":
-        errs = gates.real_report_errors(report, base)
+        errs = gates.real_report_errors(report, base, require_layers=True)
         if not errs:
             return True, "RESULT: PASS（weekly 契约）"
         return False, chr(10).join("[FAIL] " + e for e in errs[:8])
@@ -318,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.skip_sources:
             refs = stage_evidence(task_dir, list(doc.get("sources") or []), base)
         report = build_report(doc, task_id, task_dir, pack, refs)
-        errs = gates.real_report_errors(report, base)
+        errs = gates.real_report_errors(report, base, require_layers=True)
         if errs:
             raise BridgeError("可信门未过：" + "；".join(str(e) for e in errs))
     except BridgeError as exc:

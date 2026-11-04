@@ -10,26 +10,38 @@ dimensions:
   - id: data_completeness
     name: 数据完整性
     question: 11 类因素里有几个 available？
+    layer: measured
+    rubric: "5=11类全部available；3=缺2-3类且有替代口径；1=缺5类以上"
     example_evidence: "11因素中9个available"
   - id: timeliness
     name: 数据时效性
     question: 数据延迟多久？T-1 以内满分，T-7 起显著扣分
+    layer: measured
+    rubric: "5=T-1以内；3=T-3~T-4；1=T-7及以后"
     example_evidence: "数据延迟 T-1"
   - id: significance
     name: 异常显著性
     question: 异常幅度是否超基线 2σ？
+    layer: judgment
+    rubric: "5=Δ超2σ且方向稳定；3=接近2σ；1=在噪声内"
     example_evidence: "Δ+2.1pp 超 2σ"
   - id: exclusivity
     name: 因素互斥性
     question: 候选因素之间是否完全互斥（不共因）？
+    layer: judgment
+    rubric: "5=候选完全互斥且已排除干扰；3=有1处共因未排除；1=多因纠缠"
     example_evidence: "2候选因素未完全互斥"
   - id: history
     name: 历史一致性
     question: 同因素历史上是否多次伴随同类异常？
+    layer: measured
+    rubric: "5=同因素历史≥3次同向；3=1-2次；1=无历史"
     example_evidence: "同模具历史3次超期均伴随补料率上行"
   - id: human_ai_consistency
     name: 人机一致性
     question: 结论与现场人员直觉是否一致？不一致必须写明分歧点
+    layer: sampled
+    rubric: "5=与本人判断一致；0=矛盾或本人未参与（未参与必须0）"
     example_evidence: "与车间主任直觉一致"
 confidence_formula: >-
   confidence = Σ(每维得分/5 × 16.67%)，保留两位小数；

@@ -441,3 +441,70 @@ if __name__ == "__main__":
     else:
         raw = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
         print(json.dumps(compute(raw), ensure_ascii=False, indent=2))
+
+# ---------------- 评分分层（2026-11-04）：measured / rule / judgment / sampled ----------------
+LAYERS_VERSION = "scorecard.layers.v1"
+LAYER_DEFAULT = {
+    "data_completeness": {"layer": "measured", "evidence_required": "factor_coverage"},
+    "timeliness": {"layer": "measured", "evidence_required": "data_delay"},
+    "significance": {"layer": "judgment", "evidence_required": "rationale"},
+    "exclusivity": {"layer": "judgment", "evidence_required": "rationale"},
+    "history": {"layer": "measured", "evidence_required": "history_ref"},
+    "human_ai_consistency": {"layer": "sampled", "evidence_required": "sample_ref"},
+}
+
+
+def scorecard_layers(pack=None):
+    """取分层声明：pack.scorecard_layers 优先，缺则用出厂默认。"""
+    if isinstance(pack, dict):
+        got = pack.get("scorecard_layers")
+        if isinstance(got, dict) and got:
+            return got
+    return LAYER_DEFAULT
+
+
+def layer_errors(report, pack=None):
+    """逐维校验打分依据。返回错误列表（空=通过）。
+
+    规则（单签 + 抽样校准）：
+      measured → 必须给 evidence_refs（机读来源）
+      judgment → 必须给 rationale（为什么给这个分）
+      sampled  → 必须给 sample_ref；未抽样时该维必须为 0 并写 unsampled=true
+    """
+    errors = []
+    if not isinstance(report, dict):
+        return ["report 必须是 JSON 对象"]
+    try:
+        kind = card_kind(report)
+    except (ValueError, AttributeError):
+        kind = "attribution"
+    if kind != "attribution":
+        return []          # 周卡/内容卡不带六维
+    sc = report.get("scorecard")
+    if not isinstance(sc, dict):
+        return ["scorecard 缺失，无法做分层校验"]
+    notes = sc.get("dimension_notes")
+    if not isinstance(notes, dict) or not notes:
+        return ["scorecard.dimension_notes 缺失：分层打分要求逐维给依据"
+                "（measured=evidence_refs / judgment=rationale / sampled=sample_ref）"]
+    layers = scorecard_layers(pack)
+    for dim in SIX_DIMS:
+        spec = layers.get(dim) or LAYER_DEFAULT.get(dim, {"layer": "judgment"})
+        layer = str(spec.get("layer") or "judgment")
+        entry = notes.get(dim)
+        if not isinstance(entry, dict):
+            errors.append(f"scorecard.dimension_notes.{dim} 缺失")
+            continue
+        if layer == "judgment":
+            if len(str(entry.get("rationale") or "").strip()) < 6:
+                errors.append(f"scorecard.dimension_notes.{dim}.rationale 过短（判断层必须说明理由）")
+        elif layer == "measured":
+            refs = entry.get("evidence_refs")
+            if not isinstance(refs, list) or not [r for r in refs if str(r).strip()]:
+                errors.append(f"scorecard.dimension_notes.{dim}.evidence_refs 为空（测量层必须给机读来源）")
+        elif layer == "sampled":
+            score = entry.get("score", sc.get(dim))
+            if not str(entry.get("sample_ref") or "").strip():
+                if not (isinstance(score, (int, float)) and score == 0):
+                    errors.append(f"scorecard.dimension_notes.{dim} 未抽样时必须 score=0 且标注 unsampled")
+    return errors

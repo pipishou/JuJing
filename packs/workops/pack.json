@@ -148,5 +148,32 @@
   "scene_guardrails": {
     "max_per_month": 6,
     "hard_rules": []
-  }
+  },
+  "scorecard_layers": {
+    "data_completeness": {
+      "layer": "measured",
+      "evidence_required": "factor_coverage"
+    },
+    "timeliness": {
+      "layer": "measured",
+      "evidence_required": "data_delay"
+    },
+    "significance": {
+      "layer": "judgment",
+      "evidence_required": "rationale"
+    },
+    "exclusivity": {
+      "layer": "judgment",
+      "evidence_required": "rationale"
+    },
+    "history": {
+      "layer": "measured",
+      "evidence_required": "history_ref"
+    },
+    "human_ai_consistency": {
+      "layer": "sampled",
+      "evidence_required": "sample_ref"
+    }
+  },
+  "scorecard_layers_version": "scorecard.layers.v1"
 }

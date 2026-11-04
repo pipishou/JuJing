@@ -246,8 +246,11 @@ def weekly_errors(report, base=None):
     return errors
 
 
-def real_report_errors(report, base):
-    """返回真实报告必须满足的判据错误列表（空=通过）。"""
+def real_report_errors(report, base, require_layers=False):
+    """返回真实报告必须满足的判据错误列表（空=通过）。
+
+    require_layers=True 时额外校验评分分层依据（单签+抽样校准）。
+    """
     errors = []
     if not isinstance(report, dict):
         return ["report 必须是 JSON 对象"]
@@ -685,6 +688,8 @@ def review_errors(report, signature, review, allowlist=()):
     if verdict and original != verdict:
         errors.append(f"复核记录原档位={original!r} 与当前 scorecard.verdict={verdict!r} 不一致："
                       "报告档位已变，旧复核失效（需重新复核）")
+    if require_layers:
+        errors.extend(report_contract.layer_errors(report, _load_pack_doc(base)))
     return errors
 
 
