@@ -46,3 +46,24 @@ python -B tools/flywheel_tick.py --due
 - **不是定时器驱动业务**：11/17 两轮是「对齐工作节奏的检查点」，不是实时流水线；
 - **口径单一来源**：服务的后台线程与命令行 `--loop` 都用 `core/timeslots.py` 算下一次几点，避免两处各写一遍；
 - **失败不阻断**：单轮里任一步失败只记 `[flywheel]` 日志与 tick 事件，服务不受影响。
+
+## 5 已经装好的计划任务（无需管理员）
+
+```bat
+schtasks /Create /TN "JujingFlywheelDue" ^
+  /TR "cmd /c \"D:\work\产品类\个人产品\bot-2\JuJing\bot-team\server\flywheel_due.cmd\"" ^
+  /SC MINUTE /MO 10 /F /RL LIMITED
+```
+
+- 每 **10 分钟**喊一次 `server/flywheel_due.cmd`；包装器调 `tools/flywheel_tick.py --due`
+- **只有落在 11:00 / 17:00 后 20 分钟内才真跑**，其余时间一行 `not_in_window` 就退出
+- 同一槽跑过 → `already_ran`（状态在 `runtime/flywheel_tick.json`）
+- 日志：`runtime/logs/flywheel-due.log`
+- 用户级任务（`/RL LIMITED`），**不需要管理员**；删：`schtasks /Delete /TN JujingFlywheelDue /F`
+
+实测：`schtasks /Run /TN JujingFlywheelDue` → 日志写入 `{"ok": true, "skipped": true, "reason": "not_in_window", "slots": ["11:00","17:00"]}`，退出码 0。
+
+## 6 为什么不挂到 DSH 的定时器
+
+DSH 的 `schedule_create` 是**会话级**提醒：投递对象是当前会话，会话关掉就不再触发，也不能保证宿主空闲时执行。
+飞轮要的是「机器开着就跑一次」，所以落在 **Windows 计划任务**上更稳；DSH 常开只是便利，不是可靠时钟。
