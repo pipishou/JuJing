@@ -48,10 +48,15 @@ def _run(step: str, args: list[str], timeout: int = 300) -> dict:
     """跑一个子工具，返回 {step, ok, rc, summary, error}；任何异常都吞掉。"""
     cmd = [sys.executable, "-B", str(TOOLS / f"{_script(step)}")] + args
     started = time.time()
+    # 计划任务下 stdout 被重定向到文件，Windows 默认按 GBK 编码 →
+    # 工具里一旦打印 `↔`/中文符号就 UnicodeEncodeError（2026-11-04 17:01 实测踩到）。
+    env = dict(os.environ)
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUTF8", "1")
     try:
         proc = subprocess.run(
             cmd, cwd=str(ROOT), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=timeout,
+            encoding="utf-8", errors="replace", timeout=timeout, env=env,
         )
         out = (proc.stdout or "").strip()
         payload = _parse(out)
@@ -255,9 +260,26 @@ def main(argv=None) -> int:
         if state.get("last_slot") == key:
             print(json.dumps({"ok": True, "skipped": True, "reason": "already_ran", "slot": key}, ensure_ascii=False))
             return 0
+        # 同槽失败可重试（计划任务每 10 分钟一次，窗口 20 分钟 → 至少 2 次机会），
+        # 超过 3 次才认输，避免把坏配置变成无限重跑。
+        attempts = int((state.get("attempts") or {}).get(key, 0))
+        if attempts >= 3:
+            print(json.dumps({"ok": False, "skipped": True, "reason": "attempts_exhausted",
+                              "slot": key, "attempts": attempts}, ensure_ascii=False))
+            return 1
         result = tick(days=args.days, skip=skip)
-        _save_state({"last_slot": key, "last_ok": result["ok"], "finished_at": result["finished_at"]})
-        print(json.dumps(result, ensure_ascii=False) if args.json else "") if args.json else _print(result)
+        attempts_map = dict(state.get("attempts") or {})
+        attempts_map[key] = attempts + 1
+        if result["ok"]:
+            _save_state({"last_slot": key, "last_ok": True, "finished_at": result["finished_at"],
+                         "attempts": {}})
+        else:
+            _save_state({"last_slot": state.get("last_slot"), "last_ok": False,
+                         "finished_at": result["finished_at"], "attempts": attempts_map})
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False))
+        else:
+            _print(result)
         return 0 if result["ok"] else 1
 
     if args.loop:

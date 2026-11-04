@@ -1,6 +1,8 @@
 @echo off
-chcp 65001 >nul
 setlocal
+chcp 65001 >nul
+set "PYTHONIOENCODING=utf-8"
+set "PYTHONUTF8=1"
 set "ROOT=%~dp0.."
 cd /d "%ROOT%"
 set "PY=%ROOT%\..\..\venv\Scripts\python.exe"
