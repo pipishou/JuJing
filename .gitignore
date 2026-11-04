@@ -46,3 +46,6 @@ Thumbs.db
 
 # 但示例文件要入库
 !.env.example
+
+# 临时补丁脚本
+_tmp_*

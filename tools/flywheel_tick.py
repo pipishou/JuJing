@@ -229,6 +229,72 @@ def _save_state(state: dict) -> None:
         pass
 
 
+# ---------------------------------------------------------------- 失败通知
+# 用户 m10487：「失败可以发飞书」。出站沿用 bot-2/tools/lark_send.py（已验证 1.6s），
+# 只允许 purpose=mo_p2p（该脚本的白名单只有这一项）。
+LARK_SEND_DEFAULT = "D:/work/产品类/个人产品/bot-2/tools/lark_send.py"
+NOTIFY_PURPOSE = "mo_p2p"
+
+
+def notify_enabled() -> bool:
+    """BOT_FLYWHEEL_NOTIFY=0 可关；默认开。"""
+    return (os.environ.get("BOT_FLYWHEEL_NOTIFY") or "1").strip() != "0"
+
+
+def lark_send_path() -> Path | None:
+    raw = (os.environ.get("BOT_LARK_SEND") or LARK_SEND_DEFAULT).strip()
+    p = Path(raw)
+    return p if p.is_file() else None
+
+
+def compose_failure_text(result: dict, slot: str = "", attempts: int = 1,
+                         max_attempts: int = 3) -> str:
+    bad = [s for s in result.get("steps", []) if not s.get("ok") and not s.get("skipped")]
+    head = "飞轮失败"
+    if slot:
+        head += f" {slot}"
+    if max_attempts > 1:
+        head += f"（第 {attempts}/{max_attempts} 次）"
+    lines = [f"**{head}**", ""]
+    for s in bad:
+        err = (s.get("error") or "").replace("\n", " ").strip()
+        lines.append(f"- `{s.get('step')}` : {err[:240] or '（无错误文本）'}")
+    if not bad:
+        lines.append("- 有步骤失败，但未取到错误文本（看 runtime/logs/flywheel-due.log）")
+    okc = sum(1 for s in result.get("steps", []) if s.get("ok"))
+    lines += ["", f"通过 {okc}/{len(result.get('steps', []))} 步，耗时 "
+                  f"{result.get('duration_s', 0)}s，finish {result.get('finished_at', '')}"]
+    lines.append("处理：看日志 → 修配置/代码 → 手工 `python -B tools/flywheel_tick.py` 复跑")
+    return "\n".join(lines)
+
+
+def notify_failure(result: dict, slot: str = "", attempts: int = 1,
+                   max_attempts: int = 3, dry_run: bool = False) -> dict:
+    """发一条飞书告警；任何异常都吞掉（告警本身不能把 tick 搞失败）。"""
+    if not notify_enabled():
+        return {"sent": False, "reason": "disabled_by_env"}
+    script = lark_send_path()
+    if script is None:
+        return {"sent": False, "reason": "lark_send_not_found"}
+    text = compose_failure_text(result, slot=slot, attempts=attempts, max_attempts=max_attempts)
+    cmd = [sys.executable, "-B", str(script), "--purpose", NOTIFY_PURPOSE,
+           "--markdown", text, "--auth", "tenant"]
+    if not dry_run:
+        cmd.append("--send")
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=60, env=env, cwd=str(ROOT))
+    except Exception as exc:  # noqa: BLE001
+        return {"sent": False, "reason": f"exception: {exc}"}
+    out = (proc.stdout or "").strip().replace("\n", " ")[:300]
+    err = (proc.stderr or "").strip().replace("\n", " ")[:200]
+    return {"sent": proc.returncode == 0 and not dry_run,
+            "dry_run": dry_run, "rc": proc.returncode, "out": out, "err": err}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="飞轮 tick（采集→候选→周报→WAL→记忆）")
     parser.add_argument("--days", type=int, default=7, help="周报窗口天数")
@@ -276,6 +342,8 @@ def main(argv=None) -> int:
         else:
             _save_state({"last_slot": state.get("last_slot"), "last_ok": False,
                          "finished_at": result["finished_at"], "attempts": attempts_map})
+            result["notify"] = notify_failure(result, slot=key, attempts=attempts + 1,
+                                              max_attempts=3)
         if args.json:
             print(json.dumps(result, ensure_ascii=False))
         else:
@@ -303,10 +371,15 @@ def main(argv=None) -> int:
         return 0
 
     result = tick(days=args.days, skip=skip)
+    if not result["ok"]:
+        result["notify"] = notify_failure(result, max_attempts=0)
     if args.json:
         print(json.dumps(result, ensure_ascii=False))
     else:
         _print(result)
+        nf = result.get("notify")
+        if nf:
+            print(f"  飞书告警：{json.dumps(nf, ensure_ascii=False)}")
     return 0 if result["ok"] else 1
 
 
