@@ -1,0 +1,91 @@
+{
+  "ok": true,
+  "db": "C:\\Users\\kf-41\\.dsh\\botharness\\botharness.db",
+  "counts": {
+    "usage_receipts": 7536,
+    "usage_daily": 16,
+    "assignments": 1,
+    "request_assignments": 1,
+    "messaging_reception_history": 0,
+    "inbox_admissions": 5889,
+    "channel_records": 8,
+    "persona_bots": 6,
+    "model_presets": 0
+  },
+  "bots": [
+    {
+      "name": "Tob",
+      "orchestrator": "deepseek-v4.1-flash",
+      "provider": "dsh-opencode-go",
+      "reasoning": "high",
+      "assignment": true,
+      "assignment_model": "deepseek-v4.1-flash",
+      "assignment_candidates": 1,
+      "approval_template": ""
+    },
+    {
+      "name": "工作助理",
+      "orchestrator": "deepseek-v4.1-flash",
+      "provider": "dsh-opencode-go",
+      "reasoning": "high",
+      "assignment": true,
+      "assignment_model": "deepseek-v4.1-flash",
+      "assignment_candidates": 1,
+      "approval_template": "cautious-copy"
+    },
+    {
+      "name": "AI 专家",
+      "orchestrator": "deepseek-v4.1-flash",
+      "provider": "dsh-opencode-go",
+      "reasoning": "high",
+      "assignment": true,
+      "assignment_model": "deepseek-v4.1-flash",
+      "assignment_candidates": 1,
+      "approval_template": ""
+    },
+    {
+      "name": "产品专家",
+      "orchestrator": "deepseek-v4.1-flash",
+      "provider": "dsh-opencode-go",
+      "reasoning": "high",
+      "assignment": true,
+      "assignment_model": "deepseek-v4.1-flash",
+      "assignment_candidates": 1,
+      "approval_template": ""
+    },
+    {
+      "name": "业务专家",
+      "orchestrator": "deepseek-v4.1-flash",
+      "provider": "dsh-opencode-go",
+      "reasoning": "high",
+      "assignment": true,
+      "assignment_model": "deepseek-v4.1-flash",
+      "assignment_candidates": 1,
+      "approval_template": ""
+    },
+    {
+      "name": "内容操盘手",
+      "orchestrator": "deepseek-v4.1-flash",
+      "provider": "dsh-opencode-go",
+      "reasoning": "high",
+      "assignment": true,
+      "assignment_model": "deepseek-v4.1-flash",
+      "assignment_candidates": 1,
+      "approval_template": ""
+    }
+  ],
+  "last_usage": [
+    {
+      "fingerprint": "6a7c634c2357168e64cf3c870381504b29853c5ed5c5c27350b1ec7ae2f2dc95",
+      "bot_slug": "bot-10695da2e6f346b186b70cc7a1ca96ad"
+    },
+    {
+      "fingerprint": "ad52ad9b2aa6d6b95370e50f47ed061a94cf11a0020768c16a3b2ed233d3c851",
+      "bot_slug": "bot-10695da2e6f346b186b70cc7a1ca96ad"
+    },
+    {
+      "fingerprint": "6a98f415a56576c4028004d7c886318f33d44a19065a6df2fa6ade5c8c76f9e4",
+      "bot_slug": "bot-10695da2e6f346b186b70cc7a1ca96ad"
+    }
+  ]
+}

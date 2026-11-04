@@ -87,7 +87,10 @@ def bots(conn: sqlite3.Connection) -> list:
                     "orchestrator": (plan.get("orchestrator") or {}).get("model"),
                     "provider": (plan.get("orchestrator") or {}).get("provider"),
                     "reasoning": (plan.get("orchestrator") or {}).get("reasoningEffort"),
-                    "assignment": bool(plan.get("assignment")),
+                    "assignment": bool(plan.get("assignmentDefault") or plan.get("assignmentModels")),
+                    "assignment_model": ((plan.get("assignmentDefault") or {}).get("model")),
+                    "assignment_candidates": len(plan.get("assignmentModels") or []),
+                    "approval_template": (d.get("approvalTemplate") or ""),
                 }
             )
     except sqlite3.Error:

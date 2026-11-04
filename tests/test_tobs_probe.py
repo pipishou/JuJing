@@ -51,7 +51,7 @@ def build_db(path: Path) -> None:
         "displayName": "业务专家",
         "modelPlan": {
             "orchestrator": {"provider": "dsh-opencode-go", "model": "deepseek-v4.1-flash"},
-            "assignment": {"provider": "dsh-opencode-go", "model": "deepseek-v4.1-flash"},
+            "assignmentDefault": {"provider": "dsh-opencode-go", "model": "deepseek-v4.1-flash", "reasoningEffort": "high"},
         },
     }
     conn.execute("insert into persona_bots values ('biz', ?)", (json.dumps(body2),))
@@ -87,6 +87,7 @@ def main() -> int:
     asg = {b["name"]: b["assignment"] for b in payload["bots"]}
     check("assignment 缺失=False", asg["工作助理"] is False)
     check("assignment 存在=True", asg["业务专家"] is True)
+    check("assignment_model 带出型号", any(b.get("assignment_model") for b in payload["bots"]))
     check("reasoning 透出", payload["bots"][0]["reasoning"] == "high")
     check("last_usage 条数≤3", len(payload["last_usage"]) == 2)
     check("last_usage 字段带 model", payload["last_usage"][0].get("model") == "deepseek-v4.1-flash")

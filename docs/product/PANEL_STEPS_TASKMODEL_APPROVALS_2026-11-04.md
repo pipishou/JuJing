@@ -93,3 +93,28 @@ python -B JuJing/bot-team/tools/tobs_probe.py --pretty   # 看 tool_approval_rul
 - R2-C 确认页：8787 前端「候选任务」区，一键是/不是 → 建单出卡。
 - R2-D 记忆固化：`tools/memory_commit.py`（30 分钟一次 `commit -am`，不 push）。
 - T4 SOUL 追加：等你这批任务空闲窗口再写（避免撞 Tobs 的 CAS 记忆提交）。
+
+---
+
+## 四、复核结果（2026-11-04 14:11 实测，只读探针）
+
+老板在面板已完成，我逐 Bot 复核（`tools/tobs_probe.py --pretty`，已修正取值键）：
+
+| Bot | modelPlan.rev | 主模型 | 任务模型 assignmentDefault | 候选 | approvalTemplate |
+|---|---|---|---|---|---|
+| Tob | r3 | deepseek-v4.1-flash | deepseek-v4.1-flash / high | 1 | （默认） |
+| 工作助理 | r2 | deepseek-v4.1-flash | deepseek-v4.1-flash / high | 1 | **cautious-copy** |
+| AI 专家 | r2 | 同上 | 同上 | 1 | （默认） |
+| 产品专家 | r2 | 同上 | 同上 | 1 | （默认） |
+| 业务专家 | r3 | 同上 | 同上 | 1 | （默认） |
+| 内容操盘手 | r2 | 同上 | 同上 | 1 | （默认） |
+
+**我修的一个真 bug（探针口径错）**：`tobs_probe.py` 原先读 `modelPlan.assignment`（引擎里根本不存在的键），
+所以一直报 `assignment=false`；实际引擎用的是 **`assignmentDefault` + `assignmentModels[]`**。
+已改为读这两个键，并加输出 `assignment_model` / `assignment_candidates` / `approval_template`；
+`tests/test_tobs_probe.py` 14 项全过。
+
+**审批的落点与预期不同**：`tool_approval_rules` 仍 **0 行** —— 说明老板设的不是"逐工具规则"，
+而是 **Bot 级 approvalTemplate**（工作助理=`cautious-copy`，其余走默认）。
+结论：白名单不是以规则表实现，而是以"模板 + 只让工作助理持工具"实现 —— 这与我方案里的
+"规则表"路线不同，但**效果等价且更省事**，无需再建规则。
