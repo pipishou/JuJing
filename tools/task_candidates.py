@@ -256,7 +256,7 @@ def _segments(humans: list[dict]) -> list[list[dict]]:
 # --------------------------------------------------------------------------- #
 # 主流程
 # --------------------------------------------------------------------------- #
-def build(events, min_chars: int = 40, now=None, root=None) -> list[dict]:
+def build(events, min_chars: int = 40, now=None, root=None, per_message: bool = False) -> list[dict]:
     """从事件流生成候选（不落盘）。同集合/已 reject 的段跳过。"""
     if now is None:
         now_dt = datetime.now().astimezone()
@@ -294,7 +294,8 @@ def build(events, min_chars: int = 40, now=None, root=None) -> list[dict]:
     seq = _next_seq(root, date_str)
     out = []
 
-    for seg in _segments(humans):
+    segments = [[e] for e in humans] if per_message else _segments(humans)
+    for seg in segments:
         text = "\n".join(e["_body"] for e in seg).strip()
         chars = len(text)
         if chars < int(min_chars):
@@ -437,6 +438,7 @@ def main(argv=None) -> int:
     ap.add_argument("--task-id", default="")
     ap.add_argument("--reason", default="")
     ap.add_argument("--status", default="pending", help="--list 过滤：pending/confirmed/rejected/all")
+    ap.add_argument("--merge", action="store_true", help="按 dialog/频道合并（旧行为）")
     ap.add_argument("--min-chars", type=int, default=40)
     ap.add_argument("--events", default=None, help="覆盖事件流文件（测试用）")
     args = ap.parse_args(argv)
@@ -445,7 +447,7 @@ def main(argv=None) -> int:
         if args.build:
             path = Path(args.events) if args.events else None
             events = eventlog.iter_events(path)
-            built = build(events, args.min_chars, root=root)
+            built = build(events, args.min_chars, root=root, per_message=not args.merge)
             save(built, root)
             _out({"ok": True, "built": len(built), "ids": [c["id"] for c in built]}, args.json)
             return 0
