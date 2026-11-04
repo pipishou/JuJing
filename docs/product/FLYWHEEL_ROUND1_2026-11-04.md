@@ -174,3 +174,25 @@
 3. 退役必须有证据（证伪的实验号 / 空转的观测区间），不许凭感觉删条款
 
 **运行节奏**：周报时跑 `check`（列候选）→ 人有空时 `promote` 一条 → 落地后把改的文件行写回 `applies_to`；连续两轮无消费的条款走 `retire(idle)`。
+
+## R2 落地结果（2026-11-04 更新）
+
+| 批次 | 状态 | 证据 |
+|---|---|---|
+| R2-A 采集常驻 | 已落地 | `server/app.py:4697-4772` bot-collect daemon；`BOT_COLLECT_INTERVAL` 默认 600s |
+| R2-B 候选器 | 已落地 | `tools/task_candidates.py` + `tests/test_task_candidates.py` 62 断言 |
+| R2-C 确认页 | **取消** | 老板裁定：确认动作交工作助理（群里一句话即可），不新建页面 |
+| R2-D 记忆固化 | 已落地 | `tools/memory_commit.py` + `tests/test_memory_commit.py` 10 项 PASS；只 commit 不 push |
+| R2-E 判据与负测试 | 已落地 | `tests/test_promote_and_evidence.py` 26 项（含全空格证据仍红） |
+
+### 新增：回交端点（飞轮的入口）
+
+`POST /api/tasks/<id>/deliverable`，body `{"deliverable_md": "...", "by": "工作助理"}`：
+- 落 `runs/<id>/deliverable.md`（原子写），返回 `bytes/sha256/by`
+- 发 `bot_team_deliverable_saved` 事件（payload 含 task_id/name/bytes/sha256/by）
+- 实测（隔离 8862）：正常 200；空 body 400；未知任务 404
+
+### 工作助理 SOUL 已加回交契约
+
+`bot-memory/assistant/<bot>/SOUL.md` 追加「回交契约」：判级 L0–L3 阈值、专家六行、
+汇总写「未采纳谁」、定案后调上面的端点、无 task_id 先建单（`scene_id=scene-workitems-weekly`）。

@@ -1564,6 +1564,72 @@ def append_followup_event(cfg, tdir, outcome, outcome_sha256=""):
     return event
 
 
+
+DELIVERABLE_NAME = "deliverable.md"
+DELIVERABLE_MAX = 200_000
+
+
+def deliverable_file(cfg, task_id):
+    return cfg.runs / task_id / DELIVERABLE_NAME
+
+
+def get_deliverable(cfg, task_id):
+    path = deliverable_file(cfg, task_id)
+    if not path.exists():
+        raise ApiError(404, f"尚无交付物: {task_id}")
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "bytes": path.stat().st_size,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "deliverable_md": text,
+    }
+
+
+def post_deliverable(cfg, task_id, body):
+    task_dir = cfg.runs / task_id
+    if not task_dir.exists():
+        raise ApiError(404, f"任务不存在: {task_id}")
+    md = body.get("deliverable_md") or body.get("markdown") or body.get("md") or ""
+    if not isinstance(md, str) or not md.strip():
+        raise ApiError(400, "deliverable_md 不能为空")
+    data = md.encode("utf-8")
+    if len(data) > DELIVERABLE_MAX:
+        raise ApiError(400, f"交付物过大（{len(data)} > {DELIVERABLE_MAX} 字节）")
+    path = deliverable_file(cfg, task_id)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+    sha = hashlib.sha256(data).hexdigest()
+    by = (body.get("by") or cfg.owner or "").strip() or "unknown"
+    try:
+        from core import eventlog
+
+        eventlog.emit(
+            "bot_team_deliverable_saved",
+            actor=by,
+            refs={"task_id": task_id},
+            payload={
+                "task_id": task_id,
+                "name": DELIVERABLE_NAME,
+                "bytes": len(data),
+                "sha256": sha,
+                "by": by,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 —— 锚点是旁证，不阻断回交
+        print(f"[deliverable] 事件写入失败（已忽略）：{exc}", file=sys.stderr)
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "path": f"runs/{task_id}/{DELIVERABLE_NAME}",
+        "bytes": len(data),
+        "sha256": sha,
+        "by": by,
+    }
+
+
 def post_outcome(cfg, task_id, body):
     """POST /api/tasks/<id>/outcome：T+7 实测回填（幂等覆盖，重复提交 200）。"""
     tdir = task_dir(cfg, task_id)
@@ -4411,6 +4477,12 @@ def route_api(cfg, method, path, query, body):
         if method != "GET":
             raise ApiError(405, "method not allowed")
         return 200, delivery_card_html(cfg, task_id)
+    if action == "deliverable":
+        if method == "GET":
+            return 200, get_deliverable(cfg, task_id)
+        if method == "POST":
+            return 200, post_deliverable(cfg, task_id, body)
+        raise ApiError(405, "method not allowed")
     if action == "outcome":
         if method == "GET":
             return 200, get_outcome(cfg, task_id)
