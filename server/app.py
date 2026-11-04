@@ -4824,13 +4824,15 @@ def start_collector(cfg):
     return thread
 
 
-def flywheel_interval():
-    """飞轮 tick 间隔秒：env BOT_FLYWHEEL_INTERVAL，默认 900，最小 60。"""
-    try:
-        value = int(os.environ.get("BOT_FLYWHEEL_INTERVAL") or 900)
-    except (TypeError, ValueError):
-        value = 900
-    return max(60, value)
+def flywheel_slots():
+    """飞轮时间槽：env BOT_FLYWHEEL_AT（默认 11:00,17:00）。
+
+    为什么不按固定间隔跑：bot 团队不是实时系统，定点两轮足够；
+    口径与 tools/flywheel_tick.py 共用 `core/timeslots.py`，两处不各写一遍。
+    """
+    from core.timeslots import slots_from_env  # noqa: PLC0415 - 延迟导入，缺 core 时降级
+
+    return slots_from_env(os.environ.get)
 
 
 def flywheel_disabled():
@@ -4861,10 +4863,15 @@ def flywheel_round(cfg):
         return None
 
 
-def _flywheel_loop(cfg, interval):
+def _flywheel_loop(cfg, slots):
+    from core.timeslots import next_slot, seconds_until  # noqa: PLC0415
+
     while True:
+        now = datetime.now()
+        wait = seconds_until(slots, now)
+        log(f"[flywheel] 下一次 {next_slot(slots, now).strftime('%m-%d %H:%M')}（{int(wait)}s 后）")
+        time.sleep(wait)
         flywheel_round(cfg)
-        time.sleep(interval)
 
 
 def start_flywheel(cfg):
@@ -4872,11 +4879,12 @@ def start_flywheel(cfg):
     if flywheel_disabled():
         log("[flywheel] 常驻飞轮已禁用（BOT_FLYWHEEL_DISABLED）")
         return None
-    interval = flywheel_interval()
-    thread = threading.Thread(target=_flywheel_loop, args=(cfg, interval),
+    slots = flywheel_slots()
+    thread = threading.Thread(target=_flywheel_loop, args=(cfg, slots),
                               name="bot-flywheel", daemon=True)
     thread.start()
-    log(f"[flywheel] 常驻飞轮已启动：每 {interval}s 一轮（采集/候选/周报/WAL/记忆）")
+    text = ",".join(f"{h:02d}:{m:02d}" for h, m in slots)
+    log(f"[flywheel] 常驻飞轮已启动：每天 {text} 各一轮（采集/候选/周报/WAL/记忆）")
     return thread
 
 

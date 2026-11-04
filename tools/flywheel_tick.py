@@ -9,16 +9,18 @@
 - 每次 tick 落一条 `bot_team_flywheel_tick` 事件，形成可回放的时间线。
 
 用法：
-    python -B tools/flywheel_tick.py                 # 跑一次
+    python -B tools/flywheel_tick.py                 # 立刻跑一次（手工）
     python -B tools/flywheel_tick.py --json          # 机器可读
-    python -B tools/flywheel_tick.py --loop 600      # 每 600 秒一轮（前台常驻）
-    python -B tools/flywheel_tick.py --skip memory,weekly   # 跳过指定步骤
+    python -B tools/flywheel_tick.py --due           # 只在 11:00/17:00 窗口内跑（给计划任务用）
+    python -B tools/flywheel_tick.py --at 11:00,17:00 --loop   # 常驻，到点才跑
+    python -B tools/flywheel_tick.py --skip memory,weekly      # 跳过指定步骤
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -28,6 +30,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 sys.path.insert(0, str(ROOT))
+
+from core.timeslots import (  # noqa: E402 - 依赖 sys.path 先就位
+    DEFAULT_SLOTS, in_window, next_slot, parse_slots, seconds_until, slot_key,
+)
+
+STATE_PATH = ROOT / "runtime" / "flywheel_tick.json"
 
 STEPS = ("collect", "candidates", "weekly", "wal", "memory")
 
@@ -193,12 +201,38 @@ def _print(result: dict) -> None:
             print(f"       error: {r['error']}")
 
 
+def _slots(args) -> list[tuple[int, int]]:
+    raw = (args.at or "").strip()
+    if raw:
+        return parse_slots(raw)
+    env = (os.environ.get("BOT_FLYWHEEL_AT") or "").strip()
+    return parse_slots(env or DEFAULT_SLOTS)
+
+
+def _load_state() -> dict:
+    try:
+        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - 坏状态当作没跑过
+        return {}
+
+
+def _save_state(state: dict) -> None:
+    try:
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="飞轮一次 tick（采集→候选→周报→WAL→记忆）")
+    parser = argparse.ArgumentParser(description="飞轮 tick（采集→候选→周报→WAL→记忆）")
     parser.add_argument("--days", type=int, default=7, help="周报窗口天数")
     parser.add_argument("--skip", default="", help="跳过的步骤，逗号分隔：collect,candidates,weekly,wal,memory")
     parser.add_argument("--json", action="store_true", help="输出机器可读 JSON")
-    parser.add_argument("--loop", type=int, default=0, help="常驻模式：每 N 秒跑一轮（N>=60）")
+    parser.add_argument("--at", default="", help=f"每天的时间槽，逗号分隔（默认 env BOT_FLYWHEEL_AT 或 {DEFAULT_SLOTS}）")
+    parser.add_argument("--loop", action="store_true", help="常驻：睡到下一个时间槽再跑（配合 --at）")
+    parser.add_argument("--due", action="store_true", help="单次：只在当前时间槽的宽限窗口内且今天没跑过时才跑（给计划任务）")
+    parser.add_argument("--grace", type=int, default=20, help="--due 的宽限分钟数（默认 20）")
     parser.add_argument("--max-rounds", type=int, default=0, help="常驻模式最多跑几轮（0=不限）")
     args = parser.parse_args(argv)
 
@@ -208,20 +242,41 @@ def main(argv=None) -> int:
         print(f"未知步骤：{','.join(sorted(bad))}", file=sys.stderr)
         return 2
 
+    slots = _slots(args)
+
+    if args.due:
+        now = datetime.now()
+        if not in_window(slots, now, args.grace):
+            print(json.dumps({"ok": True, "skipped": True, "reason": "not_in_window",
+                              "slots": [f"{h:02d}:{m:02d}" for h, m in slots]}, ensure_ascii=False))
+            return 0
+        state = _load_state()
+        key = slot_key(now)
+        if state.get("last_slot") == key:
+            print(json.dumps({"ok": True, "skipped": True, "reason": "already_ran", "slot": key}, ensure_ascii=False))
+            return 0
+        result = tick(days=args.days, skip=skip)
+        _save_state({"last_slot": key, "last_ok": result["ok"], "finished_at": result["finished_at"]})
+        print(json.dumps(result, ensure_ascii=False) if args.json else "") if args.json else _print(result)
+        return 0 if result["ok"] else 1
+
     if args.loop:
-        if args.loop < 60:
-            print("--loop 秒数不得小于 60", file=sys.stderr)
-            return 2
         rounds = 0
         while True:
+            wait = seconds_until(slots, datetime.now())
+            print(f"[flywheel] 下一次 {next_slot(slots, datetime.now()).strftime('%Y-%m-%d %H:%M')}"
+                  f"（{int(wait)}s 后）", flush=True)
+            try:
+                time.sleep(wait)
+            except KeyboardInterrupt:
+                break
             result = tick(days=args.days, skip=skip)
-            _print(result) if not args.json else print(json.dumps(result, ensure_ascii=False))
+            if args.json:
+                print(json.dumps(result, ensure_ascii=False), flush=True)
+            else:
+                _print(result)
             rounds += 1
             if args.max_rounds and rounds >= args.max_rounds:
-                break
-            try:
-                time.sleep(args.loop)
-            except KeyboardInterrupt:
                 break
         return 0
 
