@@ -1,0 +1,150 @@
+{
+  "schema": "advisory-report.v1",
+  "goal": "企微+飞书「询价应答副驾」报价与对外签发是否可放行（v1.4.1）",
+  "card_kind": "attribution",
+  "finding": [
+    {
+      "factor": "pricing_red_line",
+      "claim": "价目表被支配关系收敛为两行，7,600 是本行红线；2 万整包不接（主档红线 20,200）",
+      "confidence": 0.72,
+      "evidence": [
+        "交付件 L179 红线公式：报价红线 ＝ max(签约口径成本, 真实工量成本) ＋ 1,000",
+        "交付件 L180：20,000 < 20,200，拒的是风险结构不是数字",
+        "交付件 L274-276：每行自带本行红线，7,600 标「毛利 1,000＝本行红线」"
+      ]
+    },
+    {
+      "factor": "version_drift",
+      "claim": "对外只有一个有效版本（v1.4.1 / 66,767B / a7b5873f…），v1.4（62,852B / da4a0aa4…）作废且其红线数字不得引用；决策简报含内部概率表不得外发",
+      "confidence": 0.81,
+      "evidence": [
+        "交付件第 13 行：v1.4.1 共五处改动，逐条可核",
+        "群内三测一致：66676 不成立，实测 66767 字节，sha256 a7b5873f0c0be9ecf8882faafca3d7322cdc95261c6e492c0ba22dc1df27e6cc",
+        "决策简报 29 行与 31 行均标注内部，不给客户看"
+      ]
+    }
+  ],
+  "cannot_attribute": [
+    {
+      "item": "单位不一致率",
+      "why": "依赖同一批 20 条样本，样本未随时间累积"
+    },
+    {
+      "item": "测时基线 180s→60s",
+      "why": "仅 20 条样本，且被转人工的条目不贡献省时"
+    },
+    {
+      "item": "客户「愿意承担第三方通道风险」",
+      "why": "属转述，无书面变更单"
+    },
+    {
+      "item": "1000 群容量口径",
+      "why": "客户口述上限，本期实际 200 群"
+    },
+    {
+      "item": "通道年费 720–1,200",
+      "why": "未进本轮工量与毛利口径"
+    }
+  ],
+  "scorecard": {
+    "data_completeness": 3,
+    "timeliness": 4,
+    "significance": 4,
+    "exclusivity": 3,
+    "history": 3,
+    "human_ai_consistency": 0,
+    "dimension_notes": {
+      "data_completeness": {
+        "evidence_refs": [
+          "artifacts/可行性评估-询价应答副驾.md",
+          "artifacts/决策简报.md"
+        ]
+      },
+      "timeliness": {
+        "evidence_refs": [
+          "artifacts/可行性评估-询价应答副驾.md"
+        ]
+      },
+      "history": {
+        "evidence_refs": [
+          "artifacts/决策简报.md"
+        ]
+      },
+      "significance": {
+        "rationale": "两条结论都直接改变报价与对外动作：一条决定能让到哪，一条决定发哪份"
+      },
+      "exclusivity": {
+        "rationale": "已排除换人/换供应商两条共因，但仍无客户侧对照，故不给满分"
+      },
+      "human_ai_consistency": {
+        "sample_ref": "",
+        "score": 0
+      }
+    }
+  },
+  "recommendation": [
+    {
+      "action": "publish_v141_only",
+      "title": "只对外发 v1.4.1 评估件，决策简报与变更日志留在内部",
+      "roi": {
+        "cost": 0,
+        "avoided": 2000,
+        "anchor": "pack.roi_anchors.publish_guard"
+      },
+      "irreversibility": "irreversible",
+      "security_gate": {
+        "action": "publish_v141_only",
+        "status": "pending_user_confirmation"
+      }
+    },
+    {
+      "action": "hold_price_lines",
+      "title": "报价按两行放行（15,000→可松 14,200；8,000→可松 7,600）",
+      "roi": {
+        "cost": 0,
+        "avoided": 2400,
+        "anchor": "pack.roi_anchors.hold_price_lines"
+      },
+      "irreversibility": "reversible"
+    },
+    {
+      "action": "request_receipt",
+      "title": "发件后要求客户回「已收 v1.4.1」+首屏与属性字节截图",
+      "roi": {
+        "cost": 0,
+        "avoided": 0,
+        "anchor": "pack.roi_anchors.request_receipt"
+      },
+      "irreversibility": "reversible"
+    }
+  ],
+  "decision_log_entry": {
+    "actor": "老板",
+    "advice": "只发 v1.4.1，报价两行，索取签收回执",
+    "date": "2026-11-04",
+    "options": [
+      "甲 只发 v1.4.1（推荐）",
+      "乙 简报脱敏后一并外发"
+    ],
+    "irreversibility": "irreversible",
+    "expected_result": "客户手里只有一份可引用版本，7,600 之下无可报价位",
+    "question": "签发件以哪组指纹为准",
+    "context": "群内四次指纹不一致，均因报数人自己也在写",
+    "action_cost": "0 元；一轮确认",
+    "outcome_window": "7d",
+    "attribution_method": "manual",
+    "verification_plan": "T+7 回看：客户回执是否到、是否出现旧价引用",
+    "data_refs": []
+  },
+  "sources": [
+    "D:/work/产品类/个人产品/企微+飞书/deliverables/可行性评估-询价应答副驾.md",
+    "D:/work/产品类/个人产品/企微+飞书/deliverables/决策简报.md"
+  ],
+  "security_gate": {
+    "action": "publish_v141_only",
+    "status": "pending_user_confirmation",
+    "reason": "对外发布不可逆：发出即无法收回，旧价与内部概率表风险外溢"
+  },
+  "attribution_method": "manual",
+  "pack": "workops"
+}

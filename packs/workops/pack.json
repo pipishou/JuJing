@@ -1,6 +1,6 @@
 {
   "pack_id": "workops",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "industry": "工作任务管理",
   "thresholds": {
     "overdue_baseline_pct": null,
@@ -13,9 +13,14 @@
     "defer": 600,
     "drop_scope": 0,
     "add_hand": 1200,
-    "escalate": 0
+    "escalate": 0,
+    "publish_v141_only": 0,
+    "hold_price_lines": 0,
+    "request_receipt": 0
   },
-  "irreversible_actions": [],
+  "irreversible_actions": [
+    "publish_v141_only"
+  ],
   "irreversible_keywords": [],
   "six_dims": [
     "data_completeness",
@@ -142,6 +147,24 @@
       "id": "escalate",
       "label": "升级给上级定夺",
       "cost_anchor_key": "escalate",
+      "reversible": true
+    },
+    {
+      "id": "publish_v141_only",
+      "label": "只对外发布 v1.4.1 评估件",
+      "cost_anchor_key": "publish_v141_only",
+      "reversible": false
+    },
+    {
+      "id": "hold_price_lines",
+      "label": "按两行价目表放行报价",
+      "cost_anchor_key": "hold_price_lines",
+      "reversible": true
+    },
+    {
+      "id": "request_receipt",
+      "label": "发件后索取客户签收回执",
+      "cost_anchor_key": "request_receipt",
       "reversible": true
     }
   ],

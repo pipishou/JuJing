@@ -4824,6 +4824,62 @@ def start_collector(cfg):
     return thread
 
 
+def flywheel_interval():
+    """飞轮 tick 间隔秒：env BOT_FLYWHEEL_INTERVAL，默认 900，最小 60。"""
+    try:
+        value = int(os.environ.get("BOT_FLYWHEEL_INTERVAL") or 900)
+    except (TypeError, ValueError):
+        value = 900
+    return max(60, value)
+
+
+def flywheel_disabled():
+    return str(os.environ.get("BOT_FLYWHEEL_DISABLED") or "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def flywheel_round(cfg):
+    """跑一次 flywheel_tick（采集→候选→周报→WAL→记忆），只写我方目录。"""
+    tool = cfg.root / "tools" / "flywheel_tick.py"
+    if not tool.is_file():
+        log(f"[flywheel] 未找到 {tool}，跳过本轮")
+        return None
+    env = dict(os.environ)
+    env.setdefault("BOT_EVENTS_FILE", str(events_path(cfg)))
+    try:
+        proc = subprocess.run(
+            [find_python(cfg), "-B", str(tool), "--days", "7", "--json"],
+            cwd=str(cfg.root), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=900, env=env,
+        )
+        tail = (proc.stdout or "").strip().splitlines()
+        payload = tail[-1] if tail else ""
+        log(f"[flywheel] tick rc={proc.returncode} {'ok' if proc.returncode == 0 else 'fail'} {payload[:200]}")
+        return payload
+    except Exception as exc:  # noqa: BLE001 - 飞轮失败不该拖垮服务
+        log(f"[flywheel] tick 异常：{type(exc).__name__}: {exc}")
+        return None
+
+
+def _flywheel_loop(cfg, interval):
+    while True:
+        flywheel_round(cfg)
+        time.sleep(interval)
+
+
+def start_flywheel(cfg):
+    """起 daemon 飞轮线程；BOT_FLYWHEEL_DISABLED=1 时不启动。"""
+    if flywheel_disabled():
+        log("[flywheel] 常驻飞轮已禁用（BOT_FLYWHEEL_DISABLED）")
+        return None
+    interval = flywheel_interval()
+    thread = threading.Thread(target=_flywheel_loop, args=(cfg, interval),
+                              name="bot-flywheel", daemon=True)
+    thread.start()
+    log(f"[flywheel] 常驻飞轮已启动：每 {interval}s 一轮（采集/候选/周报/WAL/记忆）")
+    return thread
+
+
 def main(argv=None):
     _enable_utf8_stdio()
     args = parse_args(argv)
@@ -4842,6 +4898,7 @@ def main(argv=None):
         log(f"监听 {args.host}:{args.port} 失败：{exc}（端口被占用？换 --port 8788 试试）")
         return 2
     start_collector(cfg)
+    start_flywheel(cfg)
     log(f"bot-team local server: http://{args.host}:{args.port}/")
     log(f"root={cfg.root}")
     log(f"ui={cfg.ui} runs={cfg.runs}")
