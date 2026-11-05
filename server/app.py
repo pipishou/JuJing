@@ -1597,6 +1597,27 @@ def post_deliverable(cfg, task_id, body):
     data = md.encode("utf-8")
     if len(data) > DELIVERABLE_MAX:
         raise ApiError(400, f"交付物过大（{len(data)} > {DELIVERABLE_MAX} 字节）")
+    # 版式门（2026-11-05）：老板连续反馈「输出物不能直接用」——结论不在前、附录压过正文、
+    # 复盘混进正文。契约必须配可执行载体，否则只是口号。
+    lint_mode = (os.environ.get("BOT_DELIVERY_LINT") or "strict").strip().lower()
+    if lint_mode not in ("off", "warn", "strict"):
+        lint_mode = "strict"
+    lint_result = None
+    if lint_mode != "off":
+        try:
+            from delivery_lint import lint as _lint, required_fixes as _fixes
+
+            lint_result = _lint(md)
+            if not lint_result["ok"]:
+                if lint_mode == "strict":
+                    raise ApiError(400, "交付物版式不合规，请按下列条目改写后重交：" +
+                                   "；".join(_fixes(lint_result)))
+                print("[deliverable] 版式警告（warn 模式放行）：" +
+                      "；".join(_fixes(lint_result)), file=sys.stderr)
+        except ApiError:
+            raise
+        except Exception as exc:  # noqa: BLE001 —— 机检自身坏了不阻断回交
+            print(f"[deliverable] 版式机检不可用（已放行）：{exc}", file=sys.stderr)
     path = deliverable_file(cfg, task_id)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_bytes(data)
@@ -1620,7 +1641,7 @@ def post_deliverable(cfg, task_id, body):
         )
     except Exception as exc:  # noqa: BLE001 —— 锚点是旁证，不阻断回交
         print(f"[deliverable] 事件写入失败（已忽略）：{exc}", file=sys.stderr)
-    return {
+    out = {
         "ok": True,
         "task_id": task_id,
         "path": f"runs/{task_id}/{DELIVERABLE_NAME}",
@@ -1628,6 +1649,10 @@ def post_deliverable(cfg, task_id, body):
         "sha256": sha,
         "by": by,
     }
+    if lint_result is not None:
+        out["lint"] = {"ok": lint_result["ok"], "stats": lint_result["stats"],
+                       "warnings": lint_result["warnings"]}
+    return out
 
 
 def post_outcome(cfg, task_id, body):
