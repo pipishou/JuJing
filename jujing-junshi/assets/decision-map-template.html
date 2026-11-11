@@ -1,0 +1,435 @@
+<!--
+  decision-map-template.html — 聚鲸军师 v0.5 决策地图模板（dynamic-ui comparison-cards 改数据版）
+  用法：加载 dynamic-ui skill 后，把三张 compareCard 的数据换成本轮决策的选项（2–4 张），
+        经 PureShowWidget 渲染；root 须保留 data-dynamic-ui-widget data-template="comparison-cards"。
+  硬判据（SKILL.md 相位 2）：选项 ≥2 ∧ 涉单向门 → 必出；判据未命中不出（防图通胀）。
+  规则：推荐卡 badge 加 data-tone="brand"（标记推荐但不默认选中）；权衡与风险不省略；
+        行固定五维＝覆盖根因 / 实施成本 / 触发机制 / 缺图告警 / 可逆性（可按决策换维度名）。
+-->
+<style>
+:root {
+  color-scheme: light;
+  --surface: #F7F7F8;
+  --surface-muted: #EFEFF2;
+  --text: #171717;
+  --text-muted: #52525B;
+  --border: rgba(23, 23, 23, 0.12);
+  --brand: #0FDC78;
+  --brand-soft: #E5FFF2;
+  --brand-soft-strong: #B4FDD9;
+  --brand-text: #004D26;
+  --brand-on: #004D26;
+  --chart-series-1: #02743B;
+  --chart-series-2: #85FABF;
+  --chart-series-3: #0FDC78;
+  --chart-series-4: #80C1FF;
+  --chart-other: #D3D4DA;
+  --accent: #27D2BF;
+  --accent-2: #F87454;
+  --accent-soft: #EAFBF8;
+  --accent-text: #0F766E;
+  --success: #1DC981;
+  --warning: #EFAA17;
+  --danger: #E8463A;
+  --radius: 8px;
+  --radius-card: 12px;
+  --radius-full: 999px;
+  --spacer-4: 4px;
+  --spacer-8: 8px;
+  --spacer-12: 12px;
+  --spacer-16: 16px;
+  --spacer-20: 20px;
+  --spacer-24: 24px;
+  --font-sans: "SF Pro Text", "PingFang SC", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-metric: "Inter", "SF Pro Text", "PingFang SC", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-strong: 600;
+  --text-caption: 12px/18px;
+  --text-body: 14px/20px;
+  --text-title: 16px/24px;
+  --text-code: 13px/20px;
+}
+
+:root[data-widget-theme="dark"] {
+  color-scheme: dark;
+  --surface: #171717;
+  --surface-muted: #262626;
+  --text: #E5E5E5;
+  --text-muted: #A1A1AA;
+  --border: rgba(229, 229, 229, 0.12);
+  --brand: #32F08C;
+  --brand-soft: #004D26;
+  --brand-soft-strong: #02743B;
+  --brand-text: #E5FFF2;
+  --brand-on: #004D26;
+  --chart-series-1: #32F08C;
+  --chart-series-2: #02743B;
+  --chart-series-3: #0AB861;
+  --chart-series-4: #64B4FF;
+  --accent-2: #F87454;
+  --accent-soft: #123F3C;
+  --accent-text: #CCFBF1;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-widget-theme]) {
+    color-scheme: dark;
+    --surface: #171717;
+    --surface-muted: #262626;
+    --text: #E5E5E5;
+    --text-muted: #A1A1AA;
+    --border: rgba(229, 229, 229, 0.12);
+    --brand: #32F08C;
+    --brand-soft: #004D26;
+    --brand-soft-strong: #02743B;
+    --brand-text: #E5FFF2;
+    --brand-on: #004D26;
+    --chart-series-1: #32F08C;
+    --chart-series-2: #02743B;
+    --chart-series-3: #0AB861;
+    --chart-series-4: #64B4FF;
+    --accent-2: #F87454;
+    --accent-soft: #123F3C;
+    --accent-text: #CCFBF1;
+  }
+}
+
+.widget {
+  color: var(--text);
+  background: transparent;
+  font: var(--weight-regular) var(--text-body) var(--font-sans);
+  letter-spacing: 0;
+  width: 100%;
+}
+
+.comparisonPanel {
+  box-sizing: border-box;
+  width: 100%;
+  background: transparent;
+}
+
+.panelHeader {
+  display: grid;
+  gap: var(--spacer-4);
+  margin-bottom: var(--spacer-16);
+}
+
+.panelTitle {
+  margin: 0;
+  color: var(--text);
+  font: var(--weight-strong) var(--text-title) var(--font-sans);
+}
+
+.panelMeta {
+  margin: 0;
+  color: var(--text-muted);
+  font: var(--weight-regular) var(--text-caption) var(--font-sans);
+}
+
+.comparisonGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacer-16);
+}
+
+.compareCard {
+  box-sizing: border-box;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 430px;
+  padding: var(--spacer-20);
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  border-radius: var(--radius-card);
+  outline: none;
+  transition: border-color 120ms ease;
+}
+
+.compareCard:hover,
+.compareCard:focus-visible {
+  border-color: color-mix(in srgb, var(--brand) 72%, var(--border));
+}
+
+.cardHeader {
+  display: grid;
+  gap: var(--spacer-12);
+  min-height: 96px;
+}
+
+.badgeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacer-8);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 150px;
+  min-height: 24px;
+  padding: 0 var(--spacer-8);
+  overflow: hidden;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: var(--radius-full);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--weight-medium) var(--text-caption) var(--font-sans);
+}
+
+.badge[data-tone="brand"] {
+  color: var(--brand-text);
+  background: var(--surface-muted);
+  border-color: color-mix(in srgb, var(--brand) 26%, var(--border));
+}
+
+.cardTitle {
+  display: grid;
+  gap: var(--spacer-4);
+}
+
+.optionName {
+  margin: 0;
+  color: var(--text);
+  font: var(--weight-medium) var(--text-title) var(--font-sans);
+}
+
+.optionMeta {
+  margin: 0;
+  color: var(--text-muted);
+  font: var(--weight-regular) var(--text-caption) var(--font-sans);
+}
+
+.metricList {
+  display: grid;
+  align-content: start;
+  margin-top: var(--spacer-16);
+  border-top: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+}
+
+.metricRow {
+  display: grid;
+  grid-template-columns: minmax(84px, 1fr) minmax(92px, 1.1fr);
+  align-items: center;
+  gap: var(--spacer-12);
+  min-height: 52px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+}
+
+.metricLabel {
+  min-width: 0;
+  color: var(--text-muted);
+  font: var(--weight-regular) var(--text-caption) var(--font-sans);
+}
+
+.metricValue {
+  min-width: 0;
+  color: var(--text);
+  text-align: right;
+  font: var(--weight-medium) var(--text-body) var(--font-sans);
+}
+
+.metricMark {
+  justify-self: end;
+  width: min(100%, 100px);
+  height: 7px;
+  overflow: hidden;
+  background: var(--surface-muted);
+  border-radius: var(--radius-full);
+}
+
+.metricFill {
+  display: block;
+  height: 100%;
+  background: var(--chart-series-1);
+  border-radius: var(--radius-full);
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-self: stretch;
+  width: 100%;
+  gap: var(--spacer-8);
+  margin-top: var(--spacer-16);
+  min-height: 24px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 0 var(--spacer-8);
+  overflow: hidden;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: var(--radius-full);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--weight-medium) var(--text-caption) var(--font-sans);
+}
+
+.tag[data-tone="brand"] {
+  color: var(--brand-text);
+  background: var(--surface-muted);
+  border-color: color-mix(in srgb, var(--brand) 26%, var(--border));
+}
+
+
+@media (max-width: 760px) {
+  .comparisonGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .compareCard {
+    min-height: 0;
+  }
+
+  .cardHeader {
+    min-height: 0;
+  }
+
+  .tagList {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .compareCard {
+    padding: var(--spacer-16);
+  }
+
+  .metricRow {
+    grid-template-columns: minmax(72px, 0.9fr) minmax(92px, 1fr);
+  }
+}
+</style>
+<div class="widget" data-dynamic-ui-widget data-template="comparison-cards">
+  <section class="comparisonPanel" aria-label="决策地图">
+    <header class="panelHeader">
+      <h2 class="panelTitle">决策地图 · 决策地图缺位修复</h2>
+      <p class="panelMeta">3 选项 × 5 根因 × 5 维度 ｜ 硬判据：选项 ≥2 ∧ 涉单向门 → 必出</p>
+    </header>
+    <div class="comparisonGrid">
+      <article class="compareCard" tabindex="0">
+        <header class="cardHeader">
+          <div class="badgeRow">
+            <span class="badge">最小改动</span>
+          </div>
+          <div class="cardTitle">
+            <h3 class="optionName">A 纪律条款</h3>
+            <p class="optionMeta">SKILL.md 加一行：相位 3 先图后文</p>
+          </div>
+        </header>
+        <div class="metricList">
+          <div class="metricRow">
+            <span class="metricLabel">覆盖根因</span>
+            <span class="metricMark"><span class="metricFill" style="width: 20%"></span></span>
+          </div>
+          <div class="metricRow">
+            <span class="metricLabel">实施成本</span>
+            <span class="metricMark"><span class="metricFill" style="width: 20%"></span></span>
+          </div>
+          <div class="metricRow">
+            <span class="metricLabel">触发机制</span>
+            <span class="metricValue">靠自觉</span>
+          </div>
+          <div class="metricRow">
+            <span class="metricLabel">缺图告警</span>
+            <span class="metricValue">无</span>
+          </div>
+          <div class="metricRow">
+            <span class="metricLabel">可逆性</span>
+            <span class="metricValue">高</span>
+          </div>
+        </div>
+        <div class="tagList">
+          <span class="tag">仅修 R1</span>
+        </div>
+      </article>
+
+      <article class="compareCard" tabindex="0">
+        <header class="cardHeader">
+          <div class="badgeRow">
+            <span class="badge">折中</span>
+          </div>
+          <div class="cardTitle">
+            <h3 class="optionName">B 文件门＋模板</h3>
+            <p class="optionMeta">decision-card.md 落文件＋预置 SVG 模板</p>
+          </div>
+        </header>
+        <div class="metricList">
+          <div class="metricRow">
+            <span class="metricLabel">覆盖根因</span>
+            <span class="metricMark"><span class="metricFill" style="width: 60%"></span></span>
+          </div>
+          <div class="metricRow">
+            <span class="metricLabel">实施成本</span>
+            <span class="metricMark"><span class="metricFill" style="width: 55%"></span></span>
+          </div>
+          <div class="metricRow">
+            <span class="metricLabel">触发机制</span>
+            <span class="metricValue">靠自觉</span>
+          </div>
+          <div class="metricRow">
+            <span class="metricLabel">缺图告警</span>
+            <span class="metricValue">文件门可检</span>
+          </div>
+          <div class="metricRow">
+            <span class="metricLabel">可逆性</span>
+            <span class="metricValue">高</span>
+          </div>
+        </div>
+        <div class="tagList">
+          <span class="tag">修 R1·R4·R5</span>
+        </div>
+      </article>
+
+      <article class="compareCard" tabindex="0">
+        <header class="cardHeader">
+          <div class="badgeRow">
+            <span class="badge" data-tone="brand">推荐</span>
+          </div>
+          <div class="cardTitle">
+            <h3 class="optionName">C 硬判据＋全链</h3>
+            <p class="optionMeta">路由判据：≥2 选项 ∧ 涉单向门 → 必出图</p>
+          </div>
+        </header>
+        <div class="metricList">
+          <div class="metricRow">
+            <span class="metricLabel">覆盖根因</span>
+            <span class="metricMark"><span class="metricFill" style="width: 100%"></span></span>
+          </div>
+          <div class="metricRow">
+            <span class="metricLabel">实施成本</span>
+            <span class="metricMark"><span class="metricFill" style="width: 75%"></span></span>
+          </div>
+          <div class="metricRow">
+            <span class="metricLabel">触发机制</span>
+            <span class="metricValue">硬判据（相位 2 标记）</span>
+          </div>
+          <div class="metricRow">
+            <span class="metricLabel">缺图告警</span>
+            <span class="metricValue">文件门可检</span>
+          </div>
+          <div class="metricRow">
+            <span class="metricLabel">可逆性</span>
+            <span class="metricValue">中 · 走棘轮</span>
+          </div>
+        </div>
+        <div class="tagList">
+          <span class="tag" data-tone="brand">R1–R5 全覆盖</span>
+        </div>
+      </article>
+    </div>
+  </section>
+</div>

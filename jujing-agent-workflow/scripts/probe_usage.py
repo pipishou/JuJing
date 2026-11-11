@@ -84,8 +84,46 @@ _PROMPTS = _ROOT / "assets" / "test-prompts.json"
 _PARAMS = _ROOT / "assets" / "params.json"
 
 _REQUIRED_TOP = ("budget", "probe", "wal", "rubric", "team", "governance", "kb", "knowledge",
-                 "memory", "loop", "drift", "wording", "clauses", "consumers", "release_pool")
+                 "memory", "loop", "drift", "wording", "clauses", "consumers", "release_pool",
+                 "plan")
 
+
+def _parse_judge_cards(txt):
+    """解析判据卡行：返回 {id: cells} 与五要素缺失列表。"""
+    rows, empty = {}, []
+    for ln in txt.splitlines():
+        m = re.match(r"\|\s*([KJ]-0\d)\s*\|", ln)
+        if not m:
+            continue
+        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+        if len(cells) < 6:
+            continue
+        rows[m.group(1)] = cells
+        if any(not c or len(c) < 3 for c in cells[1:6]):
+            empty.append(m.group(1))
+    return rows, empty
+
+
+def _uncovered_ok(templates_txt, stages_txt, judges_txt):
+    ids = set(re.findall(r"[KJ]-0\d", " ".join(l for l in judges_txt.splitlines() if "未覆盖" in l)))
+    st_ok = any(("未覆盖面" in l and "冒充" in l and "？" not in l and "?" not in l)
+                for l in stages_txt.splitlines())
+    return ("未覆盖面" in templates_txt) and ("消费者" in templates_txt) and st_ok and len(ids) >= 5
+
+
+def _anchors_ok(skill_txt, root):
+    bad = []
+    for m in re.finditer(r"([\w./-]+\.md)#([^\s)\]`，。；]+)", skill_txt):
+        f, frag = m.group(1), m.group(2)
+        fp = os.path.join(root, f)
+        if not os.path.isfile(fp):
+            bad.append(f"{f}#{frag}(missing)")
+            continue
+        heads = [l.lstrip("# ").strip() for l in open(fp, encoding="utf-8") if l.startswith("#")]
+        if not any(frag in h for h in heads):
+            bad.append(f"{f}#{frag}")
+    anchors = re.findall(r"[\w./-]+\.md#[^\s)\]`，。；]+", skill_txt)
+    return (not bad) and len(anchors) >= 2, bad, len(anchors)
 
 def _req(cfg, keys, where):
     """必填键校验（键可为点路径，如 budget.session.limit_kb）：缺键即报 ——
@@ -493,6 +531,9 @@ def _drift_scan(conf, files):
     regexes = [(p, re.compile(p)) for p in drift["forbid_regex"]]
     min_reason = drift["exempt_min_reason_len"]
     scan = sorted(set(files) | {p for p in (_ROOT / "assets").glob("*.json") if p != _PARAMS})
+    # data/*.jsonl 台账行不进 forbid 扫描：台账是 append-only 历史数据（note 里复述旧判据属案例证据），
+    # 判据值复制禁令对象是「对外文档」；陷阱引用存在性仍查（_pitfalls_scan 共用 files 集）。
+    scan = [f for f in scan if not (f.relative_to(_ROOT).parts[0] == "data" and f.suffix == ".jsonl")]
     hits, exempt, bare = [], [], []
     for f in scan:
         rel = f.relative_to(_ROOT).as_posix()
@@ -919,6 +960,11 @@ def cmd_size(a):
     files = [p for p in _ROOT.rglob("*.md")
              if p.relative_to(_ROOT).parts[0] in roots]
     files += [_ROOT / s for s in cfg["scan_files"]]
+    # 陷阱引用扫描扩面（#34 修复批，闭环 evolution #31 遗留）：data/*.jsonl 台账中的
+    # 陷阱/pitfalls 引用此前不在覆盖面（#31 实证一处悬空 id 引用靠人工订正）。
+    # jsonl 行内 #N 同时承载 WAL 自身行号与陷阱号——WAL 窗豁免已在 _pitfalls_scan 内处理。
+    for jf in sorted((_ROOT / "data").glob("*.jsonl")):
+        files.append(jf)
     files = sorted({f for f in files if f.exists()})
     over, unmet, total = [], [], 0.0
     print("[size] 加载预算观测（KB，软目标观测线来自 assets/params.json#budget；"
@@ -968,6 +1014,78 @@ def cmd_size(a):
           + ("一致" if not unreg else
              "未注册 " + str(len(unreg)) + " 个: "
              + "、".join(f"{t}({s})" for t, s in unreg.items())))
+    # 内联锚点：`锚点`X`` / 锚点「X」 也必须 ⊆ 抽检池
+    # （v2.3.11 独立评审 B2：原声明解析只认「锚点＋｜」同行的清单式声明，
+    #   正文内联引用从不参与校验 → 文档写裸名、池里存带括注名时机器全绿而实际是死锚点）
+    inline = {}
+    rx_inline = re.compile(r"锚点\s*[`「]([^`」]+)[`」]")
+    for f in files:
+        for ln, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            for m in rx_inline.finditer(line):
+                tok = m.group(1).strip()
+                if tok and tok not in inline:
+                    inline[tok] = f"{f.relative_to(_ROOT).as_posix()}:{ln}"
+    inline_bad = {t: s for t, s in inline.items() if t not in pool}
+    print(f"[size] 内联锚点 {len(inline)} 个 / 抽检池 {len(pool)} 个 → "
+          + ("一致" if not inline_bad else
+             "未注册 " + str(len(inline_bad)) + " 个: "
+             + "、".join(f"{t}({s})" for t, s in inline_bad.items())))
+    # 疑似未注册锚点（v2.3.13，二次独立复核 blocking 1）：
+    # 裸反引号里出现「锚点形」词、同行又出现锚点／clause 语境，却不在抽检池内 —— 视为死锚点。
+    # 取形保守：只在中文字面 2–14 字、无路径符号时判，并排除通用名词停用表，避免把普通术语当锚点。
+    _STOP = {"状态", "事件", "字段", "内容", "路径", "锚点", "判据", "参数", "文件"}
+    rx_bt = re.compile(r"`([^`\n]+)`")
+    rx_cjk = re.compile(r"[\u4e00-\u9fa5]")
+    rx_shape = re.compile(r"[\u4e00-\u9fa5A-Za-z0-9_]{2,14}")
+    rx_shape2 = re.compile(r"[\u4e00-\u9fa5A-Za-z0-9_\-]{2,20}")
+
+    def _conf_keys(node, acc=None):
+        acc = set() if acc is None else acc
+        if isinstance(node, dict):
+            for k, v in node.items():
+                acc.add(k)
+                _conf_keys(v, acc)
+        elif isinstance(node, list):
+            for v in node:
+                _conf_keys(v, acc)
+        return acc
+
+    _KEYS = _conf_keys(conf)
+
+    def _anchor_shape(t):
+        if t in _STOP or t in _KEYS or t.startswith("_"):
+            return False
+        # 排除文件/路径/表达式形态（含 . / \\ # ( 空格 的不当锚点看）
+        if any(ch in t for ch in "./\\#(（ "):
+            return False
+        return bool(rx_shape2.fullmatch(t)) and bool(rx_cjk.search(t))
+
+    suspect = {}
+    for f_ in files:
+        if f_.suffix == ".jsonl":
+            continue
+        for ln, line in enumerate(f_.read_text(encoding="utf-8").splitlines(), 1):
+            # v2.3.14（三次复核 blocking 2）：不再要求同行出现「锚点/clause」——
+            # 该前提让「参考 `X` 的条款」「判据 `X`」等本 skill 自己的主导写法全部逃逸。
+            for m in rx_bt.finditer(line):
+                tok = m.group(1).strip()
+                if _anchor_shape(tok) and tok not in pool and tok not in suspect:
+                    suspect[tok] = f"{f_.relative_to(_ROOT).as_posix()}:{ln}"
+    print("[size] 锚点引用面＝裸反引号内的中文短语（形状 2–20 字、排除键名/停用词/文件形态）；"
+          "「」角引号内的文字按普通引用处理不计锚点，纯拉丁标识符不判（写作口径见 SKILL.md）")
+    print(f"[size] 疑似未注册锚点 {len(suspect)} 个 → "
+          + ("无" if not suspect else "、".join(f"{t}({c})" for t, c in suspect.items())))
+    # 抽检池回引覆盖：观测非门（锚点多经 params consumers 与正文消费，做门会长期常红 → 被绕过 pitfalls.md#19）
+    _cited = set()
+    for f_ in files:
+        _txt = f_.read_text(encoding="utf-8")
+        for _a in pool:
+            if _a in _cited:
+                continue
+            if ("`" + _a + "`") in _txt or ("「" + _a + "」") in _txt:
+                _cited.add(_a)
+    print(f"[size] 抽检池回引覆盖 {len(_cited)}/{len(pool)}（观测非门，见 pitfalls.md#19）")
+
     drift_hits = _drift_scan(conf, files)
     key_hits = _key_ref_scan(conf, files)
     pit_hits = _pitfalls_scan(files)
@@ -978,8 +1096,8 @@ def cmd_size(a):
     # 铁律·不设硬上限（2026-09-27 用户令，evolution.md#18）：大小类（over/unmet/会话超线）
     # 只提示，绝不进退出码——字数门曾把 P1 两轮验收拖进「压文件大小」死循环。
     # 非零只留给真防自欺项：锚点未注册／漂移／悬空参数键／消费声明不可落实。
-    return 1 if (unreg or drift_hits or key_hits or pit_hits or undeclared or consumer_hits
-                 or not selfcheck) else 0
+    return 1 if (unreg or inline_bad or suspect or drift_hits or key_hits or pit_hits or undeclared
+                 or consumer_hits or not selfcheck) else 0
 
 
 def cmd_pool_check(a):
@@ -1265,25 +1383,6 @@ def cmd_selfcheck(a):
                               capture_output=True, text=True, encoding="utf-8",
                               errors="replace", cwd=str(_ROOT), env=env)
 
-    def rub(*args):
-        return subprocess.run([sys.executable, str(_ROOT / "scripts" / "rubric_score.py"), *args],
-                              capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", cwd=str(_ROOT), env=env)
-
-    def seed(rows):
-        """隔离库 scores.jsonl 整体重写（棘轮分支测试用合成行，跑完随 tmp 删）。"""
-        (tmp / "scores.jsonl").write_text(
-            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
-
-    _dims = tuple(conf["rubric"]["dims"])
-    _s_full = ["%s:7" % d for d in _dims]
-
-    def _row(ver, avg_v, **kw):
-        r = {"version": ver, "ts": "2026-01-02T00:00:00", "scores": {}, "avg": avg_v,
-             "note": "t", "by": "judge", "author": "builder", "batch": "t"}
-        r.update(kw)
-        return r
-
     try:
         # ① 缺必填键必报（无兜底默认值＝无隐藏硬编码）
         try:
@@ -1312,7 +1411,7 @@ def cmd_selfcheck(a):
             f"未带例外={len(miss)} 已列例外={len(has)} 跳过={dict(skip)}")
 
         # ④⑤⑥ wal 侧负测试（临时库）
-        p = wal("add", "--source", "ai", "--type", "lesson", "--clause", "纠偏WAL",
+        p = wal("add", "--source", "ai", "--type", "lesson", "--clause", "纠偏协议",
                 "--actor", "kf41", "--text", "selfcheck 合成行（临时库，跑完即删）", "--chain", "99")
         chk("④ add --chain 悬空必拒（修正链可复算）",
             p.returncode != 0 and "未知 id" in (p.stdout + p.stderr),
@@ -1324,13 +1423,13 @@ def cmd_selfcheck(a):
             p.returncode != 0 and "锚点" in (p.stdout + p.stderr),
             f"rc={p.returncode}")
 
-        p = wal("add", "--source", "ai", "--type", "lesson", "--clause", "纠偏WAL",
+        p = wal("add", "--source", "ai", "--type", "lesson", "--clause", "纠偏协议",
                 "--actor", "nobody-xyz", "--text", "selfcheck 合成行")
         chk("⑥ 未登记 actor 必拒（M2 准入）",
             p.returncode != 0 and "未登记" in (p.stdout + p.stderr),
             f"rc={p.returncode}")
 
-        p = wal("add", "--source", "ai", "--type", "lesson", "--clause", "纠偏WAL",
+        p = wal("add", "--source", "ai", "--type", "lesson", "--clause", "纠偏协议",
                 "--actor", "kf41", "--text", "selfcheck 合成行（合规）")
         rid = None
         mt = re.search(r"已记录 #(\d+)", p.stdout)
@@ -1373,6 +1472,94 @@ def cmd_selfcheck(a):
             f"neg={len(_fm_colon_scan(neg_fm))} neg_unclosed={len(_fm_colon_scan(neg_fm2))} "
             f"pos={len(_fm_colon_scan(pos_fm))} pos_block={len(_fm_colon_scan(pos_fm2))} tree={len(tree_fm)}")
 
+        # ⑮/⑯/⑰（锁定批·G2.5 判例回灌）：判据数唯一源、未覆盖面三方一致、md 锚点可解析
+        _judges = (_ROOT / "references" / "judges.md").read_text(encoding="utf-8")
+        _rows, _empty = _parse_judge_cards(_judges)
+        _weak = [k for k, c in _rows.items()
+                 if len(c[1]) < 8 or not (c[2].rstrip().endswith(("？", "?"))) or len(c[3]) < 6]
+        _k = len([x for x in _rows if x.startswith("K")])
+        _j = len([x for x in _rows if x.startswith("J")])
+        _roles = (_ROOT / "references" / "roles-and-gates.md").read_text(encoding="utf-8")
+        _mk = re.search(r"K-01\.\.K-0(\d)", _roles)
+        _mj = re.search(r"J-01\.\.J-0(\d)", _roles)
+        chk("⑮ 判据数一致且每条判据五要素非空（判据卡唯一源）",
+            bool(_mk and _mj) and int(_mk.group(1)) == _k and int(_mj.group(1)) == _j and not _empty and not _weak,
+            f"judges K={_k} J={_j} roles K→{_mk.group(1) if _mk else '?'} J→{_mj.group(1) if _mj else '?'} 空要素={_empty[:4]} 弱要素={_weak[:3]}")
+
+        _tp = (_ROOT / "assets" / "templates.md").read_text(encoding="utf-8")
+        _st = (_ROOT / "references" / "stages" / "03-development.md").read_text(encoding="utf-8")
+        _uncovered_ids = set(re.findall(r"[KJ]-0\d", " ".join(
+            l for l in _judges.splitlines() if "未覆盖" in l)))
+        _st_ok = _uncovered_ok(_tp, _st, _judges)
+        chk("⑯ 未覆盖面三方一致（模板含消费者/阶段含禁令/判据卡列未覆盖 ID）",
+            _st_ok,
+            f"templates={'未覆盖面' in _tp}/消费者={'消费者' in _tp} stages禁令={_st_ok} "
+            f"judges未覆盖ID={sorted(_uncovered_ids)}")
+
+        _sk = (_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        _bad_anchor = []
+        for _m in re.finditer(r"([\w./-]+\.md)#([^\s)\]`，。；]+)", _sk):
+            _f, _an = _m.group(1), _m.group(2)
+            _fp = _ROOT / _f
+            if not _fp.is_file():
+                _bad_anchor.append(f"{_f}#{_an}(文件不存在)"); continue
+            _heads = [l.lstrip("# ").strip() for l in _fp.read_text(encoding="utf-8").splitlines() if l.startswith("#")]
+            if not any(_an in h for h in _heads):
+                _bad_anchor.append(f"{_f}#{_an}")
+        _anch_ok, _anch_bad, _anch_n = _anchors_ok(_sk, str(_ROOT))
+        chk("⑰ SKILL.md 的 md 锚点可解析且非零（≥2 个，死引用机检不再只看 params 路径）",
+            _anch_ok, f"errors={(_bad_anchor or _anch_bad)[:3]} anchors={_anch_n}")
+
+        # ⑳ 评分台账每行必须有 rubric 版本（旧行已 backfill=pre-r1）
+        _sc = _ROOT / "data" / "scores.jsonl"
+        _no_rubric = []
+        if _sc.is_file():
+            for _ln3 in _sc.read_text(encoding="utf-8").splitlines():
+                if not _ln3.strip():
+                    continue
+                try:
+                    _row3 = json.loads(_ln3)
+                except Exception:  # noqa: BLE001
+                    _no_rubric.append("bad-json"); continue
+                if not (str(_row3.get("rubric") or "")).strip():
+                    _no_rubric.append(_row3.get("version", "?"))
+            _neg_row = json.dumps({"version": "x", "avg": 1}, ensure_ascii=False)
+            if (str(json.loads(_neg_row).get("rubric") or "")).strip():
+                _no_rubric.append("neg")
+        chk("⑳ 评分台账每行带 rubric 版本（跨口径可比性可追溯）", not _no_rubric,
+            f"缺 rubric 行={_no_rubric[:4]}")
+
+        # ⑲ team 节可执行消费者：card_assert.py 真跑（达标 0 / 不足 1 / 缺字段 2）
+        _ca = _ROOT / "scripts" / "card_assert.py"
+        _ca_ok = False
+        _ca_msg = "missing"
+        if _ca.is_file():
+            _tmpd = tempfile.mkdtemp()
+            try:
+                _good = type(_ROOT)(_tmpd) / "ok.json"
+                _good.write_text('{"card_assert": 9}', encoding="utf-8")
+                _bad = type(_ROOT)(_tmpd) / "bad.json"
+                _bad.write_text('{"card_assert": 0}', encoding="utf-8")
+                _rg = subprocess.run([sys.executable, str(_ca), str(_good)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+                _rb = subprocess.run([sys.executable, str(_ca), str(_bad)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+                _ca_ok = (_rg.returncode == 0 and _rb.returncode == 1)
+                _ca_msg = f"good={_rg.returncode} bad={_rb.returncode}"
+            finally:
+                shutil.rmtree(_tmpd, ignore_errors=True)
+        chk("⑲ team.card_assert_min 有可执行消费者（card_assert.py 真跑，0/1 分流）", _ca_ok, _ca_msg)
+
+        # ⑱ 判据/覆盖面/锚点三类机检自带负样本（防「子串即过」回归）
+        _m_judges = _judges.replace("| K-02 | **数据飞轮闭环：有评估集、有回流、有数据契约** | 效果怎么量？坏数据谁拦？上线后数据回流到哪？ |",
+                                    "| K-02 | **数据飞轮闭环** |  |")
+        _m_st = _st.replace("不得以「未覆盖」冒充通过", "（略）")
+        _m_sk = re.sub(r"`[^`]*\.md#[^`]*`", "`FILE`", _sk)
+        _neg_rows, _neg_empty = _parse_judge_cards(_m_judges)
+        chk("⑱ 机检自带负样本（清空判据要素/删阶段禁令/删锚点必须各自转红）",
+            bool(_neg_empty) and (not _uncovered_ok(_tp, _m_st, _judges))
+            and (not _anchors_ok(_m_sk, str(_ROOT))[0]),
+            f"empty={_neg_empty[:3]} stage_neg={not _uncovered_ok(_tp, _m_st, _judges)} "
+            f"anchor_neg={not _anchors_ok(_m_sk, str(_ROOT))[0]}")
+
         # ⑭ 版本指纹三处一致（SKILL §五 三处同改门——升版流程强制门，中间态红＝正确信号）
         p = subprocess.run([sys.executable, str(_ROOT / "scripts" / "probe_usage.py"), "version"],
                            capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -1380,90 +1567,220 @@ def cmd_selfcheck(a):
         tail = (p.stdout + p.stderr).strip().splitlines()[-1] if (p.stdout + p.stderr).strip() else ""
         chk("⑭ version 三指纹一致零红（SKILL §五；version 子命令真实存在且绿）",
             p.returncode == 0, f"rc={p.returncode} out={tail[:70]}")
-
-        # ⑮-⑱ 棘轮配对四分支（隔离库合成行直接喂 ratchet；#36 A2——配对逻辑实证密度 7→9 路径）
-        seed([_row("v1", 7.0, ts="2026-01-01T00:00:00"),
-              _row("v2", 8.0, anchor_avg=7.0, anchor_ver="anchor-t")])
-        p = rub("ratchet")
-        chk("⑮ 配对 ALLOWED：Y>X 且过地板必放行",
-            p.returncode == 0 and "ALLOWED(配对)" in p.stdout, f"rc={p.returncode}")
-
-        seed([_row("v1", 7.0, ts="2026-01-01T00:00:00"),
-              _row("v2", 7.0, anchor_avg=7.0, anchor_ver="anchor-t")])
-        p = rub("ratchet")
-        chk("⑯ 配对 LOCKED：Y≤X 必锁（严格超越才放行）",
-            p.returncode == 0 and "LOCKED(配对)" in p.stdout and "ALLOWED" not in p.stdout,
-            f"rc={p.returncode}")
-
-        seed([_row("v1", 6.0, ts="2026-01-01T00:00:00"),
-              _row("v2", 6.5, anchor_avg=6.0, anchor_ver="anchor-t")])
-        p = rub("ratchet")
-        chk("⑰ 双低防护：Y>X 但低于地板必锁（裁判整体偏松时差值失真）",
-            p.returncode == 0 and "LOCKED(配对)" in p.stdout and "地板" in p.stdout,
-            f"rc={p.returncode}")
-
-        seed([_row("v1", 8.94, ts="2026-01-01T00:00:00"), _row("v2", 9.5)])
-        p = rub("ratchet")
-        chk("⑱ 无锚行退回历史最高绝对分（旧行为分支仍活着＝向后兼容）",
-            p.returncode == 0 and "ALLOWED" in p.stdout and "配对" not in p.stdout,
-            f"rc={p.returncode}")
-
-        # ⑲⑳ 锚分入档门（#36 A1：锚文件存在性校验＋逐维校验＋均分脚本复算）
-        p = rub("score", "--version", "t1", "--note", "t", "--by", "j", "--author", "b",
-                "--batch", "t", "--s", *_s_full, "--anchor-ver", "anchor-nope",
-                "--anchor-s", *_s_full)
-        chk("⑲ 锚文件不存在的锚分必拒（防口径凭空捏造）",
-            p.returncode != 0 and "锚文件不存在" in (p.stdout + p.stderr), f"rc={p.returncode}")
-
-        (tmp / "calibration").mkdir()
-        (tmp / "calibration" / "anchor-t.md").write_text("synthetic", encoding="utf-8")
-        p = rub("score", "--version", "t1", "--note", "t", "--by", "j", "--author", "b",
-                "--batch", "t", "--s", *_s_full, "--anchor-ver", "anchor-t",
-                "--anchor-s", *_s_full)
-        last = {}
-        try:
-            last = json.loads((tmp / "scores.jsonl").read_text(encoding="utf-8").splitlines()[-1])
-        except Exception:
-            pass
-        ad = last.get("anchor_dims") or {}
-        chk("⑳ --anchor-s 合规入档：anchor_dims 全维＋anchor_avg 脚本复算",
-            p.returncode == 0 and set(ad) == set(_dims)
-            and abs(float(last.get("anchor_avg") or 0) - 7.0) < 1e-9,
-            f"rc={p.returncode} dims={len(ad)} anchor_avg={last.get('anchor_avg')}")
-
-        # ㉑ 登记行连续（裁决 WAL #5：三指纹一致绿≠登记表连续——当前版本必须在台账有行）
-        ver = (_ROOT / "data" / "VERSION").read_text(encoding="utf-8").strip()
-        evo_lines = (_ROOT / "references" / "evolution.md").read_text(encoding="utf-8").splitlines()
-        i3 = next(i for i, l in enumerate(evo_lines) if l.startswith("## 三、"))
-        j4 = next(i for i in range(i3 + 1, len(evo_lines)) if evo_lines[i].startswith("## "))
-        led = [l for l in evo_lines[i3:j4] if re.match(r"^\| \d+ \|", l)]
-        chk("㉑ 登记行连续：当前 VERSION 在 §三 最新登记行中（版本指纹绿≠台账有行）",
-            bool(led) and ver in led[-1],
-            f"VERSION={ver} 最新行=#{led[-1][2:].split('|')[0].strip() if led else '无'}")
-
-        # ㉒ 锚组成自洽（anchor-2.3.1 拼接缺陷回归门：声明「N 条止」⇔ 台账节含 |N| 行且无 |N+1| 行）
-        probs = []
-        anchors = sorted((_ROOT / "data" / "calibration").glob("anchor-*.md"))
-        for f in anchors:
-            t = f.read_text(encoding="utf-8")
-            parts = t.split("# [2/2]")
-            if len(parts) < 2:
-                probs.append(f.name + ":无台账节")
-                continue
-            m = re.search(r"组成:.*?（(\d+) 条止）", t)
-            if not m:
-                probs.append(f.name + ":头部无「N 条止」声明")
-                continue
-            n = int(m.group(1))
-            if not re.search(r"(?m)^\| %d \|" % n, parts[1]):
-                probs.append("%s:声明%d条止但缺|%d|行" % (f.name, n, n))
-            if re.search(r"(?m)^\| %d \|" % (n + 1), parts[1]):
-                probs.append("%s:声明%d条止却含|%d|行" % (f.name, n, n + 1))
-        chk("㉒ 锚组成自洽：每锚声明「N 条止」⇔ 台账节真含 |N| 且无 |N+1|（拼接缺陷回归门）",
-            not probs, "; ".join(probs) if probs else "自洽×%d" % len(anchors))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+    # ㉒ 安全六问：三处载体齐备 ＋ 判据正文有实体（v2.3.14，三次复核 blocking 1）
+    # 复审实证：只判字面子串时，把六问正文换成「略（参照登录态，不做判断）」仍四检全绿。
+    # 故负样本从「删载体」升级为「掏空正文」，并加条目数／正文长度／六条语义线索三道判据。
+    _SIX_SIGNS = ("登录", "鉴权", "参数化", "日志", "入参", "归属")
+
+    def _six_body_check(text):
+        _m6 = re.search(r"(?ms)^##\s*安全六问.*?(?=^##\s|\Z)", text)   # 取「## 安全六问」整节（含标题行）
+        sec = _m6.group(0) if _m6 else ""
+        items = [l.strip() for l in sec.splitlines()
+                 if re.match(r"^\s*(?:[-*]|\d+[.、])\s+", l)]
+        if len(items) < 6:
+            return False, f"六问条目 {len(items)} < 6"
+        if len("".join(items)) < 120:
+            return False, f"六问正文合计 {len(''.join(items))} 字 < 120（疑被掏空）"
+        miss = [x for x in _SIX_SIGNS if x not in sec]
+        if miss:
+            return False, f"缺语义线索 {miss}"
+        return True, f"条目 {len(items)}／正文 {len(''.join(items))} 字／线索齐"
+
+    def _six_carriers(texts):
+        need = {
+            "references/judges.md": ("安全六问",),
+            "references/roles-and-gates.md": ("安全六问",),
+            "assets/templates.md": ("安全六问:",),
+            "references/self-optimization.md": ("固定筛", "安全六问"),
+        }
+        return [p for p, keys in need.items() if any(k not in texts.get(p, "") for k in keys)]
+
+    _six_paths = ("references/judges.md", "references/roles-and-gates.md",
+                  "assets/templates.md", "references/self-optimization.md")
+    _six_texts = {}
+    for _p in _six_paths:
+        _fp = _ROOT / _p
+        _six_texts[_p] = _fp.read_text(encoding="utf-8") if _fp.exists() else ""
+    _six_miss = _six_carriers(_six_texts)
+    _body_ok, _body_msg = _six_body_check(_six_texts["references/judges.md"])
+    # 负样本（独立构造，不复用同一替换）：把六问正文条目整体掏空
+    _hollow = re.sub(r"(?m)^\s*(?:[-*]|\d+[.、])\s+.*$", "- 略", _six_texts["references/judges.md"])
+    _hollow_ok, _hollow_msg = _six_body_check(_hollow)
+    _neg2 = dict(_six_texts)
+    _neg2["references/roles-and-gates.md"] = _neg2["references/roles-and-gates.md"].replace("安全六问", "(略)")
+    chk("㉒ 安全六问：载体三处齐备 ＋ 正文非空壳（掏空正文/删载体 均必红）",
+        not _six_miss and _body_ok and (not _hollow_ok) and bool(_six_carriers(_neg2)),
+        f"缺失={_six_miss or '无'}｜正文={_body_msg}｜掏空负样本={_hollow_msg}")
+
+    # ㉓ 棘轮基准＝历史最大值（v2.3.15，用户判「判断基准 bug」：旧逻辑同版本取最后一行，9.15 被 8.94 覆盖）
+    # 注意：不能用 tmp 子目录——前面的断言会清理 tmp，导致 mkdir 失败（实测 FileNotFoundError）
+    _rt = pathlib.Path(tempfile.mkdtemp(prefix="jujing-rubric-"))
+    _renv = dict(os.environ, JUJING_DATA_DIR=str(_rt))
+
+    def _row(ver, ts, av):
+        return {"version": ver, "ts": ts, "scores": {}, "avg": av, "note": "selfcheck 合成行",
+                "by": "judge-A", "author": "builder-B", "batch": "synthetic", "rubric": "selfcheck"}
+
+    def _ratchet(rows):
+        (_rt / "scores.jsonl").write_text(
+            "".join(json.dumps(x, ensure_ascii=False) + chr(10) for x in rows), encoding="utf-8")
+        return subprocess.run([sys.executable, str(_ROOT / "scripts" / "rubric_score.py"), "ratchet"],
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", cwd=str(_ROOT), env=_renv)
+
+    _cand = _row("2.3.15", "2026-11-10T10:00:00", 9.0)
+    _o1 = _ratchet([_row("1.4.0", "2026-09-28T10:00:00", 9.15),
+                    _row("1.4.0", "2026-09-28T12:00:00", 8.94), _cand])
+    _ok1 = "历史最高 v1.4.0(9.15)" in _o1.stdout
+    _o2 = _ratchet([_row("1.4.0", "2026-09-28T10:00:00", 9.15),
+                    _row("1.4.0", "2026-09-28T12:00:00", 8.94),
+                    _row("0.9.0", "2026-09-01T00:00:00", 41.0), _cand])
+    _ok2 = ("跳过非十分制" in _o2.stdout) and ("历史最高 v1.4.0(9.15)" in _o2.stdout)
+    # 行序负测试（四次复核 blocking B1）：候选版本两条同版本行（9.5 / 8.0），仅行序不同，
+    # 判决必须一致（都按 9.5 判）；旧实现取 rows[-1] 会随行序翻转。
+    _hi_row = _row("2.0.0", "2026-11-10T10:00:00", 9.5)
+    _lo_row = _row("2.0.0", "2026-11-10T11:00:00", 8.0)
+    _hist = [_row("1.4.0", "2026-09-28T10:00:00", 9.15)]
+    _o5 = _ratchet(_hist + [_hi_row, _lo_row])   # 低分行在后（旧实现必 LOCKED）
+    _o6 = _ratchet(_hist + [_lo_row, _hi_row])   # 高分行在后
+    _ok5 = ("ALLOWED" in _o5.stdout) and ("ALLOWED" in _o6.stdout)
+    chk("㉓ 棘轮基准＝历史最大值（历史侧与候选侧同口径；换行序判决不变）",
+        _ok1 and _ok2 and _ok5,
+        f"最大值基准={'OK' if _ok1 else 'FAIL'}｜行序不变={'OK' if _ok5 else 'FAIL'}"
+        f"｜低→高 {_o5.stdout.strip()[:60]}｜高→低 {_o6.stdout.strip()[:60]}")
+
+    # ㉔ 十分制统一守卫（v2.3.15，用户令「后续测试统一成十分制」）：
+    #    百分制均分（>score_max）不得入账；合法十分制均分可记（--avg 模式）。
+    _o3 = subprocess.run([sys.executable, str(_ROOT / "scripts" / "rubric_score.py"), "score",
+                          "--version", "9.9.9", "--avg", "41", "--dims-used", "A", "B",
+                          "--note", "selfcheck 合成", "--by", "judge-A", "--author", "builder-B",
+                          "--batch", "synthetic"],
+                         capture_output=True, text=True, encoding="utf-8",
+                         errors="replace", cwd=str(_ROOT), env=_renv)
+    _ok3 = (_o3.returncode != 0) and ("十分制" in _o3.stdout + _o3.stderr)
+    _o4 = subprocess.run([sys.executable, str(_ROOT / "scripts" / "rubric_score.py"), "score",
+                          "--version", "9.9.9", "--avg", "4.1", "--dims-used", "A", "B", "C", "D",
+                          "--note", "selfcheck 合成", "--by", "judge-A", "--author", "builder-B",
+                          "--batch", "synthetic"],
+                         capture_output=True, text=True, encoding="utf-8",
+                         errors="replace", cwd=str(_ROOT), env=_renv)
+    _ok4 = (_o4.returncode == 0) and ("4.1" in _o4.stdout)
+    # --dims-used 缺省必须被拒（四次复核 suggest S1：标题声称必填却无负样本）
+    _o7 = subprocess.run([sys.executable, str(_ROOT / "scripts" / "rubric_score.py"), "score",
+                          "--version", "9.9.9", "--avg", "4.1",
+                          "--note", "selfcheck 合成", "--by", "judge-A", "--author", "builder-B",
+                          "--batch", "synthetic"],
+                         capture_output=True, text=True, encoding="utf-8",
+                         errors="replace", cwd=str(_ROOT), env=_renv)
+    _ok7 = (_o7.returncode != 0) and ("dims-used" in (_o7.stdout + _o7.stderr))
+    chk("㉔ 十分制统一：41 分被拒 ＋ 4.1 可记 ＋ 缺 --dims-used 必拒",
+        _ok3 and _ok4 and _ok7,
+        f"41拒={_ok3}｜4.1记={_ok4}｜缺dims拒={_ok7}｜{( _o3.stdout + _o3.stderr ).strip().splitlines()[0][:60]}")
+
+    # ㉕ 棘轮兜底不得把百分制行当基准（四次复核 blocking B2 第二处消费点）
+    _o8 = _ratchet([_row("0.8.0", "2026-08-01T00:00:00", 88.0),
+                    _row("0.9.0", "2026-08-05T00:00:00", 41.0),
+                    _row("2.0.0", "2026-11-10T10:00:00", 9.0)])
+    _ok8 = ("(41.0)" not in _o8.stdout) and ("无可比历史基准" in _o8.stdout)
+    chk("㉕ 棘轮兜底不采百分制：全百分制历史时给出「无可比历史基准」而非打印 41.0",
+        _ok8, f"实测 {_o8.stdout.strip()[:90]}")
+    shutil.rmtree(_rt, ignore_errors=True)
+
+    # ㉖ 取分函数行为守护（五次复核 blocking B1：peak_rows 曾无任何断言，改坏仍全绿）
+    _rq_code = (
+        "import sys;sys.path.insert(0, r'%s');import rubric_score as R;"
+        "rows=[{'version':'1.0.0','avg':9.15,'ts':'t1'},{'version':'1.0.0','avg':8.94,'ts':'t2'},"
+        "{'version':'0.9.0','avg':41.0,'ts':'t0'}];"
+        "b=R.peak_rows(rows);"
+        "assert abs(float(b['1.0.0']['avg'])-9.15)<1e-9, ('同版本应取最大', b);"
+        "assert '0.9.0' not in b, ('百分制行应被剔除', b);"
+        "v=R.peak_version(rows);"
+        "assert abs(float(v['avg'])-9.15)<1e-9, ('全局最大应为9.15', v);"
+        "print('peak-ok')" % str(_ROOT / "scripts")
+    )
+    _o9 = subprocess.run([sys.executable, "-c", _rq_code], capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", cwd=str(_ROOT))
+    _ok9 = (_o9.returncode == 0) and ("peak-ok" in _o9.stdout)
+    chk("㉖ 取分函数行为：同版本取最大、百分制行剔除、跨版本取全局最大（改坏即红）",
+        _ok9, f"{( _o9.stdout + _o9.stderr ).strip()[:90] or 'no output'}")
+
+    # ㉗ 源码不得回退＋负样本存在性（五次复核 B1/S1：删掉 _o7 仍 25/25 全绿＝标题自证）
+    _rs_src = (_ROOT / "scripts" / "rubric_score.py").read_text(encoding="utf-8")
+    _pu_src = (_ROOT / "scripts" / "probe_usage.py").read_text(encoding="utf-8")
+    _bad_tokens = [t for t in ("def latest_version", 'by_ver[r["version"]]', "cur = rows[-1]")
+                   if t in _rs_src]
+    # 负样本存在性用「片段拼接 + 运行时输出标记」判定：字符串不整段写在检查自身里，
+    # 否则检查会把自身当证据（第 5 次复核 S1 的正是这种自证；本行 2026-11-10 修）。
+    _neg_tag = "_" + "o" + "7"
+    _neg_mark = "缺dims" + "拒="
+    _has_neg = (_neg_tag in _pu_src) and (_neg_mark in _pu_src)
+    _ok10 = (not _bad_tokens) and _has_neg
+    chk("㉗ 源码不回退：无第二/第三份取分实现、无 latest_version；缺 --dims-used 负样本仍在",
+        _ok10, f"残留={_bad_tokens or '无'}｜负样本={'在' if _has_neg else '缺失'}")
+
+    # ㉘ 量程不得写死（五次复核 S4：SKILL 写回 0–10 时 size 仍报漂移 0）
+    _sk_txt = (_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    _hard = [t for t in ("强制 0–10", "强制 0-10", "强制 0~10") if t in _sk_txt]
+    _ok11 = (not _hard) and ("assets/params.json#rubric.score_min" in _sk_txt)
+    chk("㉘ 量程不写死：SKILL 不得出现固定量程字面，须引用 params 键",
+        _ok11, f"写死={_hard or '无'}｜引用键={'在' if 'assets/params.json#rubric.score_min' in _sk_txt else '缺失'}")
+
+    # ㉙ ②b 方案阶段接线（v2.3.19：阶段件在、出口判据在、上下游都引用、进门清单可跑）
+    _plan = (_ROOT / "references" / "stages" / "02b-plan.md")
+    _ptxt = _plan.read_text(encoding="utf-8") if _plan.exists() else ""
+    _sects = [s for s in ("依赖顺序", "垂直切片", "检查点", "未证假设", "待确认问题") if s in _ptxt]
+    _ov = (_ROOT / "references" / "stages" / "00-overview.md").read_text(encoding="utf-8")
+    _dev = (_ROOT / "references" / "stages" / "03-development.md").read_text(encoding="utf-8")
+    _kbq = (_ROOT / "scripts" / "kb_query.py")
+    _kbout = ""
+    if _kbq.exists():
+        try:
+            _kbout = subprocess.run([sys.executable, str(_kbq), "--stage", "02b"],
+                                    capture_output=True, text=True, encoding="utf-8", timeout=60).stdout or ""
+        except Exception as e:  # noqa: BLE001
+            _kbout = f"<err {e}>"
+    _m = re.search(r"(?ms)^## 出口判据[^\n]*\n(.*?)(?=^## |\Z)", _ptxt)
+    _body = (_m.group(1).strip() if _m else "")
+    _items = len([ln for ln in _body.splitlines() if re.match(r"^\s*(\d+\.|[-*])\s+\S", ln)])
+    _oksec = (bool(_body) and len(_body) >= 100 and _items >= 3)
+    _ok12 = (bool(_ptxt) and _oksec and len(_sects) == 5
+             and "02b-plan.md" in _ov and "02b-plan.md" in _dev
+             and _kbq.exists() and "进门清单" in _kbout)
+    chk("㉙ ②b 方案阶段接线：阶段件+五节出口+上下游引用+进门清单可跑",
+        _ok12, f"件={'在' if _ptxt else '缺'}｜必填节={len(_sects)}/5｜00引用={'在' if '02b-plan.md' in _ov else '缺'}"
+               f"｜03引用={'在' if '02b-plan.md' in _dev else '缺'}｜出口判据节={len(_body)}字/{_items}条"
+               f"｜kb_query={'可跑' if '进门清单' in _kbout else '异常'}")
+
+    # ㉚ 试跑回灌三件接线（v2.3.20：校验粒度列 / KB-08 蒸馏 / 断言读落盘产物）
+    _pl2 = (_ROOT / "references" / "stages" / "02b-plan.md")
+    _tpl2 = (_ROOT / "assets" / "templates.md")
+    _tst2 = (_ROOT / "references" / "stages" / "04-testing.md")
+    _kb8 = (_ROOT / "knowledge" / "entries" / "KB-08-masterdata-key-and-strata.md")
+    _idx2 = (_ROOT / "knowledge" / "INDEX.md")
+    _pl_t = _pl2.read_text(encoding="utf-8") if _pl2.exists() else ""
+    _tpl_t = _tpl2.read_text(encoding="utf-8") if _tpl2.exists() else ""
+    _tst_t = _tst2.read_text(encoding="utf-8") if _tst2.exists() else ""
+    _idx_t = _idx2.read_text(encoding="utf-8") if _idx2.exists() else ""
+    _c1 = "校验粒度" in _pl_t
+    _c2 = ("校验粒度" in _tpl_t) and ("分层校验" in _tpl_t)
+    _c3 = ("落盘" in _tst_t) and ("断言读落盘产物" in _tst_t)
+    _c4 = _kb8.exists() and ("KB-08" in _idx_t) and ("KB-08" in (_kb8.read_text(encoding="utf-8") if _kb8.exists() else ""))
+    chk("㉚ 试跑回灌三件接线：校验粒度列+KB-08 蒸馏+断言读落盘产物",
+        (_c1 and _c2 and _c3 and _c4),
+        f"02b校验粒度={'在' if _c1 else '缺'}｜templates列+分层注={'齐' if _c2 else '缺'}"
+        f"｜04-testing落盘={'在' if _c3 else '缺'}｜KB-08在盘+入索引={'是' if _c4 else '否'}")
+
+    # ㉑ 断言编号全覆盖（v2.3.14，三次复核 blocking 3：原守卫 len(checks)+1>=21 允许整块删掉一条断言仍绿）
+    # 判法＝编号集合相等：删掉任一条 chk 调用，其编号即从集合中消失 → 必红。
+    _NUMS = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮",
+             "⑯", "⑰", "⑱", "⑲", "⑳", "㉑", "㉒", "㉓", "㉔", "㉕", "㉖", "㉗", "㉘", "㉙", "㉚"]
+    _got = {n[0] for n, _ in checks} | {"㉑"}   # 本条自身尚未入 checks
+    _num_missing = [x for x in _NUMS if x not in _got]
+    chk("㉑ 断言编号全覆盖（显式编号表，删任一条即红；不再只数总数）",
+        not _num_missing, f"应有 {len(_NUMS)} 条断言编号，缺={_num_missing or '无'}；实到 {len(checks)} 条")
     bad = [n for n, ok in checks if not ok]
     print(f"[probe] selfcheck: {len(checks) - len(bad)}/{len(checks)} 断言复算通过"
           f"（隔离库 {tmp.name} 已删；稳定为 0 的前提是文档断言与实现不脱钩）")

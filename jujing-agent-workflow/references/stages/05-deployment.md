@@ -15,7 +15,7 @@
 5. 回滚预案先行（须有具名执行者）
 6. **上线前 4 问**（改平台配置或首次上云时逐问留证＝命令＋输出关键行＋日期；详版 KB-01）
 7. **配置面必答三问**（**顺序铁律：先让数据可恢复，再改会销毁数据的配置**；详版 KB-02）
-8. **Agent Runtime 清理**（`pitfalls.md#20`）——上线前必须：① 清理所有测试 cron/trigger（测试时建的 interval:20 / interval:10 之类高频残留）② 校验生产 trigger 频率（interval < 60s 拒绝启动，需显式 --force）③ 确认无后台自动触发在役
+8. **Agent Runtime 清理**（`pitfalls.md#20`）——上线前必须：① 清理所有测试 cron/trigger（测试时建的 interval:20 / interval:10 之类高频残留）② 校验生产 trigger 频率（interval 低于 `assets/params.json#cost.trigger_freq_min_interval_sec` 阈值拒绝启动，需显式 --force）③ 确认无后台自动触发在役
 9. **编码纪律固化**（`pitfalls.md#21`）——所有 HTTP API 写操作（POST/PATCH/PUT）统一走 Python httpx + UTF-8 charset；禁止 PowerShell Invoke-RestMethod 写中文（三次复发：Node WS → system_prompt → cron prompt）
 10. **成本观测线**（软观测线，`params.json#cost.hourly_soft_limit`）——网关侧记账（usage 帧消费）+ 每小时消耗警告 + 周期性累计报告；超线只 warning 不拦截（聚鲸铁律·不设硬上限）
 

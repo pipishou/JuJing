@@ -26,6 +26,7 @@
 | KB-05 | `knowledge/entries/KB-05-red-typing.md` | 测试/断言 | 通用 | `红分型` | candidate | 1 | 候选储备（stages④ 详版下沉） |
 | KB-06 | —（已升正文，无独立条目） | 验收/判据 | 通用 | `不设硬上限` | promoted | 2 | `SKILL.md` §〇＋`references/evolution.md` #18 |
 | KB-07 | `knowledge/entries/KB-07-latent-defect-attribution.md` | 测试/绿测掩盖 | 通用 | `公理5绿测掩盖` | candidate | 1 | 候选储备（WAL #36/#38/#39 判例提炼；修复落点在 DeepTutor 项目侧挂账） |
+| KB-08 | `knowledge/entries/KB-08-masterdata-key-and-strata.md` | 数据/主数据 | 通用 | `假设可证伪` | candidate | 1 | 候选储备（stages②b 未证假设区候选；来源 2026-11-10 工件主数据体检试跑） |
 
 > KB-06 走的是「同项目两轮复发先行上行」（#8→#18 同根二复发），不以独立项目门论——登记见 `references/evolution.md`。
 
@@ -36,7 +37,7 @@
 | ID | 条目 | 标签 | 形态 | 锚点 | 状态 | 复现 | 现落点 |
 |---|---|---|---|---|---|---|---|
 | PREF-01 | `preferences/work-style.md` | 偏好/工作风格 | 通用 | `减法纪律`｜`诚实降级`｜`扩展四问` | candidate | 2 | preferences 层（M3-lite 首建层） |
-| PREF-02 | `preferences/communication.md` | 偏好/沟通 | 通用 | `G2.5双视角对抗`｜`决策台账` | candidate | 2 | preferences 层（M3-lite 首建层） |
+| PREF-02 | `preferences/communication.md` | 偏好/沟通 | 通用 | `双视角对抗`｜`决策台账` | candidate | 2 | preferences 层（M3-lite 首建层） |
 
 > 条目真实性：两条均从产品负责人真实拍板/会话口吻提取（溯源行可溯），经开工令确认入档；AI 不代笔预填。消费留痕同「消费留痕协议」（record 带 `--actor`，锚点在池）。
 > 个人层晋升门（**未建**，独立评审 2026-09-28 异议留口）：candidate→promoted **不沿用** `#kb.promote_min_projects`（独立项目门对个人层不适——复现常来自同一 owner 的多项目）；待真实痛点触发扩展四问后再定义专属门（候选口径：owner 连续 N 轮真实消费）。门未建前个人层条目只以消费留痕说话，退役照走 `#probe.retire_window`。
@@ -47,3 +48,13 @@
 2. 复现达门升正文：状态改 `promoted`，行保留不删（append-only）。
 3. 真过时 → 标 `retired`，案例仍可溯（退役判据五信号：上游漂移/工具替代/判据并入他件/零消费窗口/事故根因已由机检固化）。
 4. 与 `data/wal.jsonl`、`references/pitfalls.md` 分工：wal 存纠偏/教训原文，pitfalls 存可复用陷阱表，本库存候选经验中长期储备——三者不重复，各自 append-only。
+
+## 老化三防线（锚点`知识老化`，v2.3.10）
+
+知识库最大的死法不是没写，是写了没人用还占着路由行的预取位（`pitfalls.md#8` 机制空转）。三道防线都**只降级不删**，退役仍走 `probe.retire-check` 五判据＋人工确认：
+
+1. **TTL 降级**：条目超过 `assets/params.json#knowledge.ttl_days` 天无消费痕迹 → 状态由 `candidate` 降为「待复核」（表格状态栏改写，行保留）。「消费痕迹」只认 `record --clause <锚点>` 留痕与个人层消费记录，不认「我记得用过」。
+2. **feedback 修正链**：发现知识失效/写错，落 `data/wal.jsonl` 的 `correction` 行并在本条「现落点」栏指向该 WAL id（机器可读，`wal.py add --chain` 可追）；**不静默改历史正文**。
+3. **架构随 commit 漂移刷新**：仓库结构/契约变化后，凡条目里写了具体路径/键名/命令的，按漂移反查（`probe_usage.py size` 的死引用项）就地校正；校正不了就标「待复核」。
+
+置信度用**派生值**（复现计数 + 消费痕迹 + 修正链条数）当场算，不新增必填字段——多一个必填字段＝多一条造假路径。

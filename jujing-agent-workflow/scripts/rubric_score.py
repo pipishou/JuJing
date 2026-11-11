@@ -8,10 +8,6 @@
   python rubric_score.py score --version 1.1.0 --s "结构完整:9" "边界覆盖:9" ... \
   --by "Adversary（独立上下文）" --author "Builder（本版改动方）" --batch "2026-09-23 改动后实测批次" \
   --note "依据批次…"          # --by/--author/--batch 三者必填；by==author 视为自评，ratchet 直接 LOCKED
-  # 配对校准锚分（#36 起首选 --anchor-s 逐维）:
-  #   ... --anchor-ver anchor-2.3.1 --anchor-s "结构完整:7" "边界覆盖:7" ...
-  #   逐维锚分入档（anchor_dims）且均分由脚本复算（anchor_avg）；锚文件须已在
-  #   data/calibration/ 冻结，否则拒绝——锚分必须绑定可查验的锚，防口径凭空捏造
   python rubric_score.py history
   python rubric_score.py ratchet
 
@@ -49,7 +45,7 @@ def rcfg():
         conf = json.loads(_PARAMS.read_text(encoding="utf-8"))["rubric"]
     except (json.JSONDecodeError, KeyError) as e:
         sys.exit(f"[rubric] {_PARAMS.name} 读取失败: {e}")
-    _req(conf, ("dims", "score_min", "score_max", "ratchet_floor", "anchors"), "assets/params.json#rubric")
+    _req(conf, ("dims", "score_min", "score_max"), "assets/params.json#rubric")
     return conf
 
 
@@ -100,51 +96,67 @@ def parse_dims(pairs, dims, lo, hi):
 
 def cmd_score(a):
     conf = rcfg()
-    scores = parse_dims(a.s, tuple(conf["dims"]), conf["score_min"], conf["score_max"])
+    if a.avg is not None:
+        # 跨口径评审（如四维 rubric＋blocking 罚分）只出均分：**必须仍是十分制**，不另立百分制说法。
+        if not (float(conf["score_min"]) <= a.avg <= float(conf["score_max"])):
+            sys.exit("[rubric] --avg 须在 %s-%s（十分制）；百分制分先折算成均分再记，台账不混口径"
+                     % (conf["score_min"], conf["score_max"]))
+        if not a.dims_used:
+            sys.exit("[rubric] --avg 须配 --dims-used：写明该均分由哪几维合成（防「一个数字无出处」）")
+        scores = {}
+    else:
+        if not a.s:
+            sys.exit("[rubric] 缺 --s（逐维打分）或 --avg（跨口径均分）")
+        scores = parse_dims(a.s, tuple(conf["dims"]), conf["score_min"], conf["score_max"])
     if not a.note.strip():
         sys.exit("[rubric] --note 必填：打分必须引用具体批次证据，否则视为无效分（防自欺）")
     rows = load()
+    _avg = round(float(a.avg), 2) if a.avg is not None else avg(scores)
     row = {"version": a.version, "ts": datetime.datetime.now().isoformat(timespec="seconds"),
-           "scores": scores, "avg": avg(scores), "note": a.note.strip(),
+           "scores": scores, "avg": _avg, "note": a.note.strip(),
+           "scale": float(conf["score_max"]),
            # 2026-09-23 加固（独立复评指出：自评式棘轮无防御力——只比分数就能 ALLOWED）
-           "by": a.by.strip(), "author": a.author.strip(), "batch": a.batch.strip()}
-    # 2026-10-17 #35：配对校准——同一裁判实例对冻结锚的评分随行入档；无则该行走绝对分旧行为
-    # 2026-10-17 #36：锚分优先逐维（--anchor-s）——手传 anchor_avg 是单点自报，存在「自欺 7→9」谎报
-    # 路径；逐维分校验 dims 匹配与量程、均分由脚本复算；且锚分必须绑定 data/calibration/ 已冻结锚文件
-    if a.anchor_s or a.anchor_avg is not None:
-        if a.anchor_ver is None:
-            sys.exit("[rubric] 给了锚分（--anchor-s/--anchor-avg）就必须给 --anchor-ver：锚分必须绑定锚标识")
-        anchor_file = DATA.parent / "calibration" / (a.anchor_ver.strip() + ".md")
-        if not anchor_file.exists():
-            sys.exit(f"[rubric] 锚文件不存在: {anchor_file} —— anchor_ver 须对应 data/calibration/ 已冻结的锚")
-    if a.anchor_s and a.anchor_avg is not None:
-        sys.exit("[rubric] --anchor-s 与 --anchor-avg 互斥：给了逐维锚分，均分由脚本从逐维分复算，不再手传")
-    if a.anchor_ver is not None:
-        row["anchor_ver"] = a.anchor_ver.strip()
-        if a.anchor_s:
-            row["anchor_dims"] = parse_dims(a.anchor_s, tuple(conf["dims"]), conf["score_min"], conf["score_max"])
-            row["anchor_avg"] = avg(row["anchor_dims"])
-        elif a.anchor_avg is not None:
-            row["anchor_avg"] = float(a.anchor_avg)
+           "by": a.by.strip(), "author": a.author.strip(), "batch": a.batch.strip(),
+           "rubric": conf.get("version") or "1"}
+    if a.avg is not None:
+        row["dims_used"] = list(a.dims_used)
     DATA.parent.mkdir(parents=True, exist_ok=True)
     with DATA.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
     _safe_print(f"[rubric] v{a.version} 均分 {row['avg']} 已记录（评分人 {row['by']} ｜ 实测批次 {row['batch']}）")
-    prev = latest_version(rows, exclude=a.version)
+    prev = peak_version(rows, exclude=a.version)
     if prev:
         d = round(row["avg"] - prev["avg"], 2)
         _safe_print(f"[rubric] 对比 v{prev['version']}({prev['avg']}): {'+' if d >= 0 else ''}{d}")
 
 
-def latest_version(rows, exclude=None):
-    seen = {}
+def peak_rows(rows, exclude=None):
+    """每版本取**最大 avg** 的那一行（十分制；非正与越界百分制行跳过）。
+
+    2026-11-10 修（四次独立复核 blocking B2）：旧 `latest_version()` 取「同版本最后一次」，
+    使 score 的对比行打印 8.94（真基准 9.15）、棘轮兜底把百分制行当基准（打印「历史最高 41.0」）。
+    本函数是**唯一**取分口径，历史侧与候选侧共用，不得再出现第二份取分逻辑。
+    """
+    hi = float(rcfg()["score_max"])
+    best = {}
     for r in rows:
         if exclude and r["version"] == exclude:
             continue
-        seen[r["version"]] = r  # 同版本多次打分取最后一次
-    if not seen:
+        v = float(r.get("avg") or 0)
+        if v <= 0 or v > hi:
+            continue
+        cur = best.get(r["version"])
+        if cur is None or v > float(cur.get("avg") or 0):
+            best[r["version"]] = r
+    return best
+
+
+def peak_version(rows, exclude=None):
+    """全部版本中 avg 最大的一行（同为十分制口径）；无有效行返回 None。"""
+    best = peak_rows(rows, exclude=exclude)
+    if not best:
         return None
-    return max(seen.values(), key=lambda r: r["ts"])
+    return max(best.values(), key=lambda r: float(r["avg"]))
 
 
 def cmd_history(_):
@@ -156,14 +168,44 @@ def cmd_history(_):
         _safe_print(f"v{r['version']} [{r['ts'][:10]}] 均分 {r['avg']}  {r['note'][:60]}")
 
 
+def cmd_backfill(_):
+    rows = load()
+    n = 0
+    for r in rows:
+        if not (r.get("rubric") or "").strip():
+            r["rubric"] = "pre-r1"
+            n += 1
+    if n:
+        DATA.write_text("".join(json.dumps(r, ensure_ascii=False) + chr(10) for r in rows),
+                        encoding="utf-8")
+    print(f"[rubric] backfill：{n} 条补 rubric=pre-r1（旧行如实标注，不追溯）")
+
+
 def cmd_ratchet(_):
     rows = load()
     if not rows:
         sys.exit("[rubric] 无记录，先 score")
-    cur = rows[-1]
-    prev = latest_version(rows[:-1], exclude=cur["version"])
+    # 2026-11-10 修（四次独立复核 blocking B1）：旧实现取 rows[-1] 当候选分，
+    #   同一账本换行序即翻转判决（低→高 ALLOWED / 高→低 LOCKED）——判决成了行序的函数。
+    #   候选分改为「候选版本全部行取最大 avg」，与历史侧共用 peak_rows 口径。
+    # S6（五次复核）：末行版本会被「补记旧版本评分」打乱 → 候选＝ts 最新的那一行所属版本。
+    _last_ver = max(rows, key=lambda r: str(r.get("ts") or ""))["version"]
+    _hi0 = float(rcfg()["score_max"])
+    _cand_rows = [r for r in rows
+                  if r["version"] == _last_ver and 0 < float(r.get("avg") or 0) <= _hi0]
+    if not _cand_rows:
+        sys.exit("[rubric] 候选版本 %s 无十分制有效行（avg 越界或非正），先补打分" % _last_ver)
+    cur = max(_cand_rows, key=lambda r: float(r["avg"]))
+    prev = peak_version(rows, exclude=cur["version"])
     if prev is None:
-        print(f"[rubric] 首版 v{cur['version']} 均分 {cur['avg']}，棘轮基线已建立")
+        # 2026-11-10 修（四次复核 blocking B2 的第二处消费点）：历史行可能「全被十分制过滤掉」，
+        #   此时若仍打印「首版」会掩盖事实（其实有历史，只是口径不可比），更不得回退去拿百分制行当基准。
+        _others = [r for r in rows if r["version"] != cur["version"]]
+        if _others:
+            print("[rubric] 无可比历史基准（历史行均为百分制或非正，不计入棘轮）："
+                  "v%s(%s) 视为首条十分制基线" % (cur["version"], cur["avg"]))
+        else:
+            print(f"[rubric] 首版 v{cur['version']} 均分 {cur['avg']}，棘轮基线已建立")
         return
 
     # 2026-09-23 加固（独立复评结论）：棘轮不能只比分数——否则「同一方改条款＋同日自评」即可 ALLOWED。
@@ -183,41 +225,29 @@ def cmd_ratchet(_):
               "且 --batch 必须引用**改动之后**的实测批次。")
         return
 
-    # 2026-10-17 #35：配对校准优先——跨裁判实例绝对分不可比（历史 8.94 与后续分出自不同全新
-    # 上下文实例，尺度漂移致「严格超越」退化为「几乎必然 LOCKED」）。同一裁判实例评冻结锚（X）
-    # 与当前批（Y），比 Y-X 不比绝对分；ratchet_floor 双低防护防「裁判整体偏松、锚批同涨」。
-    conf = rcfg()
-    floor = float(conf["ratchet_floor"])
-    anchor_avg = cur.get("anchor_avg")
-    if anchor_avg is not None:
-        if cur["avg"] < floor:
-            print(f"[rubric] LOCKED(配对): v{cur['version']}({cur['avg']}) < 地板 {floor} —— 双低防护："
-                  f"均分未过合格线，配对差值再高不升 minor")
-            return
-        if cur["avg"] > float(anchor_avg):
-            print(f"[rubric] ALLOWED(配对): v{cur['version']}({cur['avg']}) > 同裁判评锚 {anchor_avg}"
-                  f"（锚 {cur.get('anchor_ver')}，差值 +{round(cur['avg'] - float(anchor_avg), 2)}）"
-                  f"-> 可发布新版本号（评分人 {cur['by']} ｜ 实测批次 {cur['batch']}）；"
-                  f"换锚：以本批改动后核心样本冻结 anchor-<{cur['version']}>")
-        else:
-            print(f"[rubric] LOCKED(配对): v{cur['version']}({cur['avg']}) <= 同裁判评锚 {anchor_avg}"
-                  f"（锚 {cur.get('anchor_ver')}）-> 改动须继续实测提升，或回滚（版本号只进不退）")
-        return
-
     # 基准＝**历史最高分**（不只看上一行）：防「先记一条异常低分，再拿它当垫脚石」。
-    # 同版本多行时以**最后一行为准**（复评/订正会覆盖前一条，避免已判无效的自评分继续当基准）。
-    by_ver = {}
-    for r in rows:
-        if r["version"] == cur["version"]:
-            continue                      # 候选版本自己的历史行（含被推翻的自评分）不得充当基准
-        by_ver[r["version"]] = r          # 其他版本：按出现顺序覆盖 ⇒ 同版本取最后一条
-    hist = [r for r in by_ver.values() if float(r.get("avg") or 0) > 0]
-    top = max(hist, key=lambda r: r["avg"]) if hist else prev
+    # 2026-11-10 修（用户判「判断基准 bug」）：同版本多行时取**最大值**，不再取最后一条。
+    #   旧逻辑让 v1.4.0 两裁判（9.15 Karpathy / 8.94 Jobs）被晚一条的 8.94 覆盖 9.15，
+    #   基准被压低 0.21 ＝ 把「严格超越历史最高」放水。
+    # 同时统一**十分制**：avg 超出 score_max 的旧百分制行不进基准（只跳过，不改写历史）。
+    hi = float(rcfg()["score_max"])
+    # 2026-11-10 修（五次独立复核 blocking B1）：这里原本自己又算一遍「同版本取最大」，
+    #   等于第三份取分实现——SKILL 写的「唯一取分口径」就成了空话（改坏 peak_rows 也能全绿）。
+    #   现在历史侧一律走 peak_rows()，本函数不再持有任何取分逻辑；仍只跳过、不改写百分制行。
+    skipped_scale = ["v%s(%s)" % (r["version"], float(r.get("avg") or 0))
+                     for r in rows
+                     if r["version"] != cur["version"] and float(r.get("avg") or 0) > hi]
+    hist = list(peak_rows(rows, exclude=cur["version"]).values())
+    if skipped_scale:
+        tail = " ..." if len(skipped_scale) > 5 else ""
+        print("[rubric] 跳过非十分制（>%s）历史行 %d 条：%s%s —— 统一十分制，百分制旧分不参与棘轮"
+              % (hi, len(skipped_scale), ", ".join(skipped_scale[:5]), tail))
+    top = max(hist, key=lambda r: float(r["avg"])) if hist else prev
     if cur["avg"] > top["avg"]:
-        print(f"[rubric] ALLOWED: v{cur['version']}({cur['avg']}) > 历史最高 v{top['version']}({top['avg']}) "
+        print(f"[rubric] ALLOWED: v{cur['version']}({cur['avg']}) > 历史最高 v{top['version']}({top['avg']}) rubric={cur.get('rubric','?')} "
               f"-> 可发布新版本号（评分人 {cur['by']} ｜ 实测批次 {cur['batch']}）")
     else:
-        print(f"[rubric] LOCKED: v{cur['version']}({cur['avg']}) <= 历史最高 v{top['version']}({top['avg']}) "
+        print(f"[rubric] rubric={cur.get('rubric', '?')} LOCKED: v{cur['version']}({cur['avg']}) <= 历史最高 v{top['version']}({top['avg']}) "
               f"-> 改动须继续实测提升，或回滚（版本号只进不退）")
 
 
@@ -228,24 +258,24 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     a1 = sub.add_parser("score")
     a1.add_argument("--version", required=True)
-    a1.add_argument("--s", nargs="+", required=True,
+    a1.add_argument("--s", nargs="+", default=None,
                     help=f"维度:分数（维度与量程见 assets/params.json#rubric，当前 {len(dims)} 维）")
+    a1.add_argument("--avg", type=float, default=None,
+                    help="跨口径评审均分（十分制），与 --s 二选一；须配 --dims-used")
+    a1.add_argument("--dims-used", nargs="+", default=None,
+                    help="--avg 模式下说明均分由哪几维合成（防数字无出处）")
     a1.add_argument("--note", required=True)
     a1.add_argument("--by", required=True,
                     help="评分人/角色（必须独立于改动作者；否则 ratchet 判 LOCKED）")
     a1.add_argument("--author", required=True, help="本版改动作者/角色（用于自评检测）")
     a1.add_argument("--batch", required=True,
                     help="改动之后的实测批次标识（不得引用催生改动的那次事故）")
-    a1.add_argument("--anchor-ver", default=None,
-                    help="配对校准：冻结锚标识（如 anchor-2.3.1，文件须在 data/calibration/ 已冻结）")
-    a1.add_argument("--anchor-s", default=None, nargs="+",
-                    help="配对校准（首选）：逐维锚分 名称:分数（同一裁判实例评锚的分维明细；均分由脚本复算入档）")
-    a1.add_argument("--anchor-avg", default=None,
-                    help="配对校准（兼容）：手传锚评均分（单点自报，弱证据；与 --anchor-s 互斥）")
     sub.add_parser("history")
     sub.add_parser("ratchet")
+    sub.add_parser("backfill-rubric")
     args = p.parse_args()
-    {"score": cmd_score, "history": cmd_history, "ratchet": cmd_ratchet}[args.cmd](args)
+    {"score": cmd_score, "history": cmd_history, "ratchet": cmd_ratchet,
+     "backfill-rubric": cmd_backfill}[args.cmd](args)
 
 
 if __name__ == "__main__":

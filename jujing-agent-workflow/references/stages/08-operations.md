@@ -14,7 +14,6 @@
 4. **诚实降级**（未达生效条件就明说：surprise_rate 14 天零记录→降级＋告警）
 5. **减法纪律**（对好想法说 No；死功能清零前不新增功能；每个机制须对应一场真实事故）
 6. **飞轮回流**（每次反馈/事故须产出**成对**产物：卡＋WAL 行；机制见 `self-optimization.md`）
-7. **交付回看**（交付回执「待回看」字段登记：状态按 `params.json#followup.statuses` 流转 delivered→awaiting→reviewed；窗口＝`params.json#followup.default_days`，到期由每轮协议第 6 步呈现清单、人工核对消费证据。边界：与 `record --off-round`/`heat` 分工——既有通道管消费证据即时捕捉，本条只补「定期触发」）
 
 ## 出口判据
 
